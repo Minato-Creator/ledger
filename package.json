@@ -5,6 +5,7 @@
   "description": "A trading journal that keeps your data as plain files in a folder you choose.",
   "type": "module",
   "scripts": {
+        "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
     "serve": "python3 -m http.server 8777 --directory src"
