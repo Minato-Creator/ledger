@@ -1,0 +1,15 @@
+{
+  "name": "ledger",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A trading journal that keeps your data as plain files in a folder you choose.",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "serve": "python3 -m http.server 8777 --directory src"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

@@ -1,0 +1,265 @@
+import { el, icon, toast } from '../ui.js';
+import * as c from '../calc.js';
+import { DEFAULT_SESSIONS } from '../store.js';
+
+const SWATCHES = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
+
+export function playbook(store, nav) {
+  const pb = store.playbook;
+  const acct = store.activeAccount;
+
+  const save = async () => { await store.save('playbook'); nav.refresh(); };
+
+  const head = el('header', { class: 'head' },
+    el('h1', {}, 'Playbook'),
+    el('span', { class: 'sub' }, 'Shared across every account'),
+  );
+
+  /* ---------- setups ---------- */
+  const usage = (setupId) => store.trades.filter(t => t.setupId === setupId).length;
+
+  const setupRow = (s) => {
+    const used = usage(s.id);
+    const stats = c.summarise(acct, store.tradesFor(acct.id).filter(t => t.setupId === s.id));
+
+    const name = el('input', {
+      class: 'm', value: s.name,
+      style: { fontSize: '14px', color: '#fff', background: 'transparent', width: '100%' },
+      onChange: async e => {
+        const v = e.target.value.trim();
+        if (!v) { e.target.value = s.name; return; }
+        s.name = v; await save();          // renaming keeps every trade filed under it
+      },
+    });
+
+    const swatches = el('div', { style: { display: 'flex', gap: '5px', flex: 'none' } },
+      ...SWATCHES.map(col => el('button', {
+        title: 'Recolour',
+        style: { width: '16px', height: '16px', borderRadius: '5px', background: col,
+                 boxShadow: s.color === col ? '0 0 0 2px var(--grey-9), 0 0 0 3px #fff' : 'none' },
+        onClick: async () => { s.color = col; await save(); } })));
+
+    return el('div', { style: { background: 'var(--grey-9)', borderRadius: '24px', padding: '13px 16px',
+                                display: 'flex', flexDirection: 'column', gap: '9px' } },
+      el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        el('span', { style: { width: '10px', height: '10px', borderRadius: '3px', background: s.color, flex: 'none' } }),
+        el('div', { style: { minWidth: 0, flex: '1' } }, name),
+        used && stats.count
+          ? el('span', { class: 'm', style: { fontSize: '12.5px', flex: 'none',
+              color: stats.net > 0 ? 'var(--green)' : stats.net < 0 ? 'var(--orange)' : 'var(--grey-2)' } },
+              c.money(stats.net, { currency: acct.currency, decimals: 0 }))
+          : null),
+      el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)', flex: '1', minWidth: 0,
+                                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+          !used ? 'not used yet'
+                : used === stats.count ? `${used} trade${used === 1 ? '' : 's'}`
+                : `${used} trade${used === 1 ? '' : 's'} · ${stats.count} here`),
+        swatches,
+        el('button', { title: used ? `Used by ${used} trade${used === 1 ? '' : 's'}` : 'Delete',
+          style: { width: '26px', height: '26px', borderRadius: '9px', background: 'var(--grey-7)',
+                   display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' },
+          onClick: () => confirmDelete(s, used) }, icon('trash', 12, 'var(--grey-5)', 1.8))),
+    );
+  };
+
+  const setupList = el('div', { style: { marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '7px', overflowY: 'auto' } });
+  const paintSetups = () => setupList.replaceChildren(
+    ...pb.setups.map(setupRow),
+    el('button', { style: { border: '1px dashed var(--grey-6)', borderRadius: '24px', padding: '15px 18px',
+                            display: 'flex', alignItems: 'center', gap: '11px', width: '100%' },
+      onClick: addSetup }, icon('plus', 16, 'var(--grey-5)', 2),
+      el('span', { class: 'm', style: { fontSize: '12.5px', color: 'var(--grey-5)' } }, 'New setup')),
+
+  );
+
+  async function addSetup() {
+    const name = await inlineInput(setupList, 'Name this setup');
+    if (!name) { paintSetups(); return; }
+    pb.setups.push({ id: 's_' + crypto.randomUUID().slice(0, 6), name, color: SWATCHES[pb.setups.length % SWATCHES.length], rules: [] });
+    await save();
+  }
+
+  /* Deleting something your history points at is the one destructive act here,
+     so it asks, and it says exactly what it will do to those trades. */
+  function confirmDelete(s, used) {
+    const box = el('div', { style: { background: 'var(--grey-7)', borderRadius: '24px', padding: '15px 18px',
+                                     boxShadow: 'inset 0 0 0 1px var(--orange)' } },
+      el('div', { style: { fontSize: '12.5px', lineHeight: 1.55, color: 'var(--ink-2)' } },
+        used ? [`Delete “${s.name}”? `, el('span', { class: 'm', style: { color: '#fff' } }, `${used} trade${used === 1 ? '' : 's'}`),
+                ' use it — they will be kept and left with no setup.']
+             : [`Delete “${s.name}”?`]),
+      el('div', { style: { marginTop: '12px', display: 'flex', gap: '7px' } },
+        el('button', { class: 'btn btn-quiet', onClick: () => paintSetups() }, 'Cancel'),
+        el('button', { class: 'btn', style: { background: 'var(--orange)', color: '#202020' },
+          onClick: async () => {
+            for (const t of store.trades) if (t.setupId === s.id) t.setupId = null;
+            pb.setups = pb.setups.filter(x => x.id !== s.id);
+            await store.save('trades');
+            await save();
+            toast(`Deleted ${s.name}`);
+          } }, 'Delete')));
+    setupList.replaceChildren(box);
+  }
+  paintSetups();
+
+  const setupsCard = el('section', { class: 'card', style: { flex: '1', minWidth: 0, padding: '24px 26px', maxHeight: '100%' } },
+    el('h2', {}, 'Setups'),
+    setupList,
+  );
+
+  /* ---------- tags ---------- */
+  const tagsCard = el('section', { class: 'card', style: { flex: 'none', minWidth: 0, padding: '24px 26px' } });
+  function paintTags() {
+    tagsCard.replaceChildren(
+      el('h2', {}, 'Tags'),
+      el('div', { style: { marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '15px', overflowY: 'auto' } },
+        ...pb.tagGroups.map(g => el('div', {},
+          el('div', { style: { display: 'flex', alignItems: 'center', marginBottom: '9px' } },
+            el('input', { class: 'eyebrow', value: g.name,
+              style: { background: 'transparent', width: '140px' },
+              onChange: async e => { g.name = e.target.value.trim() || g.name; await save(); } }),
+            el('button', { class: 'm', style: { marginLeft: 'auto', fontSize: '10.5px', color: 'var(--grey-5)' },
+              onClick: async () => {
+                if (g.tags.length) return toast('Empty the group first', 'warn');
+                pb.tagGroups = pb.tagGroups.filter(x => x.id !== g.id); await save();
+              } }, 'remove group')),
+          el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '5px' } },
+            ...g.tags.map(t => el('span', { class: 'tag', style: { display: 'inline-flex', alignItems: 'center', gap: '7px' } },
+              t.name,
+              el('button', { title: 'Remove', style: { color: 'var(--grey-5)', fontSize: '13px', lineHeight: 1 },
+                onClick: async () => {
+                  const used = store.trades.filter(x => (x.tagIds || []).includes(t.id)).length;
+                  for (const x of store.trades) if ((x.tagIds || []).includes(t.id)) x.tagIds = x.tagIds.filter(i => i !== t.id);
+                  g.tags = g.tags.filter(x => x.id !== t.id);
+                  if (used) await store.save('trades');
+                  await save();
+                } }, '×'))),
+            el('button', { class: 'tag-add', onClick: () => addTag(g) }, '+')))),
+        el('button', { class: 'tag-add', style: { alignSelf: 'flex-start', borderRadius: 'var(--r-btn)', padding: '7px 14px' },
+          onClick: async () => {
+            const name = await inlineInput(tagsCard, 'Name this group');
+            if (!name) return paintTags();
+            pb.tagGroups.push({ id: 'g_' + crypto.randomUUID().slice(0, 6), name, tags: [] });
+            await save();
+          } }, '+ new group')),
+    );
+  }
+  async function addTag(g) {
+    const name = await inlineInput(tagsCard, 'Name this tag');
+    if (!name) return paintTags();
+    g.tags.push({ id: 'tg_' + crypto.randomUUID().slice(0, 6), name });
+    await save();
+  }
+  paintTags();
+
+  /* ---------- risk rules ---------- */
+  const stepper = (value, onChange, fmt = v => String(v), stepBy = 1, min = 0) =>
+    el('div', { class: 'stepper', style: { marginLeft: 'auto' } },
+      el('button', { onClick: () => onChange(Math.max(min, +(value - stepBy).toFixed(2))) }, icon('minus', 11, 'var(--grey-2)', 2.6)),
+      el('span', { class: 'val' }, fmt(value)),
+      el('button', { onClick: () => onChange(+(value + stepBy).toFixed(2)) }, icon('plus', 11, 'var(--grey-2)', 2.6)));
+
+  const ruleRow = (label, node) => el('div', { style: { display: 'flex', alignItems: 'center' } },
+    el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, label), node);
+
+  const rulesCard = el('section', { class: 'card', style: { flex: 'none', padding: '24px 26px' } },
+    el('h2', {}, 'Risk rules'),
+    el('div', { style: { marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '13px' } },
+      ruleRow('Default risk per trade', stepper(Number(acct.defaultRiskPercent) || 0,
+        async v => { await store.updateAccount(acct.id, { defaultRiskPercent: v }); nav.refresh(); },
+        v => v.toFixed(2) + '%', 0.05)),
+      ruleRow('Max trades per day', stepper(Number(pb.rules.maxTradesPerDay) || 0,
+        async v => { pb.rules.maxTradesPerDay = Math.round(v); await save(); }, v => String(Math.round(v)), 1, 1)),
+      ruleRow('Daily loss cap', stepper(Number(pb.rules.dailyLossCapPercent) || 0,
+        async v => { pb.rules.dailyLossCapPercent = v; await save(); }, v => v.toFixed(2) + '%', 0.25)),
+      ruleRow('Weekly target', stepper(Number(acct.weeklyTargetPercent) || 0,
+        async v => { await store.updateAccount(acct.id, { weeklyTargetPercent: Math.max(0, v) }); nav.refresh(); },
+        v => v > 0 ? v.toFixed(2) + '%' : 'none', 0.25)),
+    ),
+  );
+
+  /* ---------- sessions ---------- */
+  const sessionsCard = el('section', { class: 'card', style: { width: '424px', flex: 'none', padding: '24px 22px', maxHeight: '100%' } });
+  function paintSessions() {
+    const timeField = (val, set) => el('input', {
+      type: 'time', value: val, class: 'm',
+      style: { background: 'var(--grey-7)', borderRadius: '10px', padding: '5px 7px', fontSize: '11.5px',
+               color: '#fff', flex: 'none', width: '110px' },
+      onChange: async e => { set(e.target.value); await save(); } });
+
+    sessionsCard.replaceChildren(
+      el('h2', { title: 'A trade is labelled by its entry time, exactly. Where sessions overlap the first in this list wins. Changing anything here relabels every trade.' }, 'Sessions'),
+      el('div', { style: { marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' } },
+        ...pb.sessions.map((s, i) => el('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+          el('input', { class: 'm', value: s.name,
+            title: s.name,
+            style: { fontSize: '12px', color: '#fff', background: 'transparent', width: '100px', flex: 'none' },
+            onChange: async e => { s.name = e.target.value.trim() || s.name; await save(); } }),
+          timeField(s.start, v => s.start = v),
+          el('span', { class: 'm', style: { fontSize: '10px', color: 'var(--grey-5)' } }, '–'),
+          timeField(s.end, v => s.end = v),
+          el('button', { title: 'Remove', style: { marginLeft: 'auto', color: 'var(--grey-5)', fontSize: '14px' },
+            onClick: async () => {
+              for (const t of store.trades) if (t.sessionId === s.id) t.sessionId = null;
+              pb.sessions.splice(i, 1);
+              await store.save('trades'); await save();
+            } }, '×')))),
+      el('div', { style: { marginTop: '14px', display: 'flex', gap: '7px', flexWrap: 'wrap' } },
+        el('button', { class: 'tag-add', onClick: async () => {
+          const name = await inlineInput(sessionsCard, 'Name this session');
+          if (!name) return paintSessions();
+          pb.sessions.push({ id: 'ses_' + crypto.randomUUID().slice(0, 6), name, start: '00:00', end: '01:00' });
+          await save();
+        } }, '+ add session'),
+        el('button', { class: 'tag-add', onClick: async () => {
+          pb.sessions = DEFAULT_SESSIONS();
+          for (const t of store.trades) t.sessionId = t.timeOpen ? (c.sessionFor(pb, t.timeOpen)?.id ?? null) : null;
+          await store.save('trades'); await save();
+          toast('Sessions reset to the killzone defaults');
+        } }, 'reset to killzones'),
+        el('button', { class: 'tag-add', title: 'When New York moves between EDT and EST everything shifts an hour on your clock',
+          onClick: async () => {
+            for (const s of pb.sessions) { s.start = shiftHour(s.start, 1); s.end = shiftHour(s.end, 1); }
+            for (const t of store.trades) t.sessionId = t.timeOpen ? (c.sessionFor(pb, t.timeOpen)?.id ?? null) : null;
+            await store.save('trades'); await save();
+            toast('Every session moved an hour later');
+          } }, 'shift +1h'),
+        el('button', { class: 'tag-add', onClick: async () => {
+          for (const s of pb.sessions) { s.start = shiftHour(s.start, -1); s.end = shiftHour(s.end, -1); }
+          for (const t of store.trades) t.sessionId = t.timeOpen ? (c.sessionFor(pb, t.timeOpen)?.id ?? null) : null;
+          await store.save('trades'); await save();
+          toast('Every session moved an hour earlier');
+        } }, 'shift −1h')),
+    );
+  }
+  paintSessions();
+
+  return el('div', { class: 'view' }, head,
+    el('div', { class: 'row', style: { flex: '1', alignItems: 'flex-start', minHeight: 0, overflowY: 'auto' } },
+      setupsCard,
+      el('div', { style: { flex: '1', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' } }, tagsCard, rulesCard),
+      sessionsCard));
+}
+
+function shiftHour(hhmm, by) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const nh = (((h + by) % 24) + 24) % 24;
+  return `${String(nh).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/* An inline field instead of window.prompt — it never blocks the page. */
+function inlineInput(host, placeholder) {
+  return new Promise(resolve => {
+    const input = el('input', { class: 'field', placeholder,
+      style: { height: '34px', fontSize: '12px', marginTop: '8px' } });
+    host.append(input); input.focus();
+    let done = false;
+    const finish = v => { if (done) return; done = true; input.remove(); resolve(v); };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') finish(input.value.trim() || null);
+      if (e.key === 'Escape') finish(null);
+    });
+    input.addEventListener('blur', () => setTimeout(() => finish(input.value.trim() || null), 120));
+  });
+}

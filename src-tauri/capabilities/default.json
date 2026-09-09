@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Ledger reads and writes your journal folder through its own commands, so it needs nothing from the filesystem plugin. The only capability granted here is the folder picker.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open"
+  ]
+}

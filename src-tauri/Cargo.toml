@@ -1,0 +1,26 @@
+[package]
+name = "ledger"
+version = "1.0.0"
+description = "A trading journal that keeps your data as plain files in a folder you choose."
+authors = ["Minato"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "ledger_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+
+# A smaller, faster binary. Journal files are tiny; the app should be too.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

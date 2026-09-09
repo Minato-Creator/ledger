@@ -1,0 +1,288 @@
+/* ============================================================
+   Ledger — design tokens
+   Palette, spacing, radii and motion read from reown.com's
+   published tokens. Change a value here, every screen follows.
+   ============================================================ */
+:root {
+  /* greys */
+  --grey-1:#E9E9E9; --grey-1_5:#DEDEDE; --grey-1_7:#D0D0D0; --grey-2:#BBBBBB;
+  --grey-3:#9A9A9A; --grey-3_5:#808080; --grey-4:#787878; --grey-5:#6C6C6C;
+  --grey-6:#4F4F4F; --grey-7:#363636; --grey-8:#202020; --grey-9:#2A2A2A;
+
+  /* accents */
+  --blue:#0988F0; --blue-surface:#379DEF; --blue-strong:#0878D3;
+  --green:#18AC65; --orange:#F4624A; --yellow:#FFB800;
+
+  /* semantic */
+  --ground:var(--grey-3);
+  --card:var(--grey-8);
+  --card-light:var(--grey-1);
+  --inset:var(--grey-7);
+  --inset-2:var(--grey-6);
+  --ink:#FFFFFF; --ink-2:var(--grey-2); --ink-3:var(--grey-3); --ink-4:var(--grey-5);
+  --ink-on-light:var(--grey-8); --ink-on-light-2:var(--grey-6);
+  --profit:var(--green); --loss:var(--orange); --flat:var(--grey-4);
+
+  /* radii */
+  --r-btn:16px; --r-field:20px; --r-inset:24px; --r-card:40px; --r-pill:999px;
+
+  /* space */
+  --s-2:2px; --s-4:4px; --s-6:6px; --s-8:8px; --s-12:12px; --s-16:16px;
+  --s-20:20px; --s-24:24px; --s-32:32px; --s-40:40px;
+
+  /* type */
+  --mono:'Geist Mono','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'Geist','Archivo',system-ui,-apple-system,'Segoe UI',sans-serif;
+
+  /* motion */
+  --d-press:70ms; --d-snap:150ms; --d-short:250ms; --d-base:300ms; --d-long:600ms;
+  --e-standard:cubic-bezier(.45,0,.55,1);
+  --e-out:cubic-bezier(.5,1,.89,1);
+  --e-emphasised:cubic-bezier(.85,0,.15,1);
+}
+
+*,*::before,*::after { box-sizing:border-box; }
+html,body { height:100%; }
+body {
+  margin:0; background:var(--ground); font-family:var(--sans); color:var(--ink-on-light);
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+}
+button { font:inherit; color:inherit; background:none; border:none; padding:0; cursor:pointer; }
+input,select,textarea { font:inherit; color:inherit; background:none; border:none; outline:none; }
+a { color:var(--blue); text-decoration:none; }
+a:hover { color:var(--blue-strong); }
+.m { font-family:var(--mono); }
+.tnum { font-variant-numeric:tabular-nums; }
+
+/* ---------- layout ---------- */
+#app { height:100vh; padding:var(--s-8); display:flex; gap:var(--s-8); }
+.sidebar {
+  width:232px; flex:none; background:var(--card); border-radius:var(--r-card);
+  padding:28px 18px 22px; display:flex; flex-direction:column; gap:var(--s-20);
+}
+.main { flex:1; min-width:0; display:flex; flex-direction:column; gap:var(--s-8); }
+.view { flex:1; min-height:0; display:flex; flex-direction:column; gap:var(--s-8); }
+.head { height:48px; flex:none; display:flex; align-items:center; gap:var(--s-12); padding:0 14px 0 18px; }
+.head h1 { font:400 17px var(--mono); letter-spacing:-.01em; color:var(--grey-8); margin:0; }
+.head .sub { font:400 12px var(--mono); color:var(--grey-6); }
+.spacer { margin-left:auto; }
+
+.card { background:var(--card); border-radius:var(--r-card); padding:24px 26px; display:flex; flex-direction:column; min-height:0; }
+.card.light { background:var(--card-light); color:var(--ink-on-light); }
+.card h2 { font:400 13.5px var(--mono); color:var(--ink); margin:0; }
+.card.light h2 { color:var(--grey-8); }
+.card .note { font:400 11px var(--mono); color:var(--ink-4); }
+.row { display:flex; gap:var(--s-8); min-height:0; }
+.grid4 { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:var(--s-8); }
+
+.eyebrow { font:400 10px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3); }
+.card.light .eyebrow { color:var(--ink-on-light-2); }
+
+/* ---------- sidebar ---------- */
+.brand { display:flex; align-items:center; gap:9px; padding-left:6px; }
+.brand-mark { width:32px; height:32px; border-radius:11px; background:var(--grey-1); display:flex; align-items:center; justify-content:center; flex:none; }
+.brand-name { font:400 15px var(--mono); letter-spacing:-.01em; color:var(--ink); }
+
+.acct-switch { position:relative; }
+.acct-btn {
+  width:100%; background:var(--inset); border-radius:var(--r-field); padding:10px 12px;
+  display:flex; align-items:center; gap:10px; text-align:left; transition:background var(--d-snap) var(--e-standard);
+}
+.acct-btn:hover { background:var(--inset-2); }
+.acct-btn:active { transform:scale(.985); }
+.acct-dot { width:8px; height:8px; border-radius:3px; flex:none; }
+.acct-name { font:400 12px var(--mono); color:var(--ink); line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.acct-meta { font:400 10px var(--mono); color:var(--ink-4); line-height:1.3; margin-top:2px; }
+.acct-menu {
+  position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:20;
+  background:var(--inset); border-radius:var(--r-inset); padding:8px;
+  display:flex; flex-direction:column; gap:3px; box-shadow:0 12px 32px rgba(0,0,0,.45);
+}
+.acct-menu[hidden] { display:none; }
+.acct-item { display:flex; align-items:center; gap:9px; padding:9px 11px; border-radius:var(--r-btn); width:100%; text-align:left; }
+.acct-item:hover { background:var(--inset-2); }
+.acct-item:active { transform:scale(.985); }
+.acct-item.is-active { background:var(--inset-2); }
+.acct-item .n { font:400 11.5px var(--mono); color:var(--ink-2); line-height:1.2; }
+.acct-item.is-active .n { color:var(--ink); }
+.acct-item .b { font:400 9.5px var(--mono); color:var(--ink-4); margin-top:2px; }
+.acct-sep { height:1px; background:var(--inset-2); margin:4px 8px; }
+
+.nav { display:flex; flex-direction:column; gap:2px; }
+.nav a {
+  display:flex; align-items:center; gap:11px; padding:10px 13px; border-radius:var(--r-btn);
+  color:var(--ink-3); transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard);
+}
+.nav a:hover { background:var(--grey-9); color:var(--ink-2); }
+.nav a:active { transform:scale(.985); }
+.nav a.is-active { background:var(--inset); color:var(--ink); }
+.nav a span.label { font:400 13px var(--mono); }
+.nav a .dot { margin-left:auto; width:5px; height:5px; border-radius:50%; background:var(--blue); }
+.nav a .count { margin-left:auto; font:400 11px var(--mono); color:var(--ink-4); }
+.side-foot { margin-top:auto; display:flex; flex-direction:column; gap:var(--s-8); }
+.side-box { background:var(--inset); border-radius:var(--r-inset); padding:16px; }
+
+/* ---------- controls ---------- */
+.btn { border-radius:var(--r-btn); padding:9px 18px; font:400 12.5px var(--mono); letter-spacing:-.02em;
+       display:inline-flex; align-items:center; gap:8px;
+       transition:background var(--d-snap) var(--e-standard), transform var(--d-press) var(--e-standard); }
+.btn:active { transform:scale(.975); }
+.btn-primary { background:var(--blue); color:#fff; }
+.btn-primary:hover { background:var(--blue-strong); }
+.btn-light { background:var(--grey-1); color:var(--grey-8); }
+.btn-light:hover { background:var(--grey-1_7); }
+.btn-quiet { background:var(--inset); color:var(--grey-1); }
+.btn-quiet:hover { background:var(--inset-2); }
+.btn-ghost { background:var(--grey-2); color:var(--grey-8); }
+.btn-ghost:hover { background:var(--grey-1_7); }
+.btn:disabled { opacity:.45; cursor:not-allowed; }
+
+.side-folder { display:flex; align-items:center; gap:8px; padding:0 6px 10px; }
+.side-folder .m { font-size:11px; color:var(--ink-4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+.unit-switch { display:flex; gap:3px; margin:14px 0 4px; background:var(--grey-9); border-radius:var(--r-btn); padding:3px; }
+.unit-switch button { flex:1; font:400 11.5px var(--mono); color:var(--ink-4); padding:6px 0; border-radius:13px;
+                      transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard); }
+.unit-switch button:hover { color:var(--ink-2); }
+.unit-switch button:active { transform:scale(.94); }
+.unit-switch button.is-on { background:var(--inset-2); color:var(--ink); }
+
+.seg { display:flex; background:var(--card); border-radius:var(--r-btn); padding:3px; }
+.seg button { font:400 11.5px var(--mono); color:var(--ink-3); padding:6px 13px; border-radius:13px;
+              transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard),
+                         transform var(--d-press) var(--e-standard); }
+.seg button:active { transform:scale(.96); }
+.seg button:hover { color:var(--ink-2); }
+.seg button.is-on { background:var(--grey-1); color:var(--grey-8); }
+
+.field { background:var(--inset); border-radius:var(--r-field); height:42px; display:flex; align-items:center;
+         padding:0 15px; font:400 12.5px var(--mono); color:var(--ink); width:100%;
+         transition:box-shadow var(--d-snap) var(--e-standard); }
+.field::placeholder { color:var(--ink-4); }
+.field:focus { box-shadow:inset 0 0 0 1px var(--blue); }
+.field.is-stop:focus { box-shadow:inset 0 0 0 1px var(--loss); }
+textarea.field { height:auto; padding:13px 16px; line-height:1.55; resize:none; font-family:var(--sans); font-size:13px; color:var(--ink-2); border-radius:var(--r-inset); }
+.lbl { display:block; font:400 10px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3); margin-bottom:7px; }
+
+.chip { font:400 11.5px var(--mono); border-radius:var(--r-btn); padding:8px 14px; background:var(--inset); color:var(--ink-3);
+        transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard),
+                   transform var(--d-press) var(--e-standard); }
+.chip:hover { background:var(--inset-2); color:var(--ink-2); }
+.chip:active { transform:scale(.97); }
+.chip.is-on { background:var(--grey-1); color:var(--grey-8); }
+.tag { font:400 11.5px var(--mono); border-radius:var(--r-pill); padding:6px 12px; background:var(--inset); color:var(--ink-2); }
+.tag.is-on { background:var(--blue); color:#fff; }
+.tag-add { font:400 11.5px var(--mono); border:1px dashed var(--inset-2); border-radius:var(--r-pill); padding:5px 12px; color:var(--ink-4);
+           transition:border-color var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard),
+                      transform var(--d-press) var(--e-standard); }
+.tag-add:hover { border-color:var(--grey-5); color:var(--ink-2); }
+.tag-add:active { transform:scale(.96); }
+
+.stepper { display:flex; align-items:center; gap:5px; }
+.stepper button { width:22px; height:22px; border-radius:8px; background:var(--inset); display:flex; align-items:center; justify-content:center; }
+.stepper button:hover { background:var(--inset-2); }
+.stepper button { transition:background var(--d-snap) var(--e-standard), transform var(--d-press) var(--e-standard); }
+.stepper button:active { transform:scale(.88); }
+.stepper .val { font:400 12.5px var(--mono); color:var(--ink); min-width:54px; text-align:center; }
+
+/* ---------- values ---------- */
+.kpi-val { font:400 33px var(--mono); letter-spacing:-.03em; line-height:1; color:var(--ink); }
+.card.light .kpi-val { color:var(--grey-8); }
+.kpi-val .unit { font-size:21px; color:var(--ink-3); }
+.pos { color:var(--profit); } .neg { color:var(--loss); } .flat { color:var(--ink-2); }
+.card.light .pos { color:#0F6B40; } .card.light .neg { color:#A33A2B; }
+
+/* ---------- table ---------- */
+.tbl { display:flex; flex-direction:column; min-height:0; }
+.tbl-head, .tbl-row { display:grid; align-items:center; padding:0 8px; }
+.tbl-head { padding-bottom:9px; border-bottom:1px solid var(--inset); font:400 10px var(--mono);
+            letter-spacing:.06em; text-transform:uppercase; color:var(--ink-4); }
+.tbl-body { overflow-y:auto; min-height:0; }
+.tbl-row { height:42px; border-bottom:1px solid var(--grey-9); transition:background var(--d-snap) var(--e-standard); }
+.tbl-row:hover { background:var(--grey-9); }
+.tbl-row:active { background:var(--grey-7); }
+.tbl-row:last-child { border-bottom:none; }
+.tbl .num { font:400 11.5px var(--mono); color:var(--ink-2); text-align:right; }
+.tbl .pl { font:400 12.5px var(--mono); text-align:right; }
+.tbl .ins { font:400 12.5px var(--mono); color:var(--ink); }
+.tbl .td { font:400 11.5px var(--mono); color:var(--ink-2); }
+.bar-mark { width:3px; height:16px; border-radius:2px; flex:none; }
+
+.empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; padding:40px; }
+.empty p { max-width:420px; margin:0; font-size:13px; line-height:1.6; color:var(--ink-3); }
+
+/* ---------- scrollbars ---------- */
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--inset-2); border-radius:6px; border:3px solid var(--card); }
+::-webkit-scrollbar-thumb:hover { background:var(--grey-4); }
+
+/* ---------- gate (folder not yet connected) ---------- */
+.gate { position:fixed; inset:0; background:var(--ground); display:flex; align-items:center; justify-content:center; padding:40px; z-index:100; }
+.gate-card { width:620px; background:var(--card); border-radius:var(--r-card); padding:44px 46px; }
+.gate-card h1 { font:400 30px var(--mono); letter-spacing:-.03em; color:var(--ink); margin:0 0 14px; }
+.gate-card p { font-size:13.5px; line-height:1.65; color:var(--ink-3); margin:0 0 12px; }
+.gate-card .fs { margin-top:22px; background:var(--grey-9); border-radius:var(--r-inset); padding:18px 20px;
+                 font:400 11.5px var(--mono); color:var(--ink-3); line-height:1.9; white-space:pre; }
+.gate-actions { margin-top:26px; display:flex; align-items:center; gap:10px; }
+.warn { color:var(--yellow); }
+
+/* ============================================================
+   Motion
+
+   Two rules the whole app follows:
+
+   1. Nothing animates on a re-render. The app rebuilds the DOM on every
+      click, so an entrance animation tied to element creation would fire
+      constantly. `.main.enter` is set by app.js only when the view or the
+      display unit actually changed — everything below is scoped to it.
+
+   2. Nothing you read moves. Figures fade in where they already are;
+      they never slide, and they never count up. In a trading journal a
+      number you have to wait to read is a number you cannot trust at a
+      glance.
+   ============================================================ */
+@keyframes content-in { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+@keyframes fade-in   { from { opacity:0; } to { opacity:1; } }
+@keyframes grow-x    { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+@keyframes grow-y    { from { transform:scaleY(0); } to { transform:scaleY(1); } }
+@keyframes draw      { from { stroke-dashoffset:1; } to { stroke-dashoffset:0; } }
+
+/* Cards themselves NEVER fade. The ground behind them is light grey and the
+   cards are near-black, so fading a card up from zero flashes the background
+   through it — on a dark app that reads as a strobe, not a transition. The
+   card paints instantly at full opacity and only its CONTENTS animate, which
+   happens over the card's own surface and exposes nothing. */
+.main.enter .card > *   { animation:content-in 240ms var(--e-out) both; }
+.main.enter .card > *:nth-child(2)   { animation-delay:30ms; }
+.main.enter .card > *:nth-child(3)   { animation-delay:55ms; }
+.main.enter .card > *:nth-child(n+4) { animation-delay:75ms; }
+/* A nested card is a card, not content — it must not fade either. */
+.main.enter .card .card { animation:none; }
+
+/* Bars and columns draw out of their baseline. */
+.main.enter .bar-fill { animation:grow-x 420ms var(--e-out) both; transform-origin:left center; }
+.main.enter .col-fill { animation:grow-y 420ms var(--e-out) both; transform-origin:bottom center; }
+.main.enter .col-fill-svg { animation:grow-y 420ms var(--e-out) both; transform-origin:bottom; transform-box:fill-box; }
+
+/* The equity line strokes itself in. pathLength="1" normalises the maths, so
+   this works whatever the shape of the curve. */
+.main.enter .line-draw { stroke-dasharray:1; animation:draw 620ms var(--e-out) both; }
+.main.enter .line-tip  { animation:fade-in 200ms var(--e-out) both 520ms; }
+.main.enter .line-area { animation:fade-in 500ms var(--e-out) both 120ms; }
+
+/* Calendar cells settle in as one field, not 30 separate pops. */
+.main.enter .cal-grid { animation:fade-in 300ms var(--e-out) both 40ms; }
+
+/* ---------- keyboard focus ---------- */
+:focus { outline:none; }
+:focus-visible { outline:2px solid var(--blue); outline-offset:2px; border-radius:6px; }
+.field:focus-visible { outline:none; box-shadow:inset 0 0 0 1px var(--blue); }
+
+/* ---------- when the machine is told to keep still ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration:1ms !important; animation-delay:0ms !important;
+    animation-iteration-count:1 !important; transition-duration:1ms !important;
+  }
+}

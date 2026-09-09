@@ -1,0 +1,108 @@
+# Turning this into a real app
+
+You never install Rust. GitHub builds the installers for you, free.
+
+---
+
+## The five minutes of setup
+
+**1. Make a GitHub account** at github.com if you don't have one. Free.
+
+**2. Make a new repository.** Green *New* button. Call it `ledger`.
+Private is fine — you get 2,000 free build minutes a month and a full
+build costs about 25 of them.
+
+**3. Upload this whole folder.** On the empty repo page click
+*uploading an existing file*, then drag in **everything** —
+`src`, `src-tauri`, `.github`, `package.json`. Commit.
+
+> The `.github` folder is the one that matters and it is easy to miss,
+> because Windows Explorer hides folders starting with a dot. If the
+> Actions tab is empty later, that folder didn't make it.
+
+**4. Build it.** Go to the **Actions** tab → *Build Ledger* →
+**Run workflow** → the green button.
+
+**5. Wait about ten minutes.** When the run goes green, scroll to the
+bottom of it. Under **Artifacts** there are three downloads:
+
+    ledger-windows-latest    ← yours
+    ledger-macos-latest
+    ledger-ubuntu-22.04
+
+Inside the Windows one: **`Ledger_1.0.0_x64-setup.exe`**. Run it. Done —
+Ledger is in your Start Menu with its own icon.
+
+---
+
+## The first launch
+
+Windows will say **"Windows protected your PC"**. That is not a problem
+with the app; it is what every unsigned installer does. Click
+**More info → Run anyway**. You will only ever see it once.
+
+Getting rid of that message permanently needs a code signing certificate,
+around $250 a year. Not worth it for an app only you run. If you ever
+publish Ledger properly, it becomes worth it, and adding one is a config
+line — nothing about the build changes.
+
+On first open the app makes **Documents\Ledger** and starts. No folder
+picker, no permission prompt, no terminal window. To keep your existing
+journal, copy your current `.json` files into that folder — or click the
+folder name at the top of Settings and point it at where they already are.
+
+---
+
+## Changing something later
+
+Edit the files in `src`, commit, run the workflow again. That's the loop.
+
+To cut a proper release instead of a bare download, tag it:
+
+```
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The workflow then makes a draft release with all three installers attached,
+which is what you would hand to someone else.
+
+---
+
+## Building on your own machine instead
+
+Only worth it if you're changing things constantly and don't want to wait
+ten minutes each time.
+
+1. **Rust** — https://rustup.rs, run `rustup-init.exe`, accept the defaults.
+2. **C++ build tools** — the *Build Tools for Visual Studio* installer,
+   tick *Desktop development with C++*. This is the ~2GB part.
+3. Then, in this folder:
+
+```
+npm install
+npm run tauri dev      # live window, reloads as you edit
+npm run tauri build    # produces the installer
+```
+
+The installer lands in `src-tauri/target/release/bundle/`.
+
+---
+
+## What is in here
+
+    src/                 the app — unchanged from the web version
+    src-tauri/src/main.rs   the native shell: six commands, ~80 lines
+    src-tauri/tauri.conf.json   window size, icons, installer settings
+    .github/workflows/build.yml  the free build machine
+
+`src/js/fs.js` is the only file that knows which of the two it is running
+in. Everything above it — every view, every calculation — is identical.
+
+---
+
+## Still running it in a browser
+
+`npm run serve` then open http://localhost:8777. The same code, using the
+browser's folder API instead of the native one. Useful for a quick look
+without a build.
