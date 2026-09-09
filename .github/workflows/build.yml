@@ -1,0 +1,86 @@
+# ============================================================
+# Builds Ledger into real installers, on GitHub's machines.
+#
+# You never install Rust. Push this repo, open the Actions tab, press
+# "Run workflow", and about ten minutes later the installers are waiting
+# under the run's Artifacts. Tag a release (v1.0.0) and they are attached
+# to the release instead, ready to download.
+#
+# Free: unlimited for public repos, 2,000 minutes a month for private ones.
+# A full three-platform build costs roughly 25 of those minutes.
+# ============================================================
+name: Build Ledger
+
+on:
+  workflow_dispatch:            # the "Run workflow" button
+  push:
+    tags: ['v*']                # or a version tag, which makes a release
+
+jobs:
+  build:
+    permissions:
+      contents: write           # needed only to attach files to a release
+    strategy:
+      fail-fast: false          # one platform failing should not hide the others
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+          - platform: macos-latest
+            args: '--target universal-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Linux is the only one needing system libraries for the webview.
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # Caches Rust between runs, so the second build is minutes faster.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - run: npm install
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: 'Ledger ${{ github.ref_name }}'
+          releaseBody: 'Download the installer for your machine below.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      # On a manual run there is no release to attach to, so keep the
+      # installers as downloadable artifacts instead.
+      - name: Keep the installers
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-${{ matrix.platform }}
+          path: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg
+          if-no-files-found: ignore
