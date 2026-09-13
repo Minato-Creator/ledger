@@ -10,6 +10,9 @@ export const COLUMNS = [
   'id','account','accountCurrency','accountStartingBalance','date','timeOpen','timeClose',
   'pair','assetClass','side','session','entryPrice','stopLoss','takeProfit','exitPrice',
   'size','sizeUnit','riskPercent','netResult','rMultiple','outcome','setup','tags','grade','notes',
+  /* Added after the first release. An older backup has no such column and
+     reads back as closed, which is what every trade in it was. */
+  'status',
 ];
 
 const q = v => {
@@ -31,15 +34,20 @@ export function toCSV(store, accountIds = null) {
   const lines = [COLUMNS.join(',')];
   for (const t of rows) {
     const a = accounts.get(t.accountId);
+    const open = t.status === 'open';
     const r = a ? c.rMultiple(a, t) : null;
     lines.push([
       t.id, a?.name, a?.currency, a?.startingBalance, t.date, t.timeOpen, t.timeClose,
       t.pair, t.assetClass, t.side, sessions.get(t.sessionId)?.name,
       t.entryPrice, t.stopLoss, t.takeProfit, t.exitPrice, t.size, t.sizeUnit,
-      t.riskPercent, t.netResult, r == null ? '' : r.toFixed(4), c.outcome(t),
+      t.riskPercent,
+      /* A running trade exports with its result, R and outcome left blank,
+         because it has none. Writing a zero would make the backup disagree
+         with the journal it came from. */
+      open ? '' : t.netResult, open || r == null ? '' : r.toFixed(4), open ? '' : c.outcome(t),
       setups.get(t.setupId)?.name,
       (t.tagIds || []).map(id => tags.get(id)?.name).filter(Boolean).join(';'),
-      t.grade, t.notes,
+      t.grade, t.notes, open ? 'open' : 'closed',
     ].map(q).join(','));
   }
   return lines.join('\n') + '\n';
@@ -82,7 +90,8 @@ export function planImport(store, records) {
   let add = 0, skip = 0; const problems = [];
 
   records.forEach((r, i) => {
-    if (!r.date || !r.pair || r.netResult === '' || r.netResult == null) {
+    const open = String(r.status || '').toLowerCase() === 'open';
+    if (!r.date || !r.pair || (!open && (r.netResult === '' || r.netResult == null))) {
       problems.push({ line: i + 2, why: 'missing date, pair or netResult' }); return;
     }
     if (r.id && existingIds.has(r.id)) { skip++; return; }
@@ -122,7 +131,8 @@ export async function applyImport(store, records) {
 
   let added = 0;
   for (const r of records) {
-    if (!r.date || !r.pair || r.netResult === '' || r.netResult == null) continue;
+    const open = String(r.status || '').toLowerCase() === 'open';
+    if (!r.date || !r.pair || (!open && (r.netResult === '' || r.netResult == null))) continue;
     if (r.id && existingIds.has(r.id)) continue;
     const acc = accountsByName.get((r.account || 'Imported').toLowerCase());
     if (!acc) continue;
@@ -135,7 +145,11 @@ export async function applyImport(store, records) {
       entryPrice: num(r.entryPrice), stopLoss: num(r.stopLoss), takeProfit: num(r.takeProfit), exitPrice: num(r.exitPrice),
       size: num(r.size), sizeUnit: r.sizeUnit || null,
       riskPercent: Number(r.riskPercent) || acc.defaultRiskPercent || 1,
-      netResult: Number(r.netResult) || 0,
+      netResult: open ? null : (Number(r.netResult) || 0),
+      status: open ? 'open' : 'closed',
+      /* A break-even can carry a non-zero amount, so the label has to come
+         back from the file rather than be re-derived from the number. */
+      outcome: String(r.outcome || '').toLowerCase() === 'breakeven' ? 'breakeven' : null,
       setupId: setupsByName.get((r.setup || '').toLowerCase())?.id || null,
       tagIds: (r.tags || '').split(';').map(t => t.trim()).filter(Boolean)
                 .map(t => tagsByName.get(t.toLowerCase())?.id).filter(Boolean),

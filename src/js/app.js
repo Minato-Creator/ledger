@@ -2,6 +2,7 @@
    app.js — boot, sidebar, routing.
    ============================================================ */
 import { store, isSupported, isTauri } from './store.js';
+import { fs } from './fs.js';
 import { el, icon, clear, toast } from './ui.js';
 import * as c from './calc.js';
 import { dashboard } from './views/dashboard.js';
@@ -14,8 +15,10 @@ import { calendar } from './views/calendar.js';
 import { analytics } from './views/analytics.js';
 import { playbook } from './views/playbook.js';
 import { replay } from './views/replay.js';
+import { importTrades } from './views/import.js';
 
 const root = document.getElementById('app');
+const embeddedHere = () => { try { return window.self !== window.top; } catch { return true; } };
 
 const nav = {
   go(hash) { if (location.hash === hash) render(); else location.hash = hash; },
@@ -40,10 +43,12 @@ function gate({ mode }) {
     el('h1', {}, mode === 'needs-permission' ? 'Reconnect your journal' : 'Choose where your journal lives'),
   );
 
-  if (!supported) {
+  if (!supported || !fs.canChooseFolder) {
     card.append(
-      el('p', { class: 'warn' }, 'This browser cannot open a folder.'),
-      el('p', {}, 'Ledger keeps your journal as real files on your disk, which needs the File System Access API — available in Chrome and Edge on desktop. Open this page in one of those and it will work.'),
+      el('p', { class: 'warn' }, 'This page cannot open a folder.'),
+      el('p', {}, embeddedHere()
+        ? 'It is running inside another page, and browsers never allow a preview frame to reach your disk. Download this file and open it directly and it will work.'
+        : 'Folder access needs Chrome or Edge on desktop, served from a real address rather than a double-clicked file.'),
       el('p', {}, 'The desktop app has none of this in its way — it opens straight onto your journal.'),
     );
     return el('div', { class: 'gate' }, card);
@@ -149,17 +154,34 @@ function sidebar() {
     el('div', { class: 'side-foot' },
       /* Just the folder's name. What it is, and that copying it is the backup,
          is on the tooltip rather than taking up three lines of the sidebar. */
-      el('div', { class: 'side-folder', title: 'Journal folder — copy it to back up' },
-        icon('folder', 13, 'var(--grey-5)', 1.8),
-        el('span', { class: 'm' }, store.folderName || '—')),
-      el('button', { class: 'acct-item', style: { background: base === '#/settings' ? 'var(--inset)' : 'transparent' },
-        onClick: () => nav.go('#/settings') },
-        el('span', { style: { width: '28px', height: '28px', borderRadius: '10px', background: 'var(--orange)', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
-          el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-8)' } }, 'M')),
-        el('span', { style: { minWidth: 0 } },
-          el('span', { style: { display: 'block', fontSize: '12px', color: '#fff', lineHeight: 1.2 } }, 'Minato'),
-          el('span', { class: 'm', style: { display: 'block', fontSize: '10px', color: 'var(--grey-3)' } }, 'Settings'))),
+      store.isNative || fs.kind === 'browser'
+        ? el('div', { class: 'side-folder', title: 'Journal folder — copy it to back up' },
+            icon('folder', 13, 'var(--grey-5)', 1.8),
+            el('span', { class: 'm' }, store.folderName || '—'))
+        : null,
+      /* Your name if you have given one, and the row simply reads Settings if
+         you have not. Nobody should have to look at a stranger's initials. */
+      settingsRow(base),
     ));
+}
+
+/* The foot of the sidebar. Two lines with a name, one line without. */
+function settingsRow(base) {
+  const who = store.userName;
+  const initials = who.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  return el('button', { class: 'acct-item', style: { background: base === '#/settings' ? 'var(--inset)' : 'transparent' },
+    onClick: () => nav.go('#/settings') },
+    el('span', { style: { width: '28px', height: '28px', borderRadius: '10px', flex: 'none',
+                          background: who ? 'var(--orange)' : 'var(--inset-2, var(--grey-8))',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+      who ? el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-8)' } }, initials)
+          : icon('user', 15, 'var(--grey-4)', 1.7)),
+    who
+      ? el('span', { style: { minWidth: 0 } },
+          el('span', { style: { display: 'block', fontSize: '12px', color: '#fff', lineHeight: 1.2,
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, who),
+          el('span', { class: 'm', style: { display: 'block', fontSize: '10px', color: 'var(--grey-3)' } }, 'Settings'))
+      : el('span', { style: { fontSize: '12px', color: '#fff' } }, 'Settings'));
 }
 
 /* ---------- router ---------- */
@@ -172,6 +194,7 @@ function route() {
     case 'trades':    return trades(store, nav);
     case 'new':       return addTrade(store, nav);
     case 'edit':      return addTrade(store, nav, arg);
+    case 'import':    return importTrades(store, nav);
     case 'trade':     return tradeDetail(store, nav, arg);
     case 'accounts':  return accounts(store, nav);
     case 'settings':  return settings(store, nav);
@@ -188,6 +211,7 @@ function route() {
    looking at, or the unit everything is read in. A filter, a stepper or a
    month step re-renders without replaying anything. */
 let lastView = null;
+let wasSolo = false;
 function render() {
   const hash = location.hash || '#/';
   const [, seg, arg] = hash.split('/');
@@ -195,9 +219,22 @@ function render() {
   const entered = key !== lastView;
   lastView = key;
 
+  /* First run is one decision. Until an account exists there is nothing for a
+     sidebar to navigate to, so it is not drawn at all — the setup form has the
+     whole window. It arrives, once, the moment the account does. */
+  const solo = !store.accounts.length && seg !== 'settings';
+  const arriving = wasSolo && !solo;
+  wasSolo = solo;
+
   clear(root);
   const main = el('div', { class: 'main' + (entered ? ' enter' : '') }, route());
-  root.append(sidebar(), main);
+  root.classList.toggle('is-solo', solo);
+  if (solo) root.append(main);
+  else {
+    const side = sidebar();
+    if (arriving) side.classList.add('is-new');
+    root.append(side, main);
+  }
 
   /* Take the flag off once everything has played. Left on, it would animate
      anything inserted into the view later — an inline editor, a confirm box —

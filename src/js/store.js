@@ -6,7 +6,9 @@
    This file only knows about accounts, trades, playbook and replay.
    ============================================================ */
 
-import { sessionFor, UNITS, todayISO } from './calc.js';
+import { sessionFor, UNITS, todayISO, readableOn, lift, sink } from './calc.js';
+import { findBackground, scrimFor } from './backgrounds.js';
+import { SLOTS, shotName, urlFor, forgetUrl } from './shots.js';
 import { fs, isTauri } from './fs.js';
 export { todayISO, isTauri };
 
@@ -18,6 +20,75 @@ export const FILES = {
 };
 
 export function isSupported() { return fs.isSupported(); }
+
+export const DEFAULT_COLOURS = { profit: '#18AC65', loss: '#F4624A' };
+
+/* Anything that needs the colour at partial opacity — a gradient under the
+   equity curve, a shaded calendar day, a chip behind a direction — needs the
+   channels, not the hex. Published alongside so `rgba(var(--profit-rgb), .3)`
+   follows the same setting. */
+function rgbTriplet(hex) {
+  const m = String(hex).replace('#', '');
+  const n = m.length === 3 ? m.split('').map(c => c + c).join('') : m;
+  return [0, 2, 4].map(i => parseInt(n.slice(i, i + 2), 16)).join(', ');
+}
+
+/* One place decides what the app looks like. The chosen profit and loss
+   colours are written onto the root as the same variables the views already
+   use, so nothing below has to know they are configurable. */
+/* The picture behind everything, and whether the panels let it through.
+
+   Both are written onto the root element so every screen inherits them without
+   a single view knowing they exist. A background is held down by a scrim tuned
+   to the picture and to the theme — a bright photo under a dark interface needs
+   more holding down than a dark one does. */
+export function applySurface(background, glass, theme) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const bg = findBackground(background);
+  root.dataset.glass = glass ? 'on' : 'off';
+  if (!bg) {
+    root.removeAttribute('data-bg');
+    root.style.removeProperty('--bg-image');
+    root.style.removeProperty('--bg-scrim');
+    return;
+  }
+  /* Enough to hold the picture down behind small text, not so much that the
+     picture stops being a picture. It does not depend on the theme: Ledger's
+     panels are dark and its writing is light in both, so what the scrim has to
+     protect is the same either way. */
+  const scrim = scrimFor(bg);
+  root.dataset.bg = bg.id;
+  root.style.setProperty('--bg-image', `url("${bg.url}")`);
+  root.style.setProperty('--bg-scrim', String(scrim));
+}
+
+export function applyTheme(theme, colours) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const dark = theme === 'dark';
+  root.dataset.theme = dark ? 'dark' : 'light';
+
+  const { profit, loss } = { ...DEFAULT_COLOURS, ...(colours || {}) };
+  root.style.setProperty('--green', profit);
+  root.style.setProperty('--orange', loss);
+  root.style.setProperty('--profit', profit);
+  root.style.setProperty('--loss', loss);
+  root.style.setProperty('--profit-rgb', rgbTriplet(profit));
+  root.style.setProperty('--loss-rgb', rgbTriplet(loss));
+  // The pale cards are pale in light mode and dark in dark mode, so the
+  // readable variant flips with the theme.
+  root.style.setProperty('--pos-light', readableOn(profit, dark ? 'dark' : 'light'));
+  root.style.setProperty('--neg-light', readableOn(loss, dark ? 'dark' : 'light'));
+  /* For writing laid over a tint of its own colour. The calendar's cells are
+     dark in both themes, so this one does not flip. */
+  root.style.setProperty('--profit-ink', lift(profit));
+  root.style.setProperty('--loss-ink', lift(loss));
+  /* And for a cell at full strength, where the tint is nearly the colour
+     itself and the writing has to go the other way. */
+  root.style.setProperty('--profit-deep', sink(profit));
+  root.style.setProperty('--loss-deep', sink(loss));
+}
 
 /* ---------- the store ---------- */
 class Store {
@@ -56,6 +127,9 @@ class Store {
   get folderName() { return fs.folderName; }
   get folderPath() { return fs.folderPath; }
   get isNative()   { return fs.kind === 'native'; }
+  get canChooseFolder() { return fs.canChooseFolder; }
+  get isLocal()    { return fs.kind === 'local'; }
+  get isPreview()  { return fs.kind === 'memory'; }
 
   /* ---------- files ----------
      A name may carry folder segments, e.g. 'replay/weeks.json'. A file that
@@ -86,6 +160,8 @@ class Store {
     ]);
     this.data = { accounts, trades, playbook, replay };
     this.migrate();
+    applyTheme(this.theme, this.colours);
+    applySurface(this.background, this.glass, this.theme);
 
     // A brand new folder gets its scaffolding written out immediately, so the
     // user can see real files appear rather than wondering if it worked.
@@ -148,7 +224,32 @@ class Store {
   get playbook()      { return this.data.playbook; }
   get replayWeeks()   { return this.data.replay.weeks; }
 
+  /* ============================================================
+     Closed trades, and trades still running
+
+     A trade with no result is not a break-even trade. It has no outcome, no R
+     and no place in a win rate, so `tradesFor` — which every screen in the app
+     is built on — hands back only the finished ones. Nothing had to be
+     changed anywhere else for the statistics to stay honest, which is the
+     whole reason the filter lives here rather than in each view.
+
+     Open trades are asked for by name, by the one screen that wants them.
+     ============================================================ */
+  static isOpen = t => t && t.status === 'open';
+
   tradesFor(accountId) {
+    return this.allTradesFor(accountId).filter(t => t.status !== 'open');
+  }
+
+  /** Still running. Oldest first — the one you opened longest ago is the one
+      you have most likely forgotten to close. */
+  openFor(accountId) {
+    return this.trades
+      .filter(t => t.accountId === accountId && t.status === 'open')
+      .sort((a, b) => (a.date + (a.timeOpen || '')).localeCompare(b.date + (b.timeOpen || '')));
+  }
+
+  allTradesFor(accountId) {
     return this.trades
       .filter(t => t.accountId === accountId)
       .sort((a, b) => (b.date + (b.timeClose || '')).localeCompare(a.date + (a.timeClose || '')));
@@ -157,6 +258,67 @@ class Store {
   /* Which unit every figure is read in. A display preference, so it lives
      with the account list rather than with any one account. */
   get displayUnit() { return this.data.accounts.displayUnit || '$'; }
+
+  /* Whose journal this is. Only ever shown at the foot of the sidebar, and
+     empty is a perfectly good answer — the row just reads Settings then. */
+  get userName() { return this.data.accounts.userName || ''; }
+  async setUserName(name) {
+    this.data.accounts.userName = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 32);
+    await this.save('accounts');
+  }
+
+  /* Light or dark. A display preference, so it sits with the account list
+     rather than inside any one account, and it is applied before the first
+     paint so the app never flashes the wrong theme. */
+  get theme() { return this.data.accounts.theme === 'dark' ? 'dark' : 'light'; }
+  get colours() { return { ...DEFAULT_COLOURS, ...(this.data.accounts.colours || {}) }; }
+
+  /* What is behind the app, and whether the panels are see-through. Display
+     preferences, so they live with the account list rather than inside any one
+     account. */
+  get background() { return this.data.accounts.background || ''; }
+  get glass()      { return !!this.data.accounts.glass; }
+
+  async setTheme(t) {
+    this.data.accounts.theme = t === 'dark' ? 'dark' : 'light';
+    applyTheme(this.theme, this.colours);
+    applySurface(this.background, this.glass, this.theme);
+    await this.save('accounts');
+  }
+  async setColour(which, hex) {
+    this.data.accounts.colours = { ...this.colours, [which]: hex };
+    applyTheme(this.theme, this.colours);
+    await this.save('accounts');
+  }
+  /**
+   * Choose a picture — and, the very first time one is ever chosen, turn the
+   * glass on with it.
+   *
+   * A picture behind solid panels only shows in the gutters, which is not what
+   * anyone is picturing when they pick one. So the first choice makes the
+   * introduction, once, and says so. After that the two are independent and
+   * nothing touches the glass again: switching pictures later is switching
+   * pictures, and a setting you have had an opinion about is yours.
+   *
+   * Returns true when it did that, so the view can mention it rather than
+   * changing something behind your back.
+   */
+  async setBackground(id) {
+    const introduce = !!id && !this.data.accounts.glassNudged && !this.glass;
+    this.data.accounts.background = id || '';
+    if (id) this.data.accounts.glassNudged = true;
+    if (introduce) this.data.accounts.glass = true;
+    applySurface(this.background, this.glass, this.theme);
+    await this.save('accounts');
+    return introduce;
+  }
+  async setGlass(on) {
+    this.data.accounts.glass = !!on;
+    /* Having an opinion about the glass counts as having met it. */
+    this.data.accounts.glassNudged = true;
+    applySurface(this.background, this.glass, this.theme);
+    await this.save('accounts');
+  }
   async setDisplayUnit(u) {
     this.data.accounts.displayUnit = UNITS.includes(u) ? u : '$';
     await this.save('accounts');
@@ -207,8 +369,50 @@ class Store {
   }
 
   async deleteTrade(id) {
-    this.data.trades.trades = this.trades.filter(t => t.id !== id);
+    /* The charts go with the trade. Leaving them behind would quietly grow a
+       folder of pictures of trades that no longer exist. */
+    const t = this.trades.find(x => x.id === id);
+    if (t) for (const slot of SLOTS) await this.clearShot(t, slot.key);
+    this.data.trades.trades = this.trades.filter(x => x.id !== id);
     await this.save('trades');
+  }
+
+  /* ============================================================
+     Screenshots
+
+     The picture is written to the journal and the trade keeps only its name,
+     which is why a screenshot never bloats trades.json and why the folder
+     stays browsable. Writing happens after the trade has an id, so the two
+     can never disagree about what a file is called.
+     ============================================================ */
+  async putShot(tradeId, slot, blob) {
+    const name = shotName(tradeId, slot);
+    await fs.ensureDir('screenshots');
+    await fs.writeImage(name, blob);
+    forgetUrl(name);                    // any cached url now points at the old picture
+    const field = SLOTS.find(s => s.key === slot)?.field;
+    const t = this.trades.find(x => x.id === tradeId);
+    if (t && field) { t[field] = name; await this.save('trades'); }
+    return name;
+  }
+
+  async clearShot(trade, slot) {
+    const field = SLOTS.find(s => s.key === slot)?.field;
+    if (!trade || !field || !trade[field]) return;
+    const name = trade[field];
+    try { await fs.deleteImage(name); } catch { /* the record matters more than the file */ }
+    forgetUrl(name);
+    trade[field] = null;
+    await this.save('trades');
+  }
+
+  /** A url the app can put in an <img>, or null if the picture has gone. */
+  async shotUrl(name) {
+    if (!name) return null;
+    try {
+      const blob = await fs.readImage(name);
+      return blob ? urlFor(name, blob) : null;
+    } catch { return null; }
   }
 }
 

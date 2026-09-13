@@ -44,12 +44,45 @@ export function calendar(store, nav) {
 
   // The biggest single day in the month sets full intensity.
   const peak = Math.max(1, ...[...daily.values()].map(v => Math.abs(valueOf(v))));
+  /* A cell is a tint of the profit or loss colour, and its writing is that same
+     colour taken light or taken dark. Which of the two reads better is not
+     something a fixed alpha threshold can answer — a pale yellow at 70% is
+     already brighter than a deep red at 95% — so the tint is mixed down over
+     the card it sits on and both candidates are measured against the result.
+     Whichever wins, wins. That way the writing keeps working through nine
+     profit colours and nine loss colours without anyone tuning a number.
+
+     The calendar's card is dark in both themes, which is why one surface value
+     serves both. */
+  const SURFACE = [17, 19, 18];
+  const readVar = name => (typeof getComputedStyle === 'function'
+    ? getComputedStyle(document.documentElement).getPropertyValue(name).trim() : '');
+  const triplet = (name) => {
+    const n = readVar(name).split(',').map(x => Number(x.trim()));
+    return n.length === 3 && n.every(Number.isFinite) ? n : [128, 128, 128];
+  };
+  const over = (rgb, a) => rgb.map((x, i) => x * a + SURFACE[i] * (1 - a));
+  const INK = {
+    up:   { tint: triplet('--profit-rgb'), light: readVar('--profit-ink'), dark: readVar('--profit-deep') },
+    down: { tint: triplet('--loss-rgb'),   light: readVar('--loss-ink'),   dark: readVar('--loss-deep') },
+  };
+
   const shade = (v) => {
     const val = valueOf(v);
-    if (val === 0) return { bg: 'var(--grey-7)', strong: false, up: false };
+    if (val === 0) return { bg: 'var(--grey-7)', ink: 'var(--grey-1)', flat: true, up: false };
     const step = Math.abs(val) / peak;
     const alpha = step > .75 ? .95 : step > .45 ? .70 : step > .18 ? .48 : .28;
-    return { bg: `rgba(${val > 0 ? '24,172,101' : '244,98,74'},${alpha})`, strong: alpha > .9, up: val > 0 };
+    const up = val > 0;
+    const set = up ? INK.up : INK.down;
+    const bg = over(set.tint, alpha);
+    const light = c.contrast(set.light, bg), dark = c.contrast(set.dark, bg);
+    return {
+      bg: `rgba(var(${up ? '--profit-rgb' : '--loss-rgb'}), ${alpha})`,
+      ink: dark > light ? (up ? 'var(--profit-deep)' : 'var(--loss-deep)')
+                        : (up ? 'var(--profit-ink)'  : 'var(--loss-ink)'),
+      strong: dark > light,
+      up,
+    };
   };
 
   const cellText = (v) => cellMode === 'count' ? String(v.count)
@@ -93,29 +126,33 @@ export function calendar(store, nav) {
   for (let d = 1; d <= daysInMonth; d++) {
     const date = iso(y, m, d);
     const v = daily.get(date);
-    const weekend = dow(y, m, d) >= 5;
-    const future = date > today;
+    const past = date < today;
     const isToday = date === today;
     const ring = isToday ? '2px solid var(--blue)' : 'none';
 
     if (!v) {
       cells.push(el('div', {
-        style: { borderRadius: '16px', padding: '9px 11px', background: (weekend || future) ? '#262626' : 'var(--grey-9)',
+        style: { borderRadius: '16px', padding: '9px 11px', background: past ? 'var(--cell-quiet)' : 'var(--cell)',
                  outline: ring, outlineOffset: '1px' } },
         el('span', { class: 'm', style: { fontSize: '11px', color: isToday ? 'var(--blue-surface)' : 'var(--grey-6)' } }, String(d))));
       continue;
     }
 
     const sh = shade(v);
-    const ink = sh.strong ? (sh.up ? '#08301D' : '#3D1108') : '#FFFFFF';
+    /* The writing belongs to the day it is written on. At full strength the
+       cell is nearly the colour itself, so the text goes dark to sit on it;
+       everywhere else it takes the same hue lifted clear of the tint, which
+       keeps a green day green and follows whatever colours are set. A flat
+       day has no colour to borrow. */
+    const ink = sh.ink;
     cells.push(el('button', {
       style: { borderRadius: '16px', padding: '9px 11px', background: sh.bg, textAlign: 'left',
                display: 'flex', flexDirection: 'column', outline: ring, outlineOffset: '1px' },
       title: `${c.longDate(date)} · ${v.count} trade${v.count === 1 ? '' : 's'} · ${c.money(v.net, { currency: cur })} · ${c.rFmt(v.r)} · ${c.pctSigned(c.asPercent(acct, v.net))}`,
       onClick: () => nav.go('#/trades') },
       el('div', { style: { display: 'flex', alignItems: 'baseline' } },
-        el('span', { class: 'm', style: { fontSize: '11px', color: sh.strong ? ink : 'var(--grey-1)' } }, String(d)),
-        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '9.5px', opacity: .65, color: ink } }, String(v.count))),
+        el('span', { class: 'm', style: { fontSize: '11px', opacity: sh.strong ? 1 : .8, color: ink } }, String(d)),
+        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '9.5px', opacity: .6, color: ink } }, String(v.count))),
       el('span', { class: 'm', style: { marginTop: 'auto', fontSize: '13px', letterSpacing: '-.01em', color: ink } }, cellText(v)),
     ));
   }
@@ -132,9 +169,9 @@ export function calendar(store, nav) {
                          gridTemplateRows: `repeat(${rows},minmax(0,1fr))`, gap: '6px' } }, ...cells),
     el('div', { style: { display: 'flex', alignItems: 'center', gap: '7px', paddingTop: '14px' } },
       el('span', { class: 'm', style: { fontSize: '10px', color: 'var(--grey-5)' } }, 'loss'),
-      ...[.95, .70, .48, .28].map(a => swatch(`rgba(244,98,74,${a})`)),
+      ...[.95, .70, .48, .28].map(a => swatch(`rgba(var(--loss-rgb), ${a})`)),
       swatch('var(--grey-9)'),
-      ...[.28, .48, .70, .95].map(a => swatch(`rgba(24,172,101,${a})`)),
+      ...[.28, .48, .70, .95].map(a => swatch(`rgba(var(--profit-rgb), ${a})`)),
       el('span', { class: 'm', style: { fontSize: '10px', color: 'var(--grey-5)' } }, 'profit'),
       ),
   );
@@ -242,7 +279,7 @@ export function calendar(store, nav) {
             el('div', { style: { flex: '1', height: '8px', borderRadius: '4px', background: 'var(--grey-9)', overflow: 'hidden',
                                  boxShadow: target ? 'inset 0 0 0 1px var(--grey-7)' : 'none' } },
               el('div', { class: 'bar-fill', style: { width: Math.min(100, Math.abs(val) / weekScale * 100) + '%', height: '100%', borderRadius: '4px',
-                                   background: val >= 0 ? (hit ? 'var(--green)' : 'rgba(24,172,101,.62)') : 'var(--orange)' } })),
+                                   background: val >= 0 ? (hit ? 'var(--green)' : 'rgba(var(--profit-rgb), .62)') : 'var(--orange)' } })),
             target && w.count
               ? el('span', { class: 'm', style: { fontSize: '10px', width: '34px', textAlign: 'right',
                     color: hit ? 'var(--green)' : 'var(--grey-5)' } },

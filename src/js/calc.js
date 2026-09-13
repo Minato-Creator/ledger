@@ -19,8 +19,20 @@ export function rMultiple(account, trade) {
   return Number(trade.netResult) / r;
 }
 
-/** win | loss | breakeven — from the typed result alone. */
+/**
+ * win | loss | breakeven.
+ *
+ * A trade can be called break-even and still have moved the account a dollar
+ * or two — commission, slippage, a partial fill. When it has been called, that
+ * is the answer, and the exact amount still counts towards the account's
+ * total. The sign of the result only decides when nobody said.
+ *
+ * Only break-even is ever stored, because it is the only label the sign can
+ * disagree with: a win is entered as a positive number and a loss as a
+ * negative one, so those two never need telling.
+ */
 export function outcome(trade) {
+  if (trade && trade.outcome === 'breakeven') return 'breakeven';
   const n = Number(trade.netResult);
   if (!isFinite(n)) return 'breakeven';
   if (n > 0) return 'win';
@@ -289,6 +301,73 @@ export function rDistribution(account, trades) {
 }
 
 /* ============================================================
+   Colour
+
+   Profit and loss are the two colours you are allowed to choose, and the
+   choice includes white and black — which is the whole problem. A colour that
+   works on the dark ground can vanish on the pale cards, and the other way
+   round. So the pale-card variant is not stored, it is derived: take the hue
+   and saturation you picked, and move the lightness until it can be read.
+   ============================================================ */
+function hexToHsl(hex) {
+  const m = String(hex).replace('#', '');
+  const n = m.length === 3 ? m.split('').map(c => c + c).join('') : m;
+  const r = parseInt(n.slice(0, 2), 16) / 255,
+        g = parseInt(n.slice(2, 4), 16) / 255,
+        b = parseInt(n.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d) {
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  const l = (max + min) / 2;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  return { h, s: s * 100, l: l * 100 };
+}
+
+function hslToHex(h, s, l) {
+  /* Out-of-range lightness produces channels above 255, which then stringify
+     as three-digit "hex" and silently break the colour. Clamp at the door. */
+  s = Math.max(0, Math.min(100, s)) / 100;
+  l = Math.max(0, Math.min(100, l)) / 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))));
+  return '#' + [f(0), f(8), f(4)].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+/** The same colour, pulled dark enough for a pale card or pale enough for a
+ *  dark one. Pure white and pure black are the cases this exists for. */
+export function readableOn(hex, surface) {
+  const { h, s, l } = hexToHsl(hex);
+  const L = surface === 'dark' ? Math.max(l, 62) : Math.min(l, 36);
+  return hslToHex(h, s, L);
+}
+
+/**
+ * The same colour, lifted well clear of itself.
+ *
+ * Used for writing that sits ON a tint of its own colour — a calendar cell,
+ * say. Matching the tint exactly would make the text vanish, so this keeps the
+ * hue and pushes the lightness up to where it separates. Saturation is eased
+ * off a little too, because a fully saturated pastel reads as a highlighter
+ * pen rather than as text.
+ */
+export function lift(hex) {
+  const { h, s } = hexToHsl(hex);
+  return hslToHex(h, Math.min(s, 62), 86);
+}
+
+/** The opposite move, for writing on a cell at full strength. */
+export function sink(hex) {
+  const { h, s } = hexToHsl(hex);
+  return hslToHex(h, Math.min(s, 60), 8);
+}
+
+/* ============================================================
    Display units
 
    Every figure in the app can be read three ways: in the account's money, as
@@ -310,8 +389,9 @@ export const UNIT_LABEL = { $: '$', '%': '%', R: 'R' };
 /** A signed percentage: +2.00%, −0.75%, 0.00%. */
 export function pctSigned(v, decimals = 2) {
   if (v == null || !isFinite(v)) return '—';
-  const pre = v < 0 ? '−' : (v > 0 ? '+' : '');
-  return `${pre}${Math.abs(v).toFixed(decimals)}%`;
+  const abs = Math.abs(v).toFixed(decimals);
+  const pre = roundsToZero(abs) ? '' : v < 0 ? '−' : '+';
+  return `${pre}${abs}%`;
 }
 
 /** The percentage a dollar amount is of this account's starting balance. */
@@ -495,17 +575,23 @@ export function targetToPercent(account, unit, n) {
 /* ============================================================
    Formatting
    ============================================================ */
+/* A figure that rounds to zero is shown without a sign. "−$0.00" is not a
+   smaller loss than "$0.00"; it is the same number wearing a minus sign, and
+   a scratch trade produces plenty of them. */
+const roundsToZero = str => Number(String(str).replace(/[^0-9.]/g, '')) === 0;
+
 export function money(n, { sign = true, currency = 'USD', decimals = 2 } = {}) {
   if (n == null || !isFinite(n)) return '—';
   const symbol = { USD: '$', EUR: '€', GBP: '£', AUD: 'A$', JPY: '¥' }[currency] || '$';
   const abs = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-  const pre = n < 0 ? '−' : (sign && n > 0 ? '+' : '');
+  const pre = roundsToZero(abs) ? '' : n < 0 ? '−' : (sign && n > 0 ? '+' : '');
   return `${pre}${symbol}${abs}`;
 }
 export function rFmt(r, decimals = 2) {
   if (r == null || !isFinite(r)) return '—';
-  const pre = r < 0 ? '−' : (r > 0 ? '+' : '');
-  return `${pre}${Math.abs(r).toFixed(decimals)}R`;
+  const abs = Math.abs(r).toFixed(decimals);
+  const pre = roundsToZero(abs) ? '' : r < 0 ? '−' : '+';
+  return `${pre}${abs}R`;
 }
 export function pct(v, decimals = 1) {
   if (v == null || !isFinite(v)) return '—';
@@ -535,4 +621,30 @@ export function durationFmt(mins) {
   if (mins == null) return '—';
   const h = Math.floor(mins / 60), m = mins % 60;
   return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
+}
+
+/* ------------------------------------------------------------------
+   Contrast, so a colour choice can be checked rather than guessed at.
+   WCAG relative luminance: sRGB channels linearised, then weighted.
+   Both arguments may be a hex string or an [r,g,b] of 0-255 values.
+   ------------------------------------------------------------------ */
+function toRGB(c) {
+  if (Array.isArray(c)) return c;
+  const h = String(c).trim().replace('#', '');
+  const full = h.length === 3 ? h.split('').map(x => x + x).join('') : h;
+  const n = parseInt(full, 16);
+  return Number.isFinite(n) && full.length === 6
+    ? [(n >> 16) & 255, (n >> 8) & 255, n & 255] : [128, 128, 128];
+}
+function relLuminance(c) {
+  const [r, g, b] = toRGB(c).map(v => {
+    const x = Math.max(0, Math.min(255, v)) / 255;
+    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+/** Contrast ratio between two colours, 1 (identical) to 21 (black on white). */
+export function contrast(a, b) {
+  const la = relLuminance(a), lb = relLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }

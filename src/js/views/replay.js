@@ -146,7 +146,7 @@ export function replay(store, nav) {
       const share = setups ? took / setups : 0;
       h = 8 + share * 58;
       border = 'none';
-      bg = share >= .8 ? 'var(--green)' : share >= .5 ? 'rgba(24,172,101,.6)' : 'var(--orange)';
+      bg = share >= .8 ? 'var(--green)' : share >= .5 ? 'rgba(var(--profit-rgb), .6)' : 'var(--orange)';
       title = `${k} — you took ${took} of ${setups} replay setup${setups === 1 ? '' : 's'}`;
     } else {
       title = `${k} — no replay imported${lw.length ? ` · ${lw.length} live trade${lw.length === 1 ? '' : 's'}` : ''}`;

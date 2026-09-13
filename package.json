@@ -1,6 +1,6 @@
 {
   "name": "ledger",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "A trading journal that keeps your data as plain files in a folder you choose.",
   "type": "module",

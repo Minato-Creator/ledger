@@ -7,6 +7,7 @@
 import { el, icon, toast } from '../ui.js';
 import * as c from '../calc.js';
 import { toCSV, parseCSV, planImport, applyImport } from '../csv.js';
+import { BACKGROUNDS } from '../backgrounds.js';
 
 let pending = null;              // { fileName, size, records, plan }
 const COLOURS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
@@ -18,24 +19,10 @@ export function settings(store, nav) {
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Settings'),
     el('div', { class: 'spacer' }),
-    /* Native can move the journal; the browser cannot re-point a granted
-       folder handle without going through its own picker, so there it stays
-       a label. */
-    store.isNative
-      ? el('button', { class: 'm', title: (store.folderPath || '') + ' — click to move your journal somewhere else',
-          style: { fontSize: '11.5px', color: 'var(--grey-8)', background: 'var(--grey-2)',
-                   borderRadius: 'var(--r-pill)', padding: '5px 12px', display: 'inline-flex',
-                   alignItems: 'center', gap: '7px' },
-          onClick: async () => {
-            try {
-              if (await store.connect()) { toast('Journal moved to ' + store.folderName); nav.refresh(); }
-            } catch (e) { toast(e.message, 'bad'); }
-          } },
-          icon('folder', 12, 'var(--grey-8)', 1.8), store.folderName || 'Choose a folder')
-      : el('span', { class: 'm', title: 'Your journal folder — copy it to back up',
-          style: { fontSize: '11.5px', color: 'var(--grey-8)', background: 'var(--grey-2)',
-                   borderRadius: 'var(--r-pill)', padding: '5px 12px' } },
-          store.folderName ? 'Folder · ' + store.folderName : 'No folder'),
+    /* Wherever a folder can be chosen, this is the button that chooses it —
+       on the desktop app, and in any browser that will open one. Where it
+       cannot, the same pill just says where things are. */
+    folderPill(store, nav),
   );
 
   /* ============================================================
@@ -235,8 +222,26 @@ export function settings(store, nav) {
   }
   paintImport();
 
-  const backupCard = el('section', { class: 'card', style: { width: '380px', flex: 'none', alignSelf: 'flex-start' } },
+  const backupCard = el('section', { class: 'card', style: { flex: 'none' } },
     el('h2', {}, 'Backup'),
+    store.isLocal || store.isPreview
+      ? el('div', { style: { marginTop: '12px', background: 'var(--grey-9)', borderRadius: 'var(--r-inset)',
+                             padding: '12px 14px', fontSize: '12px', lineHeight: 1.5, color: 'var(--yellow)' } },
+          store.isPreview
+            ? 'This is a preview copy. Nothing is saved — close the tab and it is gone.'
+            : 'Your journal is saved on this computer, inside the browser. Clearing browsing data erases it, so export a backup now and then.',
+          store.isLocal && store.canChooseFolder
+            ? el('button', { class: 'm', style: { marginTop: '11px', display: 'inline-flex', alignItems: 'center',
+                  gap: '7px', fontSize: '11px', color: 'var(--grey-8)', background: 'var(--grey-1)',
+                  borderRadius: 'var(--r-pill)', padding: '5px 11px' },
+                onClick: async () => {
+                  try {
+                    if (await store.connect()) { toast('Journal is now in ' + store.folderName); nav.refresh(); }
+                  } catch (e) { if (e.name !== 'AbortError') toast(e.message, 'bad'); }
+                } },
+                icon('folder', 12, 'var(--grey-8)', 1.8), 'Keep it in a folder instead')
+            : null)
+      : null,
     el('div', { style: { marginTop: '18px', display: 'flex', alignItems: 'baseline', gap: '10px' } },
       countEl, metaEl),
     el('div', { style: { marginTop: '13px', display: 'flex', alignItems: 'center', gap: '8px' } },
@@ -247,7 +252,123 @@ export function settings(store, nav) {
     importBody,
   );
 
+  /* ============================================================
+     Appearance
+     ============================================================ */
+  /* Named colours people actually reach for, one row each, ending in a
+     neutral pair for anyone who wants the numbers to carry no colour at all. */
+  const PROFIT_COLOURS = [
+    ['#18AC65', 'Green'], ['#22C55E', 'Bright green'], ['#00C48C', 'Emerald'],
+    ['#0EA5A5', 'Teal'],  ['#0988F0', 'Blue'],        ['#7C5CFF', 'Purple'],
+    ['#FFB800', 'Yellow'], ['#E9E9E9', 'White'],      ['#3D3D3D', 'Black'],
+  ];
+  const LOSS_COLOURS = [
+    ['#F4624A', 'Coral'],  ['#E5342B', 'Red'],        ['#B3261E', 'Deep red'],
+    ['#FB7185', 'Pink'],   ['#F97316', 'Orange'],     ['#8C5A3C', 'Brown'],
+    ['#A855F7', 'Violet'], ['#E9E9E9', 'White'],      ['#3D3D3D', 'Black'],
+  ];
+
+  const swatches = (which, options, current) =>
+    el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '7px' } },
+      ...options.map(([hex, name]) => el('button', {
+        title: name,
+        style: { width: '24px', height: '24px', borderRadius: '8px', background: hex,
+                 boxShadow: current.toLowerCase() === hex.toLowerCase()
+                   ? '0 0 0 2px var(--card), 0 0 0 3.5px var(--ink)'
+                   : 'inset 0 0 0 1px rgba(128,128,128,.35)' },
+        onClick: async () => { await store.setColour(which, hex); nav.refresh(); } })));
+
+  const swatchRow = (label, sample, node, example = '+1.00R') =>
+    el('div', {},
+      el('div', { style: { display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '10px' } },
+        el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, label),
+        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: sample } }, example)),
+      node);
+
+  /* Whose journal this is. Saved as you leave the field rather than on every
+     keystroke, so the sidebar does not redraw itself letter by letter. */
+  const nameField = el('input', { class: 'm', value: store.userName, placeholder: 'Your name', maxLength: 32,
+    style: { width: '150px', background: 'var(--grey-7)', borderRadius: '10px',
+             padding: '6px 9px', fontSize: '11.5px', color: '#fff', textAlign: 'right' },
+    onChange: async e => { await store.setUserName(e.target.value); nav.refresh(); } });
+
+  const appearanceCard = el('section', { class: 'card', style: { flex: 'none' } },
+    el('h2', {}, 'Appearance'),
+    el('div', { style: { marginTop: '18px', display: 'flex', alignItems: 'center', gap: '10px' } },
+      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Name'),
+      el('div', { style: { marginLeft: 'auto' } }, nameField)),
+    el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
+    el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Theme'),
+      el('div', { class: 'theme-switch', style: { marginLeft: 'auto' } },
+        ...[['light', 'Light'], ['dark', 'Dark']].map(([v, label]) =>
+          el('button', { class: store.theme === v ? 'is-on' : '',
+            onClick: async () => { if (store.theme !== v) { await store.setTheme(v); nav.refresh(); } } }, label)))),
+    el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
+
+    /* Glass and the picture behind it are one idea, so they sit together. */
+    el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Liquid glass'),
+      el('div', { class: 'theme-switch', style: { marginLeft: 'auto' } },
+        ...[[false, 'Off'], [true, 'On']].map(([v, label]) =>
+          el('button', { class: store.glass === v ? 'is-on' : '',
+            onClick: async () => { if (store.glass !== v) { await store.setGlass(v); nav.refresh(); } } }, label)))),
+    el('div', { style: { marginTop: '18px' } },
+      el('span', { class: 'm', style: { display: 'block', marginBottom: '10px',
+                                        fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Background'),
+      el('div', { class: 'bg-picks' },
+        el('button', { class: 'bg-pick none' + (store.background ? '' : ' is-on'), title: 'No picture',
+          onClick: async () => { if (store.background) { await store.setBackground(''); nav.refresh(); } } },
+          el('span', {}, 'None')),
+        ...BACKGROUNDS.map(b => el('button', {
+          class: 'bg-pick' + (store.background === b.id ? ' is-on' : ''), title: b.name,
+          style: { backgroundImage: `url("${b.url}")` },
+          onClick: async () => {
+            if (store.background === b.id) return;
+            const introduced = await store.setBackground(b.id);
+            nav.refresh();
+            if (introduced) toast('Liquid glass turned on to show it through — switch it off any time');
+          } },
+          el('span', { class: 'name' }, b.name))))),
+
+    el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
+    el('div', { style: { display: 'flex', flexDirection: 'column', gap: '18px' } },
+      swatchRow('Profit', 'var(--profit)', swatches('profit', PROFIT_COLOURS, store.colours.profit)),
+      swatchRow('Loss', 'var(--loss)', swatches('loss', LOSS_COLOURS, store.colours.loss), '\u22121.00R')),
+    el('div', { class: 'm', style: { marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--grey-7)',
+                                     fontSize: '10.5px', lineHeight: 1.5, color: 'var(--grey-5)' } },
+      'Used everywhere a number is up or down. On the pale cards the same colour is darkened or lightened so it stays readable.'),
+  );
+
   refreshCounts();
   return el('div', { class: 'view' }, head,
-    el('div', { class: 'row', style: { flex: '1', minHeight: 0 } }, accountsCard, backupCard));
+    el('div', { class: 'row', style: { flex: '1', minHeight: 0 } },
+      accountsCard,
+      el('div', { style: { width: '380px', flex: 'none', display: 'flex', flexDirection: 'column',
+                           gap: '8px', alignSelf: 'flex-start', maxHeight: '100%', overflowY: 'auto' } },
+        backupCard, appearanceCard)));
+}
+
+/* Where the journal lives, and — when that is a choice — the way to change it. */
+function folderPill(store, nav) {
+  const pill = { fontSize: '11.5px', color: 'var(--grey-8)', background: 'var(--grey-2)',
+                 borderRadius: 'var(--r-pill)', padding: '5px 12px',
+                 display: 'inline-flex', alignItems: 'center', gap: '7px' };
+  if (!store.canChooseFolder) {
+    return el('span', { class: 'm', title: 'Your journal folder — copy it to back up', style: pill },
+      store.folderName ? 'Folder · ' + store.folderName : 'No folder');
+  }
+  const onFolder = store.isNative || !store.isLocal;
+  return el('button', { class: 'm', style: pill,
+    title: onFolder ? (store.folderPath || '') + ' — click to move your journal somewhere else'
+                    : 'Click to keep your journal in a folder on your computer instead',
+    onClick: async () => {
+      try {
+        if (await store.connect()) { toast('Journal is now in ' + store.folderName); nav.refresh(); }
+      } catch (e) { if (e.name !== 'AbortError') toast(e.message, 'bad'); }
+    } },
+    icon('folder', 12, 'var(--grey-8)', 1.8),
+    onFolder
+      ? (store.isNative ? (store.folderName || 'Choose a folder') : 'Folder · ' + store.folderName)
+      : 'Use a folder');
 }

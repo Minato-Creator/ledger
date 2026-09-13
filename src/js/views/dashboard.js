@@ -98,7 +98,7 @@ export function dashboard(store, nav) {
         el('span', { style: { width: '14px', height: '2px', borderRadius: '2px', background: 'var(--green)' } }),
         el('span', { class: 'note' }, 'Closed equity')),
       dd ? el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '10px' } },
-        el('span', { style: { width: '14px', height: '9px', borderRadius: '2px', background: 'rgba(244,98,74,0.25)' } }),
+        el('span', { style: { width: '14px', height: '9px', borderRadius: '2px', background: 'rgba(var(--loss-rgb), .25)' } }),
         el('span', { class: 'note' }, 'Drawdown ' + (u === 'R' ? c.rFmt(-dd.amount) : f(-dd.amount, null)))) : null,
     ),
     el('div', { style: { marginTop: '10px' } },

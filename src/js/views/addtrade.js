@@ -1,6 +1,7 @@
 import { el, icon, toast } from '../ui.js';
 import * as c from '../calc.js';
 import { todayISO } from '../store.js';
+import { SLOTS, prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
 
 const ASSET_CLASSES = ['Forex', 'Futures', 'Commodities', 'Indices'];
 
@@ -13,13 +14,26 @@ export function addTrade(store, nav, existingId = null) {
      forgiving reader takes strings. Normalise once here so nothing downstream
      has to guess which it is holding. */
   const asText = v => (v == null ? '' : String(v));
+  /* A trade with no result yet is not a break-even trade, and the form must
+     not open as though it were. An empty result box stays empty, and the
+     win/loss switch starts on win rather than on break-even — otherwise
+     typing 1400 into the box and pressing save would store a zero, because
+     break-even means exactly that. */
+  const noResultYet = editing && editing.netResult == null;
   const f = editing ? {
     ...editing,
-    resultSign: c.outcome(editing),
+    resultSign: noResultYet ? 'win' : c.outcome(editing),
     entryPrice: asText(editing.entryPrice), stopLoss: asText(editing.stopLoss),
     takeProfit: asText(editing.takeProfit), exitPrice: asText(editing.exitPrice),
     size: asText(editing.size), riskPercent: asText(editing.riskPercent),
-    netResult: asText(Math.abs(Number(editing.netResult) || 0)),
+    /* A break-even keeps its sign in the box, since that is where it lives
+       for this one outcome; a win or a loss is unsigned and takes its sign
+       from the switch. */
+    netResult: noResultYet ? ''
+      : c.outcome(editing) === 'breakeven'
+        ? asText(Number(editing.netResult) || 0)
+        : asText(Math.abs(Number(editing.netResult) || 0)),
+    status: editing.status === 'open' ? 'open' : 'closed',
   } : {
     assetClass: 'Forex', pair: '', side: 'buy', setupId: pb.setups[0]?.id || null,
     sessionId: null, sessionAuto: true,
@@ -27,47 +41,53 @@ export function addTrade(store, nav, existingId = null) {
     entryPrice: '', stopLoss: '', takeProfit: '', exitPrice: '',
     size: '', sizeUnit: 'lots',
     riskPercent: acct.defaultRiskPercent, netResult: '', resultSign: 'win',
-    tagIds: [], grade: '', notes: '',
+    tagIds: [], grade: '', notes: '', status: 'closed',
   };
   if (editing) f.sessionAuto = false;
 
   /* ---------- live maths ---------- */
   const out = {};
   out.resultNote = el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '10.5px', color: 'var(--yellow)' } });
+  /* Profit and loss take the sign from the switch, so the amount is typed
+     once and unsigned. Break-even takes whatever you typed, sign and all: a
+     trade that scratched for minus a dollar is still a break-even trade, and
+     that dollar still left the account. */
   function signedResult() {
+    if (f.resultSign === 'breakeven') return c.parseNumber(f.netResult) ?? 0;
     const raw = Math.abs(c.parseNumber(f.netResult) ?? 0);
-    if (f.resultSign === 'loss') return -raw;
-    if (f.resultSign === 'breakeven') return 0;
-    return raw;
+    return f.resultSign === 'loss' ? -raw : raw;
   }
+  const isOpen = () => f.status === 'open';
+
   function recompute() {
+    const open = isOpen();
     const risk = c.parseNumber(f.riskPercent) ?? 0;
     const oneR = acct.startingBalance * risk / 100;
-    const typedResult = c.parseNumberOrNull(f.netResult);
-    const unreadable = String(f.netResult ?? '').trim() !== '' && typedResult == null;
-    const net = signedResult();
-    const r = oneR ? net / oneR : null;
+    const typedResult = open ? null : c.parseNumberOrNull(f.netResult);
+    const unreadable = !open && String(f.netResult ?? '').trim() !== '' && typedResult == null;
+    const net = open ? 0 : signedResult();
+    const r = open || !oneR ? null : net / oneR;
     const planned = c.plannedR({ entryPrice: f.entryPrice, stopLoss: f.stopLoss, takeProfit: f.takeProfit });
     const dur = c.durationMins(f.timeOpen, f.timeClose);
 
-    out.result.textContent = typedResult == null ? '—' : c.money(net, { currency: acct.currency });
-    out.result.className = 'kpi-val ' + (net > 0 ? 'pos' : net < 0 ? 'neg' : '');
-    out.rChip.textContent = c.rFmt(r);
-    out.rChip.style.background = net > 0 ? 'rgba(24,172,101,0.20)' : net < 0 ? 'rgba(244,98,74,0.20)' : 'var(--grey-1_7)';
-    out.rChip.style.color = net > 0 ? '#0F6B40' : net < 0 ? '#A33A2B' : 'var(--grey-8)';
-    out.ofAccount.textContent = acct.startingBalance
-      ? `${(Math.abs(net) / acct.startingBalance * 100).toFixed(2)}% of account` : '';
+    const flat = f.resultSign === 'breakeven';
+    out.result.textContent = open ? 'Open' : typedResult == null ? '—' : c.money(net, { currency: acct.currency });
+    /* A break-even is shown in its real amount but not in a colour: it moved
+       the account without being a win or a loss, and colouring it either way
+       would say otherwise. */
+    out.result.className = 'kpi-val ' + (open || flat || net === 0 ? '' : net > 0 ? 'pos' : 'neg');
+    out.result.style.color = open ? 'var(--yellow)' : '';
+    out.rShown.textContent = open ? '—' : c.rFmt(r);
+    out.rShown.style.color = open || flat || net === 0 ? 'var(--ink)'
+      : net > 0 ? 'var(--profit)' : 'var(--loss)';
     out.oneR.textContent = oneR ? c.money(oneR, { sign: false, currency: acct.currency }) : '—';
-    out.oneRHint.textContent = oneR ? `= ${c.money(oneR, { sign: false, currency: acct.currency })} of this account's ${c.money(acct.startingBalance, { sign: false, currency: acct.currency, decimals: 0 })}` : '';
-    out.riskShown.textContent = risk.toFixed(2) + '%';
-    out.netShown.textContent = typedResult == null ? '—' : c.money(net, { currency: acct.currency });
-    out.netShown.className = 'm';
-    out.netShown.style.color = net > 0 ? 'var(--green)' : net < 0 ? 'var(--orange)' : 'var(--grey-2)';
-    out.rShown.textContent = c.rFmt(r);
-    out.rShown.style.color = net > 0 ? 'var(--green)' : net < 0 ? 'var(--orange)' : 'var(--grey-2)';
     out.planned.textContent = planned == null ? '—' : `1 : ${planned.toFixed(2)}`;
     out.duration.textContent = c.durationFmt(dur);
-    out.save.disabled = !(f.pair && typedResult != null && risk > 0);
+    /* An open trade is asked for less: what you are in, and what you have put
+       at risk. The result is the one thing it cannot have yet. */
+    out.save.disabled = open ? !(f.pair && risk > 0) : !(f.pair && typedResult != null && risk > 0);
+    out.save.textContent = open ? (editing ? 'Save changes' : 'Save as open')
+                                : (editing ? 'Save changes' : 'Save trade');
     // A forgiving reader has to say what it could not read, or a typo just
     // greys the save button out with no reason given.
     out.resultNote.textContent = unreadable ? 'Cannot read that as an amount' : '';
@@ -83,27 +103,163 @@ export function addTrade(store, nav, existingId = null) {
 
   /* ---------- small builders ---------- */
   const field = (props) => el('input', { class: 'field', ...props });
-  const labelled = (label, node, hint) => el('div', {}, el('span', { class: 'lbl' }, label), node,
-    hint ? el('div', { class: 'm', style: { marginTop: '7px', fontSize: '10.5px', color: 'var(--grey-5)' } }, hint) : null);
+  const labelled = (label, node) => el('div', { style: { minWidth: 0 } },
+    el('span', { class: 'lbl' }, label), node);
 
   const bind = (key, opts = {}) => ({
     value: f[key] ?? '',
     onInput: e => { f[key] = e.target.value; if (opts.onSet) opts.onSet(); recompute(); },
   });
 
-  /* ---------- session chips ---------- */
-  const sessionWrap = el('div', { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' } });
+  /* ============================================================
+     Open or closed
+
+     Half the time a trade is logged the moment it is entered, and the exit
+     does not exist yet. Rather than make you invent a result — which would be
+     a lie sitting in your win rate — the trade can be saved as still running
+     and finished later. Until it is, it appears on the Trades page and in no
+     statistic anywhere.
+     ============================================================ */
+  const statusWrap = el('div', { class: 'seg' },
+    ...[['closed', 'Closed'], ['open', 'Still open']].map(([v, label]) =>
+      el('button', { type: 'button', class: f.status === v ? 'is-on' : '',
+        onClick: () => { if (f.status === v) return; f.status = v; paintStatus(); recompute(); } }, label)));
+
+  function paintStatus() {
+    const open = isOpen();
+    [...statusWrap.children].forEach((b, i) => b.classList.toggle('is-on', (i === 0) === !open));
+    /* A running trade has no result, so the field is not there. Nothing has
+       to say why: the figure at the top already reads Open. */
+    out.resultCell.hidden = open;
+    out.riskRow.style.gridTemplateColumns = open ? 'minmax(0,200px)' : 'minmax(0,200px) minmax(0,1fr)';
+    /* An exit price and a closing time are things a running trade has not got.
+       Greyed rather than removed, so it is obvious where they will go. */
+    for (const node of [out.exitField, out.closeField]) {
+      if (!node) continue;
+      node.disabled = open;
+      node.style.opacity = open ? '.38' : '';
+    }
+  }
+
+
+  /* ============================================================
+     The two charts
+
+     Nothing is written while you are typing. A screenshot is compressed the
+     moment it is dropped — so you see the real size straight away — and held
+     until the trade is saved, because a trade with no id has nothing to name
+     its files after. Editing an existing trade follows the same rule: the old
+     picture stays on disk until you press save.
+     ============================================================ */
+  const shots = {};        // slot -> { blob, from, to, width, height } staged
+  const dropped = {};      // slot -> true when an existing one is to be removed
+  const shotWrap = el('div', { class: 'shots-stack' });
+  let focusedSlot = SLOTS[0].key;
+
+  const existingShot = key => {
+    const field = SLOTS.find(s => s.key === key).field;
+    return !dropped[key] && editing ? (editing[field] || null) : null;
+  };
+
+  async function take(key, file) {
+    if (!file) return;
+    try {
+      const out = await prepare(file);
+      shots[key] = out;
+      dropped[key] = true;                 // whatever was there is being replaced
+      paintShots();
+      /* Re-encoding a screenshot almost always shrinks it, but a tiny flat
+         image can come out bigger, and claiming otherwise would be a lie. */
+      toast(out.to < out.from
+        ? `Chart added — ${readableSize(out.from)} down to ${readableSize(out.to)}`
+        : `Chart added — ${readableSize(out.to)}`);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  function clearShot(key) {
+    delete shots[key];
+    dropped[key] = true;
+    paintShots();
+  }
+
+  /* Which box a paste goes to is a class on an existing box, never a reason to
+     rebuild the row. Redrawing here is what broke the click: focus fires
+     before click, so replacing the boxes on focus destroyed the very button
+     the mouse was pressing, the click never landed, and the file picker never
+     opened. */
+  const zones = new Map();
+  function paintTargets() {
+    for (const [key, node] of zones) node.classList.toggle('is-target', key === focusedSlot);
+  }
+
+  function paintShots() {
+    zones.clear();
+    shotWrap.replaceChildren(...SLOTS.map(slot => {
+      const staged = shots[slot.key];
+      const kept = existingShot(slot.key);
+      const input = el('input', { type: 'file', accept: 'image/*', hidden: true,
+        onChange: e => { const f = e.target.files[0]; e.target.value = ''; take(slot.key, f); } });
+
+      const head = el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '7px' } },
+        el('span', { class: 'lbl', style: { margin: 0 } }, slot.label),
+        staged || kept
+          ? el('button', { type: 'button', class: 'm', style: { marginLeft: 'auto', fontSize: '10px', color: 'var(--grey-4)' },
+              onClick: () => clearShot(slot.key) }, 'Remove')
+          : null);
+
+      const zone = el('button', { type: 'button', class: 'shot-zone' + (focusedSlot === slot.key ? ' is-target' : ''),
+        onClick: () => { focusedSlot = slot.key; paintTargets(); input.click(); },
+        onFocus: () => { focusedSlot = slot.key; paintTargets(); },
+        onDragOver: e => { e.preventDefault(); zone.classList.add('is-over'); },
+        onDragLeave: () => zone.classList.remove('is-over'),
+        onDrop: e => { e.preventDefault(); zone.classList.remove('is-over'); take(slot.key, imageOnDrop(e)); } });
+
+      if (staged) {
+        zone.style.backgroundImage = `url("${URL.createObjectURL(staged.blob)}")`;
+        zone.append(el('span', { class: 'shot-tag' }, `${staged.width}×${staged.height} · ${readableSize(staged.to)}`));
+      } else if (kept) {
+        zone.classList.add('is-loading');
+        store.shotUrl(kept).then(url => {
+          if (url) { zone.classList.remove('is-loading'); zone.style.backgroundImage = `url("${url}")`; }
+          else zone.replaceChildren(el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--yellow)' } }, 'picture missing'));
+        });
+      } else {
+        zone.append(
+          icon('image', 19, 'var(--grey-5)', 1.6),
+          el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } }, 'Drop, paste or click'));
+      }
+      zones.set(slot.key, zone);
+      return el('div', { class: 'shot-slot' }, head, zone, input);
+    }));
+  }
+  paintShots();
+
+  /* Ctrl+V is how a screenshot actually arrives — nobody saves it to disk
+     first. It goes to whichever slot is highlighted, which starts as the entry
+     and follows whichever you last clicked, so two pastes in a row fill the
+     two charts in the order you would expect. */
+  function onPaste(e) {
+    const file = imageOnClipboard(e);
+    if (!file) return;
+    e.preventDefault();
+    const key = focusedSlot;
+    /* Once a paste lands, point at the other one. */
+    const other = SLOTS.find(s => s.key !== key);
+    if (other) focusedSlot = other.key;
+    paintTargets();
+    take(key, file);
+  }
+
+  /* ---------- session ----------
+     One is chosen in the end, so one control chooses it. Set from the open
+     time, overridden by picking. */
+  const sessionWrap = el('div', {});
   function paintSessions() {
-    sessionWrap.replaceChildren(
-      ...pb.sessions.map(s =>
-        el('button', { class: 'chip' + (f.sessionId === s.id ? ' is-on' : ''), type: 'button',
-          onClick: () => { f.sessionId = s.id; f.sessionAuto = false; paintSessions(); } }, s.name)),
-      // A gap between killzones is a real answer, not a blank one.
-      el('button', { class: 'chip' + (f.sessionId == null ? ' is-on' : ''), type: 'button',
-        style: { opacity: f.sessionId == null ? 1 : .7 },
-        onClick: () => { f.sessionId = null; f.sessionAuto = false; paintSessions(); } }, c.OUTSIDE),
-      el('span', { class: 'm', style: { fontSize: '10.5px', color: f.sessionAuto ? 'var(--grey-5)' : 'var(--yellow)', marginLeft: '4px' } },
-        f.timeOpen ? (f.sessionAuto ? 'from your open time' : 'set by hand') : ''));
+    const sel = el('select', { class: 'field',
+      onChange: e => { f.sessionId = e.target.value || null; f.sessionAuto = false; paintSessions(); } },
+      ...pb.sessions.map(x => el('option', { value: x.id, selected: f.sessionId === x.id, style: { background: '#363636' } }, x.name)),
+      el('option', { value: '', selected: f.sessionId == null, style: { background: '#363636' } }, c.OUTSIDE));
+    sessionWrap.replaceChildren(sel);
   }
   paintSessions();
 
@@ -167,19 +323,18 @@ export function addTrade(store, nav, existingId = null) {
   paintSign();
 
   /* ---------- panels ---------- */
-  out.result = el('div', { class: 'kpi-val', style: { marginTop: '14px', fontSize: '34px' } }, '—');
-  out.rChip = el('span', { class: 'm', style: { fontSize: '11px', borderRadius: 'var(--r-pill)', padding: '4px 11px', background: 'var(--grey-1_7)', color: 'var(--grey-8)' } }, '—');
-  out.ofAccount = el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-6)' } }, '');
-  out.oneR = el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: 'var(--ink-2)' } }, '—');
-  out.oneRHint = el('div', { class: 'm', style: { marginTop: '7px', fontSize: '10.5px', color: 'var(--grey-5)' } }, '');
-  out.riskShown = el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: 'var(--ink-2)' } }, '—');
-  out.netShown = el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px' } }, '—');
-  out.rShown = el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px' } }, '—');
-  out.planned = el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: 'var(--ink-2)' } }, '—');
-  out.duration = el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: 'var(--ink-2)' } }, '—');
+  /* The live maths reads across the top of the page now rather than down the
+     side of it, so every figure is one line high and the form gets the room.
+     The step-by-step version was a nice explanation the first week and a
+     column of wasted space every week after. */
+  const figure = (extra = {}) => el('div', { class: 'm', style: {
+    fontSize: '21px', letterSpacing: '-.02em', lineHeight: 1, color: 'var(--ink)', ...extra } }, '—');
 
-  const mathRow = (k, v) => el('div', { style: { display: 'flex', alignItems: 'baseline' } },
-    el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, k), v);
+  out.result = el('div', { class: 'kpi-val', style: { fontSize: '21px' } }, '—');
+  out.rShown = figure();
+  out.oneR = figure();
+  out.planned = figure();
+  out.duration = figure();
 
   out.save = el('button', { class: 'btn btn-primary', disabled: true, onClick: save }, editing ? 'Save changes' : 'Save trade');
 
@@ -191,11 +346,37 @@ export function addTrade(store, nav, existingId = null) {
       entryPrice: numOrNull(f.entryPrice), stopLoss: numOrNull(f.stopLoss),
       takeProfit: numOrNull(f.takeProfit), exitPrice: numOrNull(f.exitPrice),
       size: numOrNull(f.size), sizeUnit: f.sizeUnit,
-      riskPercent: c.parseNumber(f.riskPercent), netResult: signedResult(),
+      riskPercent: c.parseNumber(f.riskPercent),
       tagIds: f.tagIds, grade: f.grade || null, notes: f.notes || '',
+      status: isOpen() ? 'open' : 'closed',
     };
-    if (editing) { await store.updateTrade(editing.id, payload); toast('Trade updated'); }
-    else { await store.addTrade(payload); toast('Trade saved to ' + store.folderName); }
+    /* A running trade carries no result, no exit and no closing time — not a
+       zero, not an empty string. Anything that reads this trade later has to
+       be able to tell "nothing yet" from "nothing gained". */
+    if (isOpen()) {
+      payload.netResult = null;
+      payload.exitPrice = null;
+      payload.timeClose = null;
+    } else {
+      payload.netResult = signedResult();
+      /* Stored only when it is a break-even, because that is the only label
+         the amount cannot be read back from. */
+      payload.outcome = f.resultSign === 'breakeven' ? 'breakeven' : null;
+    }
+    let saved;
+    if (editing) { await store.updateTrade(editing.id, payload); saved = editing; }
+    else { saved = await store.addTrade(payload); }
+
+    /* Now the trade has an id, so its charts can be named after it. A removal
+       is applied before a replacement, so swapping one chart for another never
+       leaves the old file behind. */
+    for (const slot of SLOTS) {
+      if (dropped[slot.key]) await store.clearShot(saved, slot.key);
+      const staged = shots[slot.key];
+      if (staged) await store.putShot(saved.id, slot.key, staged.blob);
+    }
+
+    toast(editing ? 'Trade updated' : 'Trade saved to ' + store.folderName);
     nav.go('#/trades');
   }
 
@@ -204,102 +385,124 @@ export function addTrade(store, nav, existingId = null) {
     el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--grey-8)', borderRadius: 'var(--r-btn)', padding: '7px 13px' } },
       el('span', { style: { width: '7px', height: '7px', borderRadius: '2px', background: acct.color } }),
       el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-2)' } }, 'Saving to ', el('span', { style: { color: '#fff' } }, acct.name))),
+    statusWrap,
     el('div', { class: 'spacer' }),
+    editing ? null : el('button', { class: 'btn btn-ghost', onClick: () => nav.go('#/import') },
+      icon('upload', 14, 'var(--grey-3)', 1.8), 'Import CSV'),
     el('button', { class: 'btn btn-ghost', onClick: () => history.back() }, 'Cancel'),
     out.save,
   );
 
-  const form = el('section', { class: 'card', style: { width: '720px', flex: 'none', gap: '15px', overflow: 'hidden' } },
-    el('div', {}, el('span', { class: 'lbl' }, 'Asset class'),
-      el('div', { style: { display: 'flex', gap: '5px' } },
-        ...ASSET_CLASSES.map(a => el('button', { type: 'button', class: 'chip' + (f.assetClass === a ? ' is-on' : ''),
-          onClick: e => { f.assetClass = a; [...e.target.parentNode.children].forEach(x => x.classList.toggle('is-on', x === e.target)); } }, a)))),
+  /* The form is taller than it used to be — two charts is real estate — so it
+     scrolls rather than clipping whatever falls past the bottom. */
+  /* ============================================================
+     One card, two columns.
 
-    el('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' } },
+     Everything you type is the page now. What the numbers come to reads along
+     the top in a single line, where it can be glanced at, instead of down a
+     column beside the form, where it was taking a third of the width to
+     restate arithmetic you can already see happening.
+
+     The split is by how the fields are used, not by how many there are: the
+     left column is the trade as it happened, in the order you would recall it;
+     the right is what you make of it afterwards. Nothing scrolls.
+     ============================================================ */
+  /* ============================================================
+     The layout
+
+     One line of figures along the top, then the trade itself. No sentence on
+     the page explains a field — a label and a number are the whole design, and
+     anything that needed a caption to be understood has been replaced by
+     something that does not.
+
+     The left column is the trade, in five bands separated by a hairline: what
+     it was, where it went, what it risked, what it came from, what it was.
+     The right column is what it looked like and what you thought.
+     ============================================================ */
+  const cell = (label, value) => el('div', { class: 'ts-cell' },
+    el('div', { class: 'ts-lbl' }, label),
+    el('div', { class: 'ts-val' }, value));
+  const rule = () => el('i', {});
+
+  const strip = el('section', { class: 'card trade-strip' },
+    cell('Result', out.result), rule(),
+    cell('R', out.rShown), rule(),
+    cell('1R', out.oneR), rule(),
+    cell('Planned', out.planned), rule(),
+    cell('Time', out.duration));
+
+  const band = (...kids) => el('div', { class: 'band' }, ...kids);
+  const grid = (cols, ...kids) => el('div', { style: { display: 'grid', gridTemplateColumns: cols, gap: '14px' } }, ...kids);
+
+  const classSelect = el('select', { class: 'field',
+    onChange: e => { f.assetClass = e.target.value; } },
+    ...ASSET_CLASSES.map(a => el('option', { value: a, selected: f.assetClass === a, style: { background: '#363636' } }, a)));
+
+  const direction = el('div', { style: { display: 'flex', gap: '5px' } },
+    ...[['buy', '▲ Long', 'var(--profit)'], ['sell', '▼ Short', 'var(--loss)']].map(([v, label, col]) =>
+      el('button', { type: 'button', class: 'dir' + (f.side === v ? ' is-on' : ''),
+        style: { '--dir': col, '--dir-rgb': v === 'buy' ? 'var(--profit-rgb)' : 'var(--loss-rgb)' },
+        onClick: e => {
+          f.side = v;
+          [...e.currentTarget.parentNode.children].forEach(x => x.classList.toggle('is-on', x === e.currentTarget));
+        } }, label)));
+
+  out.riskRow = grid('minmax(0,200px) minmax(0,1fr)',
+    labelled('Risk %', el('div', { class: 'suffix' },
+      field({ inputmode: 'decimal', ...bind('riskPercent') }),
+      el('span', {}, '%'))),
+    out.resultCell = labelled('Net result', el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+      el('div', { class: 'prefix', style: { flex: '1' } },
+        el('span', {}, '$'),
+        field({ inputmode: 'decimal', placeholder: '0.00', ...bind('netResult') })),
+      signWrap, out.resultNote)));
+
+  const colLeft = el('div', { class: 'col' },
+    band(grid('minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.3fr)',
       labelled('Instrument', field({ placeholder: 'XAUUSD', ...bind('pair') })),
-      labelled('Direction', el('div', { style: { display: 'flex', gap: '5px', height: '42px' } },
-        ...[['buy', '▲ Long', 'var(--green)'], ['sell', '▼ Short', 'var(--orange)']].map(([v, label, col]) =>
-          el('button', { type: 'button', style: {
-              flex: '1', borderRadius: 'var(--r-field)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              gap: '5px', font: '400 12px var(--mono)',
-              background: f.side === v ? (v === 'buy' ? 'rgba(24,172,101,0.18)' : 'rgba(244,98,74,0.18)') : 'var(--grey-7)',
-              boxShadow: f.side === v ? `inset 0 0 0 1px ${col}` : 'none',
-              color: f.side === v ? col : 'var(--grey-3)' },
-            onClick: e => { f.side = v; [...e.target.parentNode.children].forEach((x, i) => {
-              const on = (i === 0 ? 'buy' : 'sell') === v; const cc = i === 0 ? 'var(--green)' : 'var(--orange)';
-              x.style.background = on ? (i === 0 ? 'rgba(24,172,101,0.18)' : 'rgba(244,98,74,0.18)') : 'var(--grey-7)';
-              x.style.boxShadow = on ? `inset 0 0 0 1px ${cc}` : 'none';
-              x.style.color = on ? cc : 'var(--grey-3)'; }); } }, label)))),
-      labelled('Setup', setupWrap)),
+      labelled('Class', classSelect),
+      labelled('Direction', direction))),
 
-    el('div', {}, el('span', { class: 'lbl' }, 'Session ',
-      el('span', { style: { textTransform: 'none', letterSpacing: 0, color: 'var(--grey-5)' } }, '— set from your open time, click to override')),
-      sessionWrap),
+    band(
+      grid('repeat(4,minmax(0,1fr))',
+        labelled('Entry', field({ inputmode: 'decimal', ...bind('entryPrice') })),
+        labelled('Stop', field({ inputmode: 'decimal', class: 'field is-stop', ...bind('stopLoss') })),
+        labelled('Target', field({ inputmode: 'decimal', ...bind('takeProfit') })),
+        labelled('Exit', out.exitField = field({ inputmode: 'decimal', ...bind('exitPrice') }))),
+      grid('repeat(4,minmax(0,1fr))',
+        labelled('Size', field({ inputmode: 'decimal', ...bind('size') })),
+        labelled('Date', field({ type: 'date', ...bind('date') })),
+        labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
+        labelled('Closed', out.closeField = field({ type: 'time', ...bind('timeClose') })))),
 
-    el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: '10px' } },
-      labelled('Entry', field({ inputmode: 'decimal', ...bind('entryPrice') })),
-      labelled('Stop', field({ inputmode: 'decimal', class: 'field is-stop', ...bind('stopLoss') })),
-      labelled('Target', field({ inputmode: 'decimal', ...bind('takeProfit') })),
-      labelled('Exit', field({ inputmode: 'decimal', ...bind('exitPrice') }))),
+    band(out.riskRow),
 
-    el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: '10px' } },
-      labelled('Size', field({ inputmode: 'decimal', placeholder: 'optional', ...bind('size') })),
-      labelled('Date', field({ type: 'date', ...bind('date') })),
-      labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
-      labelled('Closed', field({ type: 'time', ...bind('timeClose') }))),
+    band(grid('1fr 1fr',
+      labelled('Setup', setupWrap),
+      labelled('Session', sessionWrap))),
 
-    el('div', { style: { background: 'var(--grey-9)', borderRadius: '28px', padding: '16px 18px', boxShadow: 'inset 0 0 0 1px var(--grey-6)' } },
-      el('div', { style: { display: 'flex', alignItems: 'center', marginBottom: '12px' } },
-        el('span', { class: 'm', style: { fontSize: '10px', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--grey-1)' } }, 'You type these two'),
-        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '10.5px', color: 'var(--grey-5)' } }, 'everything else follows from them')),
-      el('div', { style: { display: 'grid', gridTemplateColumns: '210px 1fr', gap: '10px' } },
-        el('div', {}, el('span', { class: 'lbl' }, 'Risk on this trade'),
-          el('div', { style: { position: 'relative' } },
-            field({ inputmode: 'decimal', style: { background: 'var(--grey-6)', paddingRight: '34px' }, ...bind('riskPercent') }),
-            el('span', { class: 'm', style: { position: 'absolute', right: '15px', top: '12px', fontSize: '12px', color: 'var(--grey-2)', pointerEvents: 'none' } }, '%')),
-          out.oneRHint),
-        el('div', {}, el('span', { class: 'lbl' }, 'Net result — as your broker reports it'),
-          el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-            el('div', { style: { position: 'relative', flex: '1' } },
-              field({ inputmode: 'decimal', placeholder: '0.00', style: { background: 'var(--grey-6)', boxShadow: 'inset 0 0 0 1px var(--green)', paddingLeft: '26px' }, ...bind('netResult') }),
-              el('span', { class: 'm', style: { position: 'absolute', left: '15px', top: '12px', fontSize: '12px', color: 'var(--grey-3)', pointerEvents: 'none' } }, '$')),
-            signWrap),
-          el('div', { style: { display: 'flex', gap: '10px', marginTop: '7px' } },
-            el('div', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } }, 'Commission and swap already included.'),
-            out.resultNote)))),
+    band(labelled('Tags', tagWrap)),
 
-    el('div', {}, el('span', { class: 'lbl' }, 'Tags'), tagWrap),
-
-    el('div', { style: { flex: '1', minHeight: 0, display: 'flex', flexDirection: 'column' } },
+    el('div', { class: 'band', style: { flex: '1', minHeight: '120px', display: 'flex', flexDirection: 'column' } },
       el('span', { class: 'lbl' }, 'Notes'),
-      el('textarea', { class: 'field', style: { flex: '1' }, placeholder: 'What was the idea, and what would you change?',
+      el('textarea', { class: 'field', style: { flex: '1', minHeight: '90px' },
         oninput: e => { f.notes = e.target.value; } }, f.notes || '')),
   );
 
-  const side = el('aside', { style: { flex: '1', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' } },
-    el('div', { class: 'card light', style: { flex: 'none' } },
-      el('div', { class: 'eyebrow' }, 'Result'),
-      out.result,
-      el('div', { style: { marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' } }, out.rChip, out.ofAccount)),
-    el('div', { class: 'card', style: { flex: '1', gap: '14px' } },
-      el('div', { class: 'eyebrow' }, 'How R is worked out'),
-      el('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
-        mathRow('Account', el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: 'var(--ink-2)' } }, acct.name)),
-        mathRow('Starting balance', el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: 'var(--ink-2)' } },
-          c.money(acct.startingBalance, { sign: false, currency: acct.currency, decimals: 0 }))),
-        mathRow('Risk you set', out.riskShown),
-        mathRow('So 1R equals', out.oneR),
-        el('div', { style: { height: '1px', background: 'var(--grey-7)' } }),
-        mathRow('Result you typed', out.netShown),
-        mathRow('R = result ÷ 1R', out.rShown),
-        el('div', { style: { height: '1px', background: 'var(--grey-7)' } }),
-        mathRow('Planned R:R', out.planned),
-        mathRow('Time in trade', out.duration)),
-      ),
-  );
+  /* The charts get the whole right-hand side and stack, which is the shape a
+     chart actually is — wide. Two tall thin ones side by side was the worst of
+     both. */
+  const colRight = el('div', { class: 'col' }, band(shotWrap));
 
+  const form = el('section', { class: 'card roomy trade-form' }, colLeft, colRight);
+
+  /* Settle the open/closed state and fill the strip in before the page is
+     handed over, so an edit opens showing what the trade already came to
+     rather than a row of dashes. */
+  paintStatus();
   recompute();
-  return el('div', { class: 'view' }, head, el('div', { class: 'row', style: { flex: '1' } }, form, side));
+
+  return el('div', { class: 'view', onPaste }, head, strip, form);
 }
 
 /* Prices, sizes and the dollar result all go through the same forgiving

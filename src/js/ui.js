@@ -8,7 +8,7 @@ export function el(tag, props = {}, ...children) {
   for (const [k, v] of Object.entries(props)) {
     if (v == null || v === false) continue;
     if (k === 'class') node.className = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+    else if (k === 'style' && typeof v === 'object') setStyle(node, v);
     else if (k === 'html') node.innerHTML = v;
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'dataset') Object.assign(node.dataset, v);
@@ -20,6 +20,17 @@ export function el(tag, props = {}, ...children) {
     node.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
   return node;
+}
+
+/* Object.assign onto a style object silently drops custom properties — the
+   setter only understands named ones — so `--dir: red` would do nothing at
+   all. Anything starting with two dashes goes through setProperty instead. */
+function setStyle(node, styles) {
+  for (const [k, v] of Object.entries(styles)) {
+    if (v == null) continue;
+    if (k.startsWith('--')) node.style.setProperty(k, String(v));
+    else node.style[k] = v;
+  }
 }
 
 export function svg(tag, props = {}, ...children) {
@@ -50,6 +61,10 @@ const PATHS = {
   trash:     '<path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/>',
   pencil:    '<path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5z"/>',
   mark:      '<path d="M4 18 L9 9 L14 15 L20 5"/>',
+  image:     '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.5" cy="10" r="1.6"/><path d="M3.5 17l4.6-4.2a1.6 1.6 0 0 1 2.2 0L14 16"/><path d="M13.5 14.5l2.4-2.2a1.6 1.6 0 0 1 2.2 0l2.4 2.2"/>',
+  expand:    '<path d="M14 4h6v6"/><path d="M10 20H4v-6"/><path d="M20 4l-7 7"/><path d="M4 20l7-7"/>',
+  close:     '<path d="M6 6l12 12M18 6L6 18"/>',
+  user:      '<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6"/>',
   upload:    '<path d="M12 16V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>',
 };
 export function icon(name, size = 17, stroke = 'currentColor', width = 1.6) {
@@ -88,7 +103,7 @@ export function lineChart({ points, width = 960, height = 240, pad = { l: 48, r:
   // drawdown band
   if (drawdown && drawdown.fromIndex >= 0 && drawdown.toIndex > drawdown.fromIndex) {
     const xa = X(drawdown.fromIndex), xb = X(drawdown.toIndex);
-    g.append(svg('rect', { x: xa, y: y0, width: Math.max(xb - xa, 2), height: y1 - y0, fill: 'rgba(244,98,74,0.10)' }));
+    g.append(svg('rect', { x: xa, y: y0, width: Math.max(xb - xa, 2), height: y1 - y0, fill: 'rgba(var(--loss-rgb), 0.10)' }));
     g.append(svg('line', { x1: xa, y1: Y(drawdown.peak), x2: xb, y2: Y(drawdown.peak),
                            stroke: 'var(--orange)', 'stroke-width': 1.4, 'stroke-dasharray': '5 4' }));
     g.append(svg('line', { x1: xb, y1: Y(drawdown.peak), x2: xb, y2: Y(points[drawdown.toIndex].v),
@@ -100,8 +115,8 @@ export function lineChart({ points, width = 960, height = 240, pad = { l: 48, r:
   const id = 'grad_' + Math.random().toString(36).slice(2, 8);
   const defs = svg('defs');
   const lg = svg('linearGradient', { id, x1: 0, y1: 0, x2: 0, y2: 1 });
-  lg.append(svg('stop', { offset: '0%', 'stop-color': '#18AC65', 'stop-opacity': .30 }));
-  lg.append(svg('stop', { offset: '100%', 'stop-color': '#18AC65', 'stop-opacity': .02 }));
+  lg.append(svg('stop', { offset: '0%', 'stop-color': 'var(--profit)', 'stop-opacity': .30 }));
+  lg.append(svg('stop', { offset: '100%', 'stop-color': 'var(--profit)', 'stop-opacity': .02 }));
   defs.append(lg); g.append(defs);
   g.append(svg('path', { class: 'line-area',
     d: `${d} L${X(points.length - 1).toFixed(1)},${Y(lo).toFixed(1)} L${X(0).toFixed(1)},${Y(lo).toFixed(1)} Z`, fill: `url(#${id})` }));

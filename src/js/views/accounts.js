@@ -32,7 +32,7 @@ export function accounts(store, nav) {
     el('span', { class: 'sub' }, 'Each keeps its own trades and stats'),
   );
 
-  const list = el('section', { class: 'card', style: { width: '700px', flex: 'none', padding: '26px 28px' } });
+  const list = el('section', { class: 'card', style: { width: '100%', flex: 'none', padding: '26px 28px', maxHeight: '58vh' } });
 
   function paintList() {
     const rows = store.allAccounts.map(a => {
@@ -76,7 +76,8 @@ export function accounts(store, nav) {
       el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '12px' } },
         el('h2', {}, 'Your accounts'),
         el('span', { class: 'note' }, `${store.accounts.length} active`)),
-      el('div', { style: { marginTop: '18px', display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' } },
+      el('div', { style: { marginTop: '18px', display: 'flex', flexDirection: 'column', gap: '8px',
+                           overflowY: 'auto', minHeight: 0 } },
         ...rows,
         rows.length ? null : el('p', { style: { fontSize: '13px', color: 'var(--grey-3)' } }, 'No accounts yet.')),
     );
@@ -84,16 +85,71 @@ export function accounts(store, nav) {
   paintList();
 
   const lbl = t => el('span', { class: 'lbl' }, t);
-  const create = el('div', { class: 'card', style: { flex: '1', minWidth: 0, gap: '16px', padding: '26px 28px' } },
-    el('div', {}, el('h2', {}, 'New account'),
-      el('div', { class: 'm', style: { marginTop: '6px', fontSize: '11px', color: 'var(--grey-5)' } }, 'Two fields are required — the rest have defaults.')),
+  const first = !store.accounts.length;
+
+  /* The only two answers the form actually needs. Everything else has a
+     sensible default, so these are the only things that can hold it up. */
+  const nameInput = el('input', { class: 'field', placeholder: 'Swing account',
+    oninput: e => { draft.name = e.target.value; settle(); } });
+  const balInput = el('input', { class: 'field', inputmode: 'decimal', placeholder: '50 000',
+    oninput: e => { draft.startingBalance = e.target.value; echoBalance(); settle(); } });
+  const missingNote = el('div', { class: 'missing-note' });
+  const cta = el('button', { class: 'btn btn-primary is-waiting', style: { flex: '1', justifyContent: 'center' } }, 'Create account');
+
+  const describe = missing => 'Needs ' + missing.map(([, what]) => what).join(' and ');
+
+  const whatIsMissing = () => {
+    const out = [];
+    if (!draft.name.trim()) out.push([nameInput, 'a name']);
+    const bal = c.parseNumber(draft.startingBalance);
+    if (!(bal > 0)) out.push([balInput, 'a starting balance']);
+    return out;
+  };
+
+  /* Called on every keystroke: the button goes live the moment the form can
+     be answered, and any red already showing clears itself as you fix it. */
+  function settle() {
+    const missing = whatIsMissing();
+    cta.classList.toggle('is-waiting', missing.length > 0);
+    cta.classList.remove('is-refused');
+    for (const f of [nameInput, balInput]) {
+      const stillMissing = missing.some(([el]) => el === f);
+      f.classList.toggle('is-missing', stillMissing && f.dataset.flagged === '1');
+      if (!stillMissing) delete f.dataset.flagged;
+    }
+    // Once it has spoken, it keeps up: the line shrinks as you fill things in
+    // rather than still asking for something you have already given it.
+    if (!missing.length) missingNote.textContent = '';
+    else if (missingNote.textContent) missingNote.textContent = describe(missing);
+  }
+
+  let refuseTimer;
+  cta.addEventListener('click', async () => {
+    const missing = whatIsMissing();
+    if (missing.length) {
+      for (const [f] of missing) { f.dataset.flagged = '1'; f.classList.add('is-missing'); f.setAttribute('aria-invalid', 'true'); }
+      missingNote.textContent = describe(missing);
+      cta.classList.remove('is-refused');
+      void cta.offsetWidth;                       // replay the animation on a second press
+      cta.classList.add('is-refused');
+      clearTimeout(refuseTimer);
+      refuseTimer = setTimeout(() => cta.classList.remove('is-refused'), 900);
+      missing[0][0].focus();
+      return;
+    }
+    const a = await store.addAccount({ ...draft,
+      startingBalance: c.parseNumber(draft.startingBalance),
+      defaultRiskPercent: c.parseNumber(draft.defaultRiskPercent) ?? 1 });
+    toast('Created ' + a.name);
+    nav.refresh();
+  });
+  const create = el('div', { class: 'card', style: { width: '540px', flex: 'none', gap: '16px', padding: '28px 30px' } },
+    el('h2', {}, first ? 'Set up your first account' : 'New account'),
     el('div', {}, lbl('Account name'),
-      el('input', { class: 'field', placeholder: 'Swing account', oninput: e => draft.name = e.target.value }),
-      el('div', { class: 'm', style: { marginTop: '7px', fontSize: '10.5px', color: 'var(--grey-5)' } }, 'Anything you like — it is just a label.')),
+      nameInput),
     el('div', { style: { display: 'grid', gridTemplateColumns: '1fr 96px', gap: '10px' } },
       el('div', {}, lbl('Starting balance'),
-        el('input', { class: 'field', inputmode: 'decimal', placeholder: '50 000',
-          oninput: e => { draft.startingBalance = e.target.value; echoBalance(); } }),
+        balInput,
         balanceEcho),
       el('div', {}, lbl('Currency'),
         el('select', { class: 'field', style: { cursor: 'pointer' }, onchange: e => draft.currency = e.target.value },
@@ -112,18 +168,42 @@ export function accounts(store, nav) {
           onClick: e => { draft.color = col;
             [...e.target.parentNode.children].forEach(x => x.style.boxShadow = 'none');
             e.target.style.boxShadow = '0 0 0 2px var(--grey-8), 0 0 0 3.5px #fff'; } })))),
-    el('div', { style: { marginTop: 'auto', display: 'flex', gap: '7px' } },
-      el('button', { class: 'btn btn-primary', style: { flex: '1', justifyContent: 'center' },
-        onClick: async () => {
-          if (!draft.name.trim()) return toast('Give the account a name', 'warn');
-          const bal = c.parseNumber(draft.startingBalance);
-          if (!bal || bal <= 0) return toast('A starting balance is needed — it is what risk % is measured against', 'warn');
-          const a = await store.addAccount({ ...draft, startingBalance: bal,
-            defaultRiskPercent: c.parseNumber(draft.defaultRiskPercent) ?? 1 });
-          toast('Created ' + a.name);
-          nav.refresh();
-        } }, 'Create account')),
+    el('div', { style: { marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '8px' } },
+      el('div', { style: { display: 'flex', gap: '7px' } }, cta),
+      missingNote),
   );
 
-  return el('div', { class: 'view' }, head, el('div', { class: 'row', style: { flex: '1' } }, list, create));
+  /* First run is one decision, so the screen shows one thing: the form,
+     centred, at a size you can take in at a glance. Everything else — the
+     list, the page heading — has nothing to say until an account exists. */
+  if (first) {
+    return el('div', { class: 'view' },
+      el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column',
+                           alignItems: 'center', justifyContent: 'center', gap: '20px' } },
+        el('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' } },
+          el('div', { class: 'brand-mark', style: { width: '40px', height: '40px', borderRadius: '14px' } },
+            icon('mark', 20, 'var(--grey-8)', 2.4)),
+          el('div', { style: { textAlign: 'center' } },
+            el('h1', { class: 'welcome-title' }, 'Welcome to Ledger'),
+            el('p', { class: 'm', style: { margin: '9px 0 0', fontSize: '12.5px', color: 'var(--grey-5)' } },
+              'Your edge, in writing.'))),
+        create));
+  }
+
+  /* Afterwards: a centred column that stops at its content. The list grows
+     with the accounts and only starts scrolling once it would otherwise push
+     the page around. */
+  const addToggle = el('button', {
+    style: { border: '1px dashed var(--grey-6)', borderRadius: '26px', padding: '16px 20px',
+             display: 'flex', alignItems: 'center', gap: '11px', width: '100%' },
+    onClick: () => { formWrap.hidden = false; addToggle.hidden = true; formWrap.querySelector('input')?.focus(); } },
+    icon('plus', 16, 'var(--grey-5)', 2),
+    el('span', { class: 'm', style: { fontSize: '12.5px', color: 'var(--grey-5)' } }, 'New account'));
+
+  const formWrap = el('div', { hidden: true, style: { display: 'flex', justifyContent: 'center' } }, create);
+
+  return el('div', { class: 'view' }, head,
+    el('div', { style: { flex: '1', minHeight: 0, display: 'flex', flexDirection: 'column',
+                         alignItems: 'flex-start', gap: '10px', width: '100%', maxWidth: '860px' } },
+      list, addToggle, formWrap));
 }

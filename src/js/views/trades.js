@@ -32,9 +32,18 @@ export function trades(store, nav) {
     return b;
   };
 
+  const open = store.openFor(acct.id);
+
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Trades'),
-    el('span', { class: 'sub' }, `${store.tradesFor(acct.id).length} logged on ${acct.name}`),
+    el('span', { class: 'sub' }, `${store.tradesFor(acct.id).length} closed on ${acct.name}`),
+    open.length
+      ? el('span', { class: 'm', style: { display: 'inline-flex', alignItems: 'center', gap: '7px',
+            fontSize: '11px', borderRadius: 'var(--r-pill)', padding: '5px 11px',
+            background: 'rgba(255,184,0,.14)', color: 'var(--yellow)' } },
+          el('span', { style: { width: '6px', height: '6px', borderRadius: '50%', background: 'var(--yellow)' } }),
+          `${open.length} still open`)
+      : null,
     el('div', { class: 'spacer' }),
     el('button', { class: 'btn btn-ghost', onClick: () => nav.go('#/settings') }, 'Export'),
     el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, '#fff', 2), 'New trade'),
@@ -61,6 +70,27 @@ export function trades(store, nav) {
         ? 'No trades match these filters.'
         : 'Nothing logged on this account yet.'));
 
+  /* ---------- the ones still running ----------
+     Above the log rather than inside it, because they are not part of it yet:
+     no result, no R, nothing to sort by. They sit at the top as a short list
+     of things to finish, oldest first, since the trade you opened longest ago
+     is the one you have most likely forgotten. */
+  const openCard = open.length
+    ? el('section', { class: 'card', style: { flex: 'none', padding: '18px 26px 14px' } },
+        el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '9px', marginBottom: '10px' } },
+          el('div', { class: 'eyebrow', style: { margin: 0, color: 'var(--yellow)' } }, 'Still open')),
+        el('div', { class: 'tbl' },
+          el('div', { class: 'tbl-head', style: { gridTemplateColumns: OPEN_COLS } },
+            el('span', {}, 'Instrument'), el('span', {}, 'Side'), el('span', {}, 'Opened'),
+            el('span', {}, 'Setup & tags'),
+            el('span', { style: { textAlign: 'right' } }, 'Entry'),
+            el('span', { style: { textAlign: 'right' } }, 'Stop'),
+            el('span', { style: { textAlign: 'right' } }, 'Target'),
+            el('span', { style: { textAlign: 'right' } }, 'Risk'),
+            el('span', { style: { textAlign: 'right' } }, '')),
+          el('div', {}, ...open.map(t => openRow(t, acct, store, nav)))))
+    : null;
+
   const table = el('section', { class: 'card', style: { flex: '1', padding: '22px 26px 18px' } },
     el('div', { class: 'tbl', style: { flex: '1' } },
       el('div', { class: 'tbl-head', style: { gridTemplateColumns: cols } },
@@ -75,7 +105,7 @@ export function trades(store, nav) {
         (s.winRate == null ? '' : ` · ${c.pct(s.winRate)}`))),
   );
 
-  return el('div', { class: 'view' }, head, bar, table);
+  return el('div', { class: 'view' }, head, bar, openCard, table);
 }
 
 let refreshTimer;
@@ -108,4 +138,36 @@ function fullRow(t, acct, store, cols, nav) {
     el('span', { class: 'pl', style: { color: o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-2)' } },
       c.tradeFig(store.displayUnit, acct, t)),
   );
+}
+
+const OPEN_COLS = '150px 78px 116px minmax(0,1fr) 92px 92px 92px 84px 96px';
+
+/* A running trade, and the one button it needs: the way to finish it. */
+function openRow(t, acct, store, nav) {
+  const long = t.side === 'buy';
+  const setup = store.playbook.setups.find(s => s.id === t.setupId);
+  const allTags = store.playbook.tagGroups.flatMap(g => g.tags);
+  const tags = (t.tagIds || []).map(id => allTags.find(x => x.id === id)).filter(Boolean);
+  const oneR = c.oneR(acct, t);
+
+  return el('div', { class: 'tbl-row', style: { gridTemplateColumns: OPEN_COLS, cursor: 'pointer' },
+                     onClick: () => nav.go('#/trade/' + t.id) },
+    el('span', { style: { display: 'flex', alignItems: 'center', gap: '9px' } },
+      el('span', { style: { width: '3px', height: '17px', borderRadius: '2px', background: 'var(--yellow)' } }),
+      el('span', { class: 'ins' }, t.pair)),
+    el('span', { class: 'm', style: { fontSize: '11.5px', color: long ? 'var(--profit)' : 'var(--loss)' } },
+      long ? '▲ Long' : '▼ Short'),
+    el('span', { class: 'td' }, `${c.shortDate(t.date)}${t.timeOpen ? '  ' + t.timeOpen : ''}`),
+    el('span', { style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, overflow: 'hidden' } },
+      setup ? el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--ink-2)' } }, setup.name) : null,
+      ...tags.slice(0, 2).map(tag => el('span', { class: 'tag' }, tag.name))),
+    el('span', { class: 'num' }, t.entryPrice ?? '—'),
+    el('span', { class: 'num', style: { color: t.stopLoss == null ? 'var(--grey-5)' : 'var(--loss)' } }, t.stopLoss ?? '—'),
+    el('span', { class: 'num', style: { color: t.takeProfit == null ? 'var(--grey-5)' : 'var(--profit)' } }, t.takeProfit ?? '—'),
+    el('span', { class: 'num', title: oneR ? `1R = ${c.money(oneR, { sign: false, currency: acct.currency })}` : '' },
+      t.riskPercent == null ? '—' : Number(t.riskPercent).toFixed(2) + '%'),
+    el('span', { style: { textAlign: 'right' } },
+      el('button', { class: 'm', style: { fontSize: '10.5px', borderRadius: 'var(--r-pill)', padding: '5px 12px',
+            background: 'rgba(255,184,0,.16)', color: 'var(--yellow)' },
+          onClick: e => { e.stopPropagation(); nav.go('#/edit/' + t.id); } }, 'Close it')));
 }

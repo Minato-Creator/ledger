@@ -22,6 +22,10 @@
   --ink:#FFFFFF; --ink-2:var(--grey-2); --ink-3:var(--grey-3); --ink-4:var(--grey-5);
   --ink-on-light:var(--grey-8); --ink-on-light-2:var(--grey-6);
   --profit:var(--green); --loss:var(--orange); --flat:var(--grey-4);
+  /* green and red that survive on a light card */
+  --pos-light:#0F6B40; --neg-light:#A33A2B;
+  --profit-rgb:24, 172, 101; --loss-rgb:244, 98, 74;
+  --cell:var(--grey-9); --cell-quiet:#262626;
 
   /* radii */
   --r-btn:16px; --r-field:20px; --r-inset:24px; --r-card:40px; --r-pill:999px;
@@ -63,8 +67,8 @@ a:hover { color:var(--blue-strong); }
 .main { flex:1; min-width:0; display:flex; flex-direction:column; gap:var(--s-8); }
 .view { flex:1; min-height:0; display:flex; flex-direction:column; gap:var(--s-8); }
 .head { height:48px; flex:none; display:flex; align-items:center; gap:var(--s-12); padding:0 14px 0 18px; }
-.head h1 { font:400 17px var(--mono); letter-spacing:-.01em; color:var(--grey-8); margin:0; }
-.head .sub { font:400 12px var(--mono); color:var(--grey-6); }
+.head h1 { font:400 17px var(--mono); letter-spacing:-.01em; color:var(--ink-on-light); margin:0; }
+.head .sub { font:400 12px var(--mono); color:var(--ink-on-light-2); }
 .spacer { margin-left:auto; }
 
 .card { background:var(--card); border-radius:var(--r-card); padding:24px 26px; display:flex; flex-direction:column; min-height:0; }
@@ -190,7 +194,7 @@ textarea.field { height:auto; padding:13px 16px; line-height:1.55; resize:none; 
 .card.light .kpi-val { color:var(--grey-8); }
 .kpi-val .unit { font-size:21px; color:var(--ink-3); }
 .pos { color:var(--profit); } .neg { color:var(--loss); } .flat { color:var(--ink-2); }
-.card.light .pos { color:#0F6B40; } .card.light .neg { color:#A33A2B; }
+.card.light .pos { color:var(--pos-light); } .card.light .neg { color:var(--neg-light); }
 
 /* ---------- table ---------- */
 .tbl { display:flex; flex-direction:column; min-height:0; }
@@ -285,4 +289,509 @@ textarea.field { height:auto; padding:13px 16px; line-height:1.55; resize:none; 
     animation-duration:1ms !important; animation-delay:0ms !important;
     animation-iteration-count:1 !important; transition-duration:1ms !important;
   }
+}
+
+/* ---------- a form that answers back ----------
+   A button that cannot yet do its job should not look like it can. It sits
+   inert until the form is answerable, then turns live. Press it early and it
+   refuses out loud — once, briefly — and points at what is missing. */
+.btn.is-waiting { background:var(--inset-2); color:var(--ink-4); }
+.btn.is-waiting:hover { background:var(--inset-2); }
+.btn.is-refused { background:var(--loss); color:#fff; animation:refuse 400ms var(--e-standard); }
+@keyframes refuse {
+  15%, 85% { transform:translateX(-2px); }
+  30%, 70% { transform:translateX(4px); }
+  45%      { transform:translateX(-6px); }
+  60%      { transform:translateX(6px); }
+  100%     { transform:none; }
+}
+.field.is-missing { box-shadow:inset 0 0 0 1px var(--loss); }
+.field.is-missing:focus { box-shadow:inset 0 0 0 1px var(--blue); }
+.missing-note { font:400 11px var(--mono); color:var(--loss); min-height:14px; }
+
+/* ---------- native controls, brought into line ----------
+   Browsers draw their own date and select widgets, and they draw them for a
+   light page: a black glyph jammed against the text. These push them to the
+   right edge where the eye expects them, and recolour them to match. */
+input[type="date"].field { color-scheme:dark; }
+input[type="date"].field::-webkit-calendar-picker-indicator {
+  margin-left:auto; opacity:.5; cursor:pointer; padding:0;
+  transition:opacity var(--d-snap) var(--e-standard);
+}
+input[type="date"].field::-webkit-calendar-picker-indicator:hover { opacity:.95; }
+input[type="date"].field::-webkit-datetime-edit { flex:none; }
+
+select.field {
+  appearance:none; -webkit-appearance:none;
+  padding-right:36px; cursor:pointer;
+  background-repeat:no-repeat;
+  background-position:right 14px center;
+  background-size:11px 7px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 7' fill='none'%3E%3Cpath d='M1 1.2 5.5 5.7 10 1.2' stroke='%239A9A9A' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  transition:background-color var(--d-snap) var(--e-standard);
+}
+select.field:hover {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 7' fill='none'%3E%3Cpath d='M1 1.2 5.5 5.7 10 1.2' stroke='%23E9E9E9' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* ---------- the trade form ----------
+   The one screen you fill in by hand, several times a day. It gets taller
+   fields and more air between them than the read-only screens do — a form you
+   are typing into wants room, a dashboard you are scanning does not. */
+.card.roomy .field { height:46px; }
+.card.roomy .lbl { margin-bottom:9px; }
+.card.roomy .chip { padding:9px 15px; }
+
+/* ============================================================
+   Depth
+
+   The palette was flat: everything sat on the same plane, so the eye had
+   nothing to order. This gives the interface three planes and lights them
+   from above, the way a physical panel would be.
+
+     • cards RISE — a soft drop shadow and a hairline of light along the
+       top edge, where a lit surface would catch it
+     • fields and wells SINK — the shadow inside, pointing the other way
+     • the ground stays flat, so both directions read against it
+
+   Everything here is a few percent of black or white. Depth you notice as
+   depth is too much; this should only register as the thing looking solid.
+   ============================================================ */
+.card {
+  background-image:linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,0) 42%);
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.20),
+    0 10px 26px -12px rgba(0,0,0,.42),
+    inset 0 1px 0 rgba(255,255,255,.05);
+}
+/* A light card is lit the same way, but white-on-white needs the shadow to
+   do the work and the highlight to nearly vanish. */
+.card.light {
+  background-image:linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0) 46%);
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.16),
+    0 10px 26px -12px rgba(0,0,0,.34),
+    inset 0 1px 0 rgba(255,255,255,.7);
+}
+
+/* The sidebar is the nearest thing to the viewer, so it casts the longest. */
+.sidebar {
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.22),
+    0 14px 34px -14px rgba(0,0,0,.48),
+    inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+/* Anything you type into is cut INTO the surface, not sitting on it. */
+.field, .stepper, .seg, .unit-switch {
+  box-shadow:
+    inset 0 1px 2px rgba(0,0,0,.28),
+    inset 0 0 0 1px rgba(255,255,255,.022);
+}
+/* Focus still wins — it replaces the recess rather than fighting it. */
+.field:focus { box-shadow:inset 0 0 0 1px var(--blue), inset 0 1px 3px rgba(0,0,0,.3); }
+.field.is-stop:focus { box-shadow:inset 0 0 0 1px var(--loss), inset 0 1px 3px rgba(0,0,0,.3); }
+.field.is-missing { box-shadow:inset 0 0 0 1px var(--loss), inset 0 1px 3px rgba(0,0,0,.3); }
+
+/* The two things that sit on top of a recess get their own small lift, so a
+   selected segment reads as a key rather than a painted rectangle. */
+.seg button.is-on, .unit-switch button.is-on, .chip.is-on {
+  box-shadow:0 1px 2px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.34);
+}
+
+/* Buttons are pressable objects: lit on top, shadowed underneath, and the
+   shadow collapses as they go down. */
+.btn-primary, .btn-light, .btn-ghost {
+  box-shadow:0 1px 2px rgba(0,0,0,.24), 0 4px 10px -4px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.16);
+}
+.btn-primary:active, .btn-light:active, .btn-ghost:active {
+  box-shadow:0 1px 1px rgba(0,0,0,.24), inset 0 1px 2px rgba(0,0,0,.22);
+}
+.btn.is-waiting { box-shadow:inset 0 1px 2px rgba(0,0,0,.22); }
+
+/* The account switcher is the one control that opens over the app. */
+.acct-menu { box-shadow:0 2px 4px rgba(0,0,0,.28), 0 22px 48px -16px rgba(0,0,0,.62); }
+
+/* ============================================================
+   Dark theme
+
+   The default puts near-black cards on a grey ground. Dark mode drops the
+   ground below the cards instead, so the cards still read as the raised
+   plane — the lighting model does not invert, only the ground does.
+
+   The interesting part is the pale cards. A handful of screens use one for
+   contrast, and their contents are styled inline with `var(--grey-8)` and
+   friends. Rather than chase every one of those, the variables themselves
+   are redefined on the card: an inline `color: var(--grey-8)` then resolves
+   to a pale ink without a single view file knowing a theme exists.
+   ============================================================ */
+[data-theme="dark"] {
+  --ground:#060706;
+  --card:#111312;
+  --card-light:#181B1A;
+  --inset:#1A1D1C;
+  --inset-2:#242827;
+  --ink:#F2F4F3; --ink-2:#B4BAB8; --ink-3:#8B918F; --ink-4:#6A706E;
+  --ink-on-light:#F2F4F3; --ink-on-light-2:#B4BAB8;
+  --pos-light:#3ED08B; --neg-light:#FF8A72;
+  --blue-surface:#4DA8F5;
+}
+
+/* The pale card becomes the lighter of two dark surfaces, and every inline
+   colour written for a light background is remapped in one place. */
+[data-theme="dark"] .card.light {
+  --grey-8:#F2F4F3;        /* was the dark ink on a pale card */
+  --grey-6:#B4BAB8;
+  --grey-5:#8B918F;
+  --grey-4:#6A706E;
+  --grey-2:#2B2F2E;        /* pale chips and rules */
+  --grey-1:#222625;
+  --grey-1_5:#1B1E1D;
+  --grey-1_7:#222625;      /* the track behind a bar */
+  color:var(--ink);
+  background-image:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0) 46%);
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.4),
+    0 10px 26px -12px rgba(0,0,0,.6),
+    inset 0 1px 0 rgba(255,255,255,.05);
+}
+[data-theme="dark"] .card.light h2,
+[data-theme="dark"] .card.light .kpi-val { color:var(--ink); }
+
+/* A darker ground swallows a soft shadow, so the shadows deepen and the top
+   highlight lifts a touch to keep the edges legible. */
+[data-theme="dark"] .card {
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.45),
+    0 12px 30px -14px rgba(0,0,0,.7),
+    inset 0 1px 0 rgba(255,255,255,.045);
+}
+[data-theme="dark"] .sidebar {
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.5),
+    0 16px 40px -16px rgba(0,0,0,.75),
+    inset 0 1px 0 rgba(255,255,255,.045);
+}
+[data-theme="dark"] .tbl-row { border-bottom-color:#191C1B; }
+[data-theme="dark"] .tbl-row:hover { background:#181B1A; }
+[data-theme="dark"] .tbl-row:active { background:#1E2221; }
+/* The wells inside a card: rows, dropzones, the little grey-9 panels. */
+[data-theme="dark"] { --grey-9:#171A19; --grey-7:#1A1D1C; }
+/* Recessive cells have to stay BELOW the normal ones, not above — a fixed hex
+   here was lighter than the dark theme's own surface and inverted the meaning. */
+[data-theme="dark"] { --cell:#151817; --cell-quiet:#0C0E0D; }
+
+/* The mark is a pale tile with dark ink; in dark mode it is the other way
+   round. Same variable trick as the pale cards. */
+[data-theme="dark"] .brand-mark {
+  --grey-8:#E8EBEA;
+  background:#1E2120;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb { border-color:var(--card); }
+
+/* One switch, two words, no icon — it is a setting, not a toy. */
+.theme-switch { display:flex; gap:3px; background:var(--inset); border-radius:var(--r-btn); padding:3px; }
+.theme-switch button {
+  font:400 11.5px var(--mono); color:var(--ink-4); padding:7px 15px; border-radius:13px;
+  transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard),
+             transform var(--d-press) var(--e-standard);
+}
+.theme-switch button:hover { color:var(--ink-2); }
+.theme-switch button:active { transform:scale(.96); }
+.theme-switch button.is-on {
+  background:var(--inset-2); color:var(--ink);
+  box-shadow:0 1px 2px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.1);
+}
+
+/* ---------- import: the row tick ----------
+   A checkbox that reads as part of the table rather than a form control. */
+.tick { width:18px; height:18px; border-radius:6px; border:1px solid var(--grey-6);
+  background:transparent; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; padding:0; transition:background var(--d-snap) var(--e-standard),
+  border-color var(--d-snap) var(--e-standard), transform var(--d-snap) var(--e-standard); }
+.tick:hover { border-color:var(--grey-4); }
+.tick:active { transform:scale(.9); }
+.tick.is-on { background:var(--blue,#0988F0); border-color:var(--blue,#0988F0); }
+[data-theme="dark"] .tick { border-color:#2A2E2D; }
+[data-theme="dark"] .tick:hover { border-color:#3A403E; }
+
+/* ---------- first run ----------
+   No account, no sidebar: the setup form gets the window to itself. When the
+   account is made, the sidebar takes its space back rather than snapping into
+   existence — the form slides across as the panel widens, so the first thing
+   the app does is move like an app. */
+.is-solo .main { max-width:none; }
+.sidebar.is-new { animation:sidebar-in 520ms var(--e-out) both; }
+@keyframes sidebar-in {
+  from { opacity:0; margin-left:calc(-232px - var(--s-8)); transform:translateX(-10px); }
+  45%  { opacity:1; }
+  to   { opacity:1; margin-left:0; transform:none; }
+}
+@media (prefers-reduced-motion:reduce) { .sidebar.is-new { animation:none; } }
+.welcome-title { font:400 26px var(--mono); letter-spacing:-.02em; color:var(--ink-on-light); margin:0; }
+
+/* ============================================================
+   The backdrop, and the glass in front of it
+
+   A picture goes on the body, so it is behind every screen and does not
+   reload, redraw or shift when the view changes. It is held down by a scrim
+   whose weight is set per picture and per theme, because a bright photograph
+   under a dark interface needs more holding down than a dark one does.
+
+   Glass is a separate switch. It swaps the panels' solid fills for translucent
+   ones and blurs whatever is behind them, so the picture reads through the
+   whole app rather than only in the gaps. The inner surfaces — fields, table
+   rows, calendar cells — become tints of white rather than fixed greys, which
+   is what keeps the stack looking like one material instead of solid boxes
+   floating on a sheet of glass.
+   ============================================================ */
+html[data-bg] body {
+  background-image:
+    linear-gradient(rgba(0,0,0,var(--bg-scrim,.5)), rgba(0,0,0,var(--bg-scrim,.5))),
+    var(--bg-image);
+  background-size:cover; background-position:center; background-repeat:no-repeat;
+  background-attachment:fixed;
+}
+/* With a picture behind it the ground is dark whatever the theme, so the page
+   headings have to stop being dark-on-light. The pale cards are still pale,
+   though, so they put their own dark ink back — unless glass has made them
+   translucent too, in which case they are dark like everything else. */
+html[data-bg] { --ink-on-light:#F2F4F3; --ink-on-light-2:rgba(255,255,255,.62); }
+html[data-bg][data-glass="off"] .card.light {
+  --ink-on-light:var(--grey-8); --ink-on-light-2:var(--grey-6);
+}
+
+/* A pale card under glass is not pale any more. Same remapping the dark theme
+   does, for the same reason: the contents are styled inline against these
+   variables, so moving the variables is what moves the card. */
+html[data-glass="on"] .card.light {
+  --grey-8:#F2F4F3;
+  --grey-6:#B4BAB8;
+  --grey-5:#8B918F;
+  --grey-4:#6A706E;
+  --grey-2:#2B2F2E;
+  --grey-1:#222625;
+  --grey-1_5:#1B1E1D;
+  --grey-1_7:#222625;
+  --ink-on-light:#F2F4F3;
+  --ink-on-light-2:rgba(255,255,255,.62);
+  color:var(--ink);
+}
+html[data-glass="on"] .card.light h2,
+html[data-glass="on"] .card.light .kpi-val { color:var(--ink); }
+
+html[data-glass="on"] {
+  --glass-blur:26px;
+  --glass-rim:rgba(255,255,255,.10);
+  --glass-lip:rgba(255,255,255,.13);
+  --glass-panel:rgba(24,24,24,.50);
+  --glass-raised:rgba(58,58,58,.40);
+  /* the surfaces inside a panel, as light rather than as grey */
+  --inset:rgba(255,255,255,.065);
+  --inset-2:rgba(255,255,255,.10);
+  --grey-9:rgba(255,255,255,.055);
+  --grey-7:rgba(255,255,255,.11);
+  --cell:rgba(255,255,255,.055);
+  --cell-quiet:rgba(255,255,255,.02);
+  /* A translucent panel is never as dark as a solid one, so the quietest greys
+     are lifted a step to keep the footing they had. */
+  --ink-3:#B4B4B4;
+  --ink-4:#8E8E8E;
+}
+html[data-glass="on"][data-theme="dark"] {
+  --glass-panel:rgba(10,12,11,.52);
+  --glass-raised:rgba(40,44,43,.42);
+  --glass-rim:rgba(255,255,255,.075);
+  --glass-lip:rgba(255,255,255,.10);
+}
+
+html[data-glass="on"] .sidebar,
+html[data-glass="on"] .card,
+html[data-glass="on"] .gate-card,
+html[data-glass="on"] .acct-menu,
+html[data-glass="on"] #toast {
+  background:var(--glass-panel);
+  -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(170%);
+  backdrop-filter:blur(var(--glass-blur)) saturate(170%);
+  border:1px solid var(--glass-rim);
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.22),
+    0 20px 46px -20px rgba(0,0,0,.58),
+    inset 0 1px 0 var(--glass-lip);
+}
+/* A card nested inside a card must not blur twice — the second pass turns the
+   first one to mud. It gets the tint and the rim only. */
+html[data-glass="on"] .card .card {
+  -webkit-backdrop-filter:none; backdrop-filter:none;
+  background:rgba(255,255,255,.05); box-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+}
+html[data-glass="on"] .card.light {
+  background:var(--glass-raised);
+  -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(170%);
+  backdrop-filter:blur(var(--glass-blur)) saturate(170%);
+}
+/* Controls that sit on the ground rather than inside a panel need their own
+   pane of glass, or they would read as flat chips on a photograph. */
+html[data-glass="on"] .seg,
+html[data-glass="on"] .stepper {
+  background:var(--glass-panel);
+  -webkit-backdrop-filter:blur(14px) saturate(150%);
+  backdrop-filter:blur(14px) saturate(150%);
+  border:1px solid var(--glass-rim);
+}
+html[data-glass="on"] .tbl-row:hover { background:rgba(255,255,255,.07); }
+html[data-glass="on"] .tbl-row:active { background:rgba(255,255,255,.11); }
+html[data-glass="on"] .nav a.is-active { background:rgba(255,255,255,.10); }
+html[data-glass="on"] .field,
+html[data-glass="on"] input.m {
+  background:rgba(255,255,255,.07);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.20), inset 0 0 0 1px rgba(255,255,255,.06);
+}
+html[data-glass="on"] .field:focus { box-shadow:inset 0 0 0 1px var(--blue), 0 0 0 3px rgba(9,136,240,.20); }
+
+/* Blurring twenty panes at once is real work for a laptop. Where the browser
+   cannot do it, the tint alone still reads as a layer rather than breaking. */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  html[data-glass="on"] .sidebar,
+  html[data-glass="on"] .card,
+  html[data-glass="on"] .gate-card,
+  html[data-glass="on"] .acct-menu { background:rgba(20,20,20,.86); }
+}
+
+/* ---------- picking one, in Settings ---------- */
+/* Four across, always. They share the row rather than each holding a fixed
+   width, so the line stays full whether there are two pictures or ten. */
+.bg-picks { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:9px; }
+.bg-pick {
+  width:auto; aspect-ratio:8/5; border-radius:11px; padding:0; overflow:hidden; position:relative;
+  background-size:cover; background-position:center; cursor:pointer;
+  box-shadow:inset 0 0 0 1px rgba(128,128,128,.35);
+  transition:transform var(--d-snap) var(--e-standard), box-shadow var(--d-snap) var(--e-standard);
+}
+.bg-pick:hover { transform:translateY(-1px); }
+.bg-pick:active { transform:scale(.97); }
+.bg-pick.is-on { box-shadow:0 0 0 2px var(--card), 0 0 0 3.5px var(--ink); }
+.bg-pick .name {
+  position:absolute; left:0; right:0; bottom:0; padding:3px 6px;
+  font:400 8.5px var(--mono); color:#fff; text-align:left;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  background:linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.62));
+}
+.bg-pick.none { background:var(--inset); display:flex; align-items:center; justify-content:center; }
+.bg-pick.none span { font:400 9.5px var(--mono); color:var(--grey-4); }
+
+/* ---------- the two charts on a trade ----------
+   An empty slot is an invitation, a filled one is the picture itself. The
+   4:3-ish box is a compromise: charts are wide, but a wide strip on a form
+   makes the whole page scroll for no reason. */
+.shot-zone {
+  width:100%; aspect-ratio:16/9; border-radius:16px; padding:0; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px;
+  background:var(--grey-9); background-size:cover; background-position:center;
+  box-shadow:inset 0 0 0 1px var(--grey-7);
+  position:relative; overflow:hidden;
+  transition:box-shadow var(--d-snap) var(--e-standard), transform var(--d-snap) var(--e-standard);
+}
+.shot-zone:hover { box-shadow:inset 0 0 0 1px var(--grey-6); }
+.shot-zone:active { transform:scale(.99); }
+.shot-zone.is-target { box-shadow:inset 0 0 0 1px var(--grey-5), 0 0 0 2px rgba(9,136,240,.28); }
+.shot-zone.is-over { box-shadow:inset 0 0 0 1.5px var(--blue), 0 0 0 3px rgba(9,136,240,.22); }
+.shot-zone.is-loading { background-image:linear-gradient(100deg, var(--grey-9) 30%, var(--grey-7) 50%, var(--grey-9) 70%);
+  background-size:200% 100%; animation:shot-wait 1.1s linear infinite; }
+@keyframes shot-wait { from { background-position:120% 0; } to { background-position:-20% 0; } }
+.shot-tag {
+  position:absolute; left:9px; bottom:9px; padding:3px 8px; border-radius:8px;
+  font:400 9.5px var(--mono); color:#fff; background:rgba(0,0,0,.5);
+  -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+}
+
+/* ---------- one chart, full size ---------- */
+.lightbox {
+  position:fixed; inset:0; z-index:300; display:flex; flex-direction:column;
+  background:rgba(0,0,0,.86); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+  animation:fade-in 160ms var(--e-out) both;
+}
+.lightbox .bar { flex:none; height:54px; display:flex; align-items:center; gap:12px; padding:0 18px; }
+.lightbox .bar .t { font:400 12.5px var(--mono); color:var(--ink-2); }
+.lightbox .bar .n { font:400 10px var(--mono); letter-spacing:.09em; color:var(--grey-5); }
+.lightbox .stage { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:0 18px 18px; }
+.lightbox img { max-width:100%; max-height:100%; border-radius:12px; box-shadow:0 30px 80px -30px rgba(0,0,0,.9); }
+.lightbox .x { width:32px; height:32px; border-radius:11px; display:flex; align-items:center; justify-content:center;
+  background:rgba(255,255,255,.08); }
+.lightbox .x:hover { background:rgba(255,255,255,.14); }
+
+/* ---------- and on the trade page ---------- */
+.shot-view {
+  width:100%; aspect-ratio:16/9; border-radius:14px; overflow:hidden; padding:0; cursor:zoom-in;
+  background:var(--grey-9) center/cover no-repeat; box-shadow:inset 0 0 0 1px var(--grey-7);
+  position:relative; transition:box-shadow var(--d-snap) var(--e-standard);
+}
+.shot-view:hover { box-shadow:inset 0 0 0 1px var(--grey-5); }
+.shot-view.is-waiting { background-image:linear-gradient(100deg, var(--grey-9) 30%, var(--grey-7) 50%, var(--grey-9) 70%);
+  background-size:200% 100%; animation:shot-wait 1.1s linear infinite; }
+.shot-view .zoom { position:absolute; right:9px; top:9px; width:26px; height:26px; border-radius:9px;
+  display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.42);
+  -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); opacity:0;
+  transition:opacity var(--d-snap) var(--e-standard); }
+.shot-view:hover .zoom { opacity:1; }
+
+/* ---------- the trade form ----------
+   Two columns in one card, sized in CSS rather than inline so a short screen
+   can tighten the whole thing at once. A 768-tall laptop is a real desk, and
+   a form you have to scroll to reach the save button is a worse form. */
+.trade-form {
+  flex:1; min-height:0; display:grid;
+  grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);
+  gap:30px; padding:26px 30px; align-items:stretch;
+  overflow-x:hidden; overflow-y:auto;
+}
+@media (max-height:850px) {
+  .trade-form { gap:24px; padding:16px 24px; }
+  .card.roomy .field { height:42px; }
+  .card.roomy .lbl { margin-bottom:6px; }
+  .card.roomy .chip { padding:7px 13px; }
+}
+
+/* ---------- the figures along the top of a trade ---------- */
+.trade-strip { flex:none; padding:15px 6px; display:flex; align-items:stretch; flex-direction:row; }
+.trade-strip i { width:1px; background:var(--grey-7); }
+.ts-cell { flex:1; min-width:0; padding:0 22px; }
+.ts-lbl { font:400 10px var(--mono); letter-spacing:.11em; text-transform:uppercase; color:var(--grey-5); }
+.ts-val { margin-top:9px; font:400 21px var(--mono); letter-spacing:-.02em; line-height:1; color:var(--ink); }
+
+/* ---------- the trade form ----------
+   Two columns, five bands down the left, a hairline where one thing ends and
+   the next begins. No caption anywhere: a label and a field is the design. */
+.trade-form > .col { display:flex; flex-direction:column; min-width:0; min-height:0; gap:0; }
+.band + .band { margin-top:18px; padding-top:18px; border-top:1px solid var(--grey-9); }
+.band > * + * { margin-top:14px; }
+
+/* Charts stack and share the height, because wide is the shape a chart is. */
+.shots-stack { display:flex; flex-direction:column; gap:14px; flex:1; min-height:0; }
+.shot-slot { flex:1; min-height:0; display:flex; flex-direction:column; }
+.shot-slot .shot-zone { aspect-ratio:auto; flex:1; min-height:88px; }
+.trade-form > .col:last-child > .band { flex:1; min-height:0; display:flex; }
+
+.dir { flex:1; height:46px; border-radius:var(--r-field); display:flex; align-items:center; justify-content:center;
+  gap:5px; font:400 12px var(--mono); background:var(--grey-7); color:var(--ink-3);
+  transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard),
+             box-shadow var(--d-snap) var(--e-standard); }
+.dir:hover { color:var(--ink-2); }
+.dir.is-on { background:rgba(var(--dir-rgb), .18); box-shadow:inset 0 0 0 1px var(--dir); color:var(--dir); }
+
+/* A unit that belongs to the field rather than beside it. */
+.prefix, .suffix { position:relative; }
+.prefix > span, .suffix > span { position:absolute; top:50%; transform:translateY(-50%);
+  font:400 12px var(--mono); color:var(--grey-3); pointer-events:none; }
+.prefix > span { left:15px; } .prefix .field { padding-left:27px; }
+.suffix > span { right:15px; } .suffix .field { padding-right:30px; }
+
+@media (max-height:850px) {
+  .trade-strip { padding:11px 6px; }
+  .ts-val { margin-top:7px; font-size:19px; }
+  .band + .band { margin-top:13px; padding-top:13px; }
+  .band > * + * { margin-top:11px; }
+  .dir { height:42px; }
+  .shots-stack { gap:10px; }
 }
