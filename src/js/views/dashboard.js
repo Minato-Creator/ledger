@@ -110,8 +110,11 @@ export function dashboard(store, nav) {
       })),
   );
 
-  const best = [...curve].sort((a, b) => b.day - a.day)[0];
-  const worst = [...curve].sort((a, b) => a.day - b.day)[0];
+  /* An account can have trades and still have none in this window — every one
+     of them older than the last thirty days. The curve is empty then, and
+     asking it for its best day has to answer "none" rather than throw. */
+  const best = [...curve].sort((a, b) => b.day - a.day)[0] || null;
+  const worst = [...curve].sort((a, b) => a.day - b.day)[0] || null;
   const statRow = (k, v, cls) => el('div', { style: { display: 'flex', alignItems: 'baseline' } },
     el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-6)' } }, k),
     el('span', { class: 'm ' + (cls || ''), style: { marginLeft: 'auto', fontSize: '12.5px' } }, v));
@@ -119,8 +122,8 @@ export function dashboard(store, nav) {
   const sideCard = el('div', { class: 'card light', style: { flex: '1', minWidth: 0 } },
     el('h2', {}, 'This period'),
     el('div', { style: { marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' } },
-      statRow('Best day', f(best.day, best.dayR)),
-      statRow('Worst day', f(worst.day, worst.dayR)),
+      statRow('Best day', best ? f(best.day, best.dayR) : '—'),
+      statRow('Worst day', worst ? f(worst.day, worst.dayR) : '—'),
       statRow('Max drawdown', dd ? (u === 'R' ? c.rFmt(-dd.amount) : f(-dd.amount, null)) : '—'),
       statRow('Avg win', f(s.avgWin, s.avgWinR)),
       statRow('Avg loss', s.avgLoss == null ? '—' : f(-s.avgLoss, s.avgLossR == null ? null : -s.avgLossR)),

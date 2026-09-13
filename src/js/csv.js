@@ -1,8 +1,10 @@
 /* ============================================================
    csv.js — the whole journal as one flat sheet.
-   Same shape as the FX Replay export: account name, currency and
-   starting balance repeat on every row, which is what lets a
-   single file rebuild accounts, setups and tags on a fresh machine.
+
+   One way out, for a spreadsheet. Bringing a journal back is the vault's
+   job, not this file's: a sheet of text cannot carry the charts. parseCSV
+   stays because the broker importer and the replay importer both read
+   other people's files with it.
    ============================================================ */
 import * as c from './calc.js';
 
@@ -78,88 +80,3 @@ export function parseCSV(text) {
   const header = rows[0].map(h => h.trim());
   return rows.slice(1).map(r => Object.fromEntries(header.map((h, i) => [h, (r[i] ?? '').trim()])));
 }
-
-/** Work out what an import would do, without writing anything. */
-export function planImport(store, records) {
-  const existingIds = new Set(store.trades.map(t => t.id));
-  const accountsByName = new Map(store.allAccounts.map(a => [a.name.toLowerCase(), a]));
-  const setupsByName = new Map(store.playbook.setups.map(s => [s.name.toLowerCase(), s]));
-  const tagsByName = new Map(store.playbook.tagGroups.flatMap(g => g.tags).map(t => [t.name.toLowerCase(), t]));
-
-  const newAccounts = new Map(), newSetups = new Set(), newTags = new Set();
-  let add = 0, skip = 0; const problems = [];
-
-  records.forEach((r, i) => {
-    const open = String(r.status || '').toLowerCase() === 'open';
-    if (!r.date || !r.pair || (!open && (r.netResult === '' || r.netResult == null))) {
-      problems.push({ line: i + 2, why: 'missing date, pair or netResult' }); return;
-    }
-    if (r.id && existingIds.has(r.id)) { skip++; return; }
-    add++;
-    const an = (r.account || 'Imported').toLowerCase();
-    if (!accountsByName.has(an) && !newAccounts.has(an)) {
-      newAccounts.set(an, { name: r.account || 'Imported', currency: r.accountCurrency || 'USD',
-                            startingBalance: Number(r.accountStartingBalance) || 0 });
-    }
-    if (r.setup && !setupsByName.has(r.setup.toLowerCase())) newSetups.add(r.setup);
-    (r.tags || '').split(';').map(t => t.trim()).filter(Boolean)
-      .forEach(t => { if (!tagsByName.has(t.toLowerCase())) newTags.add(t); });
-  });
-
-  return { add, skip, problems, newAccounts: [...newAccounts.values()], newSetups: [...newSetups], newTags: [...newTags] };
-}
-
-/** Apply an import. Rule: a row whose id is already here is skipped; nothing is deleted. */
-export async function applyImport(store, records) {
-  const plan = planImport(store, records);
-
-  for (const a of plan.newAccounts) await store.addAccount({ ...a, defaultRiskPercent: 1 });
-  const accountsByName = new Map(store.allAccounts.map(a => [a.name.toLowerCase(), a]));
-
-  for (const name of plan.newSetups) {
-    store.playbook.setups.push({ id: 's_' + crypto.randomUUID().slice(0, 6), name, color: '#0988F0', rules: [] });
-  }
-  for (const name of plan.newTags) {
-    store.playbook.tagGroups[0].tags.push({ id: 'tg_' + crypto.randomUUID().slice(0, 6), name });
-  }
-  if (plan.newSetups.length || plan.newTags.length) await store.save('playbook');
-
-  const setupsByName = new Map(store.playbook.setups.map(s => [s.name.toLowerCase(), s]));
-  const tagsByName = new Map(store.playbook.tagGroups.flatMap(g => g.tags).map(t => [t.name.toLowerCase(), t]));
-  const sessionsByName = new Map(store.playbook.sessions.map(s => [s.name.toLowerCase(), s]));
-  const existingIds = new Set(store.trades.map(t => t.id));
-
-  let added = 0;
-  for (const r of records) {
-    const open = String(r.status || '').toLowerCase() === 'open';
-    if (!r.date || !r.pair || (!open && (r.netResult === '' || r.netResult == null))) continue;
-    if (r.id && existingIds.has(r.id)) continue;
-    const acc = accountsByName.get((r.account || 'Imported').toLowerCase());
-    if (!acc) continue;
-    store.data.trades.trades.push({
-      id: r.id || ('t_' + crypto.randomUUID().slice(0, 8)),
-      accountId: acc.id,
-      date: r.date, timeOpen: r.timeOpen || null, timeClose: r.timeClose || null,
-      pair: r.pair, assetClass: r.assetClass || null, side: r.side === 'sell' ? 'sell' : 'buy',
-      sessionId: sessionsByName.get((r.session || '').toLowerCase())?.id || null,
-      entryPrice: num(r.entryPrice), stopLoss: num(r.stopLoss), takeProfit: num(r.takeProfit), exitPrice: num(r.exitPrice),
-      size: num(r.size), sizeUnit: r.sizeUnit || null,
-      riskPercent: Number(r.riskPercent) || acc.defaultRiskPercent || 1,
-      netResult: open ? null : (Number(r.netResult) || 0),
-      status: open ? 'open' : 'closed',
-      /* A break-even can carry a non-zero amount, so the label has to come
-         back from the file rather than be re-derived from the number. */
-      outcome: String(r.outcome || '').toLowerCase() === 'breakeven' ? 'breakeven' : null,
-      setupId: setupsByName.get((r.setup || '').toLowerCase())?.id || null,
-      tagIds: (r.tags || '').split(';').map(t => t.trim()).filter(Boolean)
-                .map(t => tagsByName.get(t.toLowerCase())?.id).filter(Boolean),
-      grade: r.grade || null, notes: r.notes || '',
-      createdAt: new Date().toISOString(),
-    });
-    added++;
-  }
-  await store.save('trades');
-  return { ...plan, added };
-}
-
-const num = v => { const n = Number(v); return v === '' || v == null || !isFinite(n) ? null : n; };

@@ -1,21 +1,19 @@
 /* ============================================================
-   settings.js — the account settings, and one backup box.
+   settings.js — the accounts, the vault, and how the place looks.
 
-   Backup used to take the whole page. It is a thing you touch twice a year;
-   the accounts are the thing you actually come here to change.
+   The vault is the backup. It carries the trades and the charts together, so
+   there is one thing to export and one thing to import, and no second
+   half-backup made of text to confuse it with.
    ============================================================ */
 import { el, icon, toast } from '../ui.js';
 import * as c from '../calc.js';
-import { toCSV, parseCSV, planImport, applyImport } from '../csv.js';
+import { toCSV } from '../csv.js';
 import { BACKGROUNDS } from '../backgrounds.js';
 
-let pending = null;              // { fileName, size, records, plan }
 const COLOURS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'JPY'];
 
 export function settings(store, nav) {
-  const scopeAll = { value: true };
-
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Settings'),
     el('div', { class: 'spacer' }),
@@ -130,27 +128,40 @@ export function settings(store, nav) {
     list);
 
   /* ============================================================
-     Backup — export and import, one box
-     ============================================================ */
-  const countEl = el('span', { class: 'm', style: { fontSize: '20px', color: '#fff' } });
-  const metaEl = el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } });
+     The vault
 
-  function refreshCounts() {
-    const ids = scopeAll.value ? null : [store.activeAccount?.id];
-    const rows = store.trades.filter(t => !ids || ids.includes(t.accountId));
-    const bytes = new Blob([toCSV(store, ids)]).size;
-    countEl.textContent = `${rows.length} trade${rows.length === 1 ? '' : 's'}`;
-    const kb = bytes / 1024;
-    metaEl.textContent = `${scopeAll.value ? store.allAccounts.length + ' accounts' : store.activeAccount?.name || '—'}`
-      + ` · ${kb < 1 ? '<1' : kb.toFixed(0)} KB`;
+     Three things you can do to the folder your journal lives in: find it,
+     put it in one file, or put one file back. Import replaces — a vault is a
+     whole journal, not a pile to merge — so it says what it found before it
+     touches anything.
+
+     Underneath, one line for the one job a vault cannot do: hand the trades
+     to a spreadsheet. It is not a backup and does not pretend to be one.
+     ============================================================ */
+  const vaultFile = el('input', { type: 'file', accept: '.zip,application/zip', hidden: true,
+    onChange: e => { const f = e.target.files[0]; e.target.value = ''; if (f) offerImport(f); } });
+  const vaultNote = el('div', { class: 'm', style: { marginTop: '12px', fontSize: '11px', color: 'var(--grey-5)',
+    lineHeight: 1.5, wordBreak: 'break-all' } }, store.folderPath || store.folderName || '—');
+  const vaultAsk = el('div', { hidden: true, style: { marginTop: '12px' } });
+
+  async function doVaultExport() {
+    try {
+      const { file, name, missing } = await store.exportVault();
+      const url = URL.createObjectURL(file);
+      const a = el('a', { href: url, download: name });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast(missing ? `Vault exported — ${missing} chart${missing === 1 ? '' : 's'} could not be found`
+                    : 'Vault exported', missing ? 'warn' : 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
   }
 
-  async function doExport() {
-    const ids = scopeAll.value ? null : [store.activeAccount.id];
-    const text = toCSV(store, ids);
+  /* A spreadsheet, not a backup — no charts, no accounts, no settings.
+     It goes into the vault folder as well as down as a file, so it is
+     findable either way. */
+  async function doCsvExport() {
+    const text = toCSV(store, null);
     const name = `ledger-trades-${new Date().toISOString().slice(0, 10)}.csv`;
-    // Into the journal folder so it lands somewhere findable, and as a
-    // download so it can go on a stick. Either way you have it.
     try { await store.writeText(name, text); } catch { /* the folder copy is best-effort */ }
     const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
     const a = el('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove();
@@ -158,78 +169,57 @@ export function settings(store, nav) {
     toast(`Exported ${name}`);
   }
 
-  const scopeChips = el('span', { style: { display: 'flex', gap: '5px' } });
-  function paintScope() {
-    scopeChips.replaceChildren(
-      ...[[true, 'All'], [false, 'This account']].map(([v, label]) =>
-        el('button', { class: 'chip' + (scopeAll.value === v ? ' is-on' : ''),
-          style: { padding: '6px 11px', fontSize: '11px' },
-          onClick: () => { scopeAll.value = v; paintScope(); refreshCounts(); } }, label)));
+  async function offerImport(file) {
+    let found;
+    try { found = await store.inspectVault(file); }
+    catch (e) { return toast(e.message, 'bad'); }
+
+    vaultAsk.hidden = false;
+    vaultAsk.replaceChildren(
+      el('div', { style: { background: 'var(--grey-9)', borderRadius: 'var(--r-inset)', padding: '13px 15px' } },
+        el('div', { class: 'm', style: { fontSize: '11.5px', color: 'var(--ink-2)' } },
+          `${found.trades} trades · ${found.accounts} accounts · ${found.shots} charts`),
+        el('div', { class: 'm', style: { marginTop: '7px', fontSize: '10.5px', color: 'var(--yellow)' } },
+          'This replaces everything in the vault you have open.'),
+        el('div', { style: { marginTop: '12px', display: 'flex', gap: '7px' } },
+          el('button', { class: 'btn btn-primary', style: { padding: '7px 14px', fontSize: '11.5px' },
+            onClick: async () => {
+              vaultAsk.hidden = true;
+              try {
+                const done = await store.importVault(file);
+                toast(done.damaged
+                  ? `${done.trades} trades restored — ${done.damaged} file${done.damaged === 1 ? '' : 's'} in that vault could not be read`
+                  : `${done.trades} trades restored`, done.damaged ? 'warn' : 'ok');
+                nav.go('#/');
+              } catch (e) { toast(e.message, 'bad'); }
+            } }, 'Replace'),
+          el('button', { class: 'btn btn-ghost', style: { padding: '7px 14px', fontSize: '11.5px' },
+            onClick: () => { vaultAsk.hidden = true; } }, 'Cancel'))));
   }
-  paintScope();
 
-  const importBody = el('div', {});
-  function paintImport() {
-    if (!pending) {
-      importBody.replaceChildren(
-        el('label', { style: {
-            display: 'flex', alignItems: 'center', gap: '11px', cursor: 'pointer',
-            border: '1px dashed var(--grey-6)', borderRadius: 'var(--r-inset)',
-            background: 'var(--grey-9)', padding: '15px 16px' } },
-          icon('folder', 18, 'var(--grey-5)', 1.6),
-          el('span', { class: 'm', style: { fontSize: '12px', color: 'var(--grey-3)' } }, 'Choose a Ledger CSV'),
-          el('input', { type: 'file', accept: '.csv,text/csv', style: { display: 'none' },
-            onChange: async e => {
-              const file = e.target.files[0]; if (!file) return;
-              const records = parseCSV(await file.text());
-              pending = { fileName: file.name, size: file.size, records, plan: planImport(store, records) };
-              paintImport();
-            } })));
-      return;
-    }
+  const vaultButton = (label, ic, onClick) => el('button', { class: 'btn btn-quiet',
+    style: { flex: '1', justifyContent: 'center', padding: '9px 10px', fontSize: '11.5px' }, onClick },
+    icon(ic, 13, 'var(--grey-1)', 1.8), label);
 
-    const p = pending.plan;
-    const row = (k, v, col) => el('div', { style: { display: 'flex', alignItems: 'baseline' } },
-      el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-5)' } }, k),
-      el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12px', color: col || 'var(--ink-2)' } }, v));
+  const vaultCard = el('section', { class: 'card', style: { flex: 'none' } },
+    el('h2', {}, 'Vault'),
+    vaultNote,
+    el('div', { style: { marginTop: '14px', display: 'flex', gap: '7px' } },
+      store.isNative ? vaultButton('Locate', 'folder', async () => {
+        if (!(await store.revealVault())) toast('Could not open that folder', 'warn');
+      }) : null,
+      vaultButton('Export', 'download', doVaultExport),
+      vaultButton('Import', 'upload', () => vaultFile.click())),
+    vaultAsk, vaultFile,
 
-    importBody.replaceChildren(
-      el('div', { style: { background: 'var(--grey-9)', borderRadius: 'var(--r-inset)', padding: '13px 15px',
-                           display: 'flex', alignItems: 'center', gap: '10px', boxShadow: 'inset 0 0 0 1px var(--blue)' } },
-        icon('folder', 16, 'var(--blue-surface)', 1.7),
-        el('div', { style: { minWidth: 0 } },
-          el('div', { class: 'm', style: { fontSize: '11.5px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, pending.fileName),
-          el('div', { class: 'm', style: { marginTop: '2px', fontSize: '10px', color: 'var(--grey-5)' } },
-            `${pending.records.length} rows read`)),
-        el('button', { class: 'm', style: { marginLeft: 'auto', fontSize: '15px', color: 'var(--grey-5)' },
-          onClick: () => { pending = null; paintImport(); } }, '×')),
-      el('div', { style: { marginTop: '13px', display: 'flex', flexDirection: 'column', gap: '9px' } },
-        row('Trades added', String(p.add), 'var(--green)'),
-        row('Already here, skipped', String(p.skip)),
-        row('Accounts created', String(p.newAccounts.length)),
-        row('Setups and tags created', String(p.newSetups.length + p.newTags.length)),
-        p.problems.length ? row('Rows with a problem', String(p.problems.length), 'var(--yellow)') : null),
-      el('button', { class: 'btn btn-primary', style: { marginTop: '14px', width: '100%', justifyContent: 'center' },
-        onClick: async () => {
-          const res = await applyImport(store, pending.records);
-          pending = null;
-          toast(`Imported ${res.added} trade${res.added === 1 ? '' : 's'}`);
-          nav.refresh();
-        } }, `Import ${p.add} trade${p.add === 1 ? '' : 's'}`),
-      el('div', { class: 'm', style: { marginTop: '10px', fontSize: '10.5px', lineHeight: 1.5, color: 'var(--grey-5)' } },
-        'A row already here is skipped. Nothing is ever deleted.'),
-    );
-  }
-  paintImport();
-
-  const backupCard = el('section', { class: 'card', style: { flex: 'none' } },
-    el('h2', {}, 'Backup'),
+    /* Where the journal lives inside a browser, it can be wiped by clearing
+       browsing data. That is worth one sentence, and a way out of it. */
     store.isLocal || store.isPreview
-      ? el('div', { style: { marginTop: '12px', background: 'var(--grey-9)', borderRadius: 'var(--r-inset)',
-                             padding: '12px 14px', fontSize: '12px', lineHeight: 1.5, color: 'var(--yellow)' } },
+      ? el('div', { style: { marginTop: '14px', background: 'var(--grey-9)', borderRadius: 'var(--r-inset)',
+                             padding: '12px 14px', fontSize: '11.5px', lineHeight: 1.5, color: 'var(--yellow)' } },
           store.isPreview
             ? 'This is a preview copy. Nothing is saved — close the tab and it is gone.'
-            : 'Your journal is saved on this computer, inside the browser. Clearing browsing data erases it, so export a backup now and then.',
+            : 'Your journal is saved inside this browser. Clearing browsing data erases it, so export a vault now and then.',
           store.isLocal && store.canChooseFolder
             ? el('button', { class: 'm', style: { marginTop: '11px', display: 'inline-flex', alignItems: 'center',
                   gap: '7px', fontSize: '11px', color: 'var(--grey-8)', background: 'var(--grey-1)',
@@ -242,14 +232,11 @@ export function settings(store, nav) {
                 icon('folder', 12, 'var(--grey-8)', 1.8), 'Keep it in a folder instead')
             : null)
       : null,
-    el('div', { style: { marginTop: '18px', display: 'flex', alignItems: 'baseline', gap: '10px' } },
-      countEl, metaEl),
-    el('div', { style: { marginTop: '13px', display: 'flex', alignItems: 'center', gap: '8px' } },
-      scopeChips,
-      el('button', { class: 'btn btn-primary', style: { marginLeft: 'auto' }, onClick: doExport },
-        icon('upload', 14, '#fff', 1.9), 'Export')),
-    el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
-    importBody,
+
+    el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '16px 0 0' } }),
+    el('button', { class: 'm', style: { marginTop: '14px', display: 'inline-flex', alignItems: 'center',
+        gap: '7px', fontSize: '11px', color: 'var(--grey-5)' }, onClick: doCsvExport },
+      icon('download', 12, 'var(--grey-5)', 1.8), 'Trades as a spreadsheet'),
   );
 
   /* ============================================================
@@ -335,18 +322,14 @@ export function settings(store, nav) {
     el('div', { style: { display: 'flex', flexDirection: 'column', gap: '18px' } },
       swatchRow('Profit', 'var(--profit)', swatches('profit', PROFIT_COLOURS, store.colours.profit)),
       swatchRow('Loss', 'var(--loss)', swatches('loss', LOSS_COLOURS, store.colours.loss), '\u22121.00R')),
-    el('div', { class: 'm', style: { marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--grey-7)',
-                                     fontSize: '10.5px', lineHeight: 1.5, color: 'var(--grey-5)' } },
-      'Used everywhere a number is up or down. On the pale cards the same colour is darkened or lightened so it stays readable.'),
   );
 
-  refreshCounts();
   return el('div', { class: 'view' }, head,
     el('div', { class: 'row', style: { flex: '1', minHeight: 0 } },
       accountsCard,
       el('div', { style: { width: '380px', flex: 'none', display: 'flex', flexDirection: 'column',
                            gap: '8px', alignSelf: 'flex-start', maxHeight: '100%', overflowY: 'auto' } },
-        backupCard, appearanceCard)));
+        vaultCard, appearanceCard)));
 }
 
 /* Where the journal lives, and — when that is a choice — the way to change it. */

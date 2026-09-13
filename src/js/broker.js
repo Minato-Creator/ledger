@@ -23,7 +23,10 @@ const FIELDS = {
   time:      ['time', 'date', 'datetime', 'datetime', 'ordertime', 'filltime', 'executiontime',
               'transactiontime', 'transactiondate', 'placedtime', 'opentime', 'entrytime',
               'timestamp', 'tradedate', 'closedate', 'closetime'],
-  closeTime: ['closetime', 'exittime', 'closedate', 'exitdate', 'dateclosed', 'timeclosed'],
+  /* Some exports — Ledger's own among them — keep the day in one column and
+     the clock in another. Where that happens the two are put back together. */
+  openTime:  ['timeopen', 'opentime', 'entrytime', 'timein', 'openclock'],
+  closeTime: ['closetime', 'timeclose', 'exittime', 'closedate', 'exitdate', 'dateclosed', 'timeclosed'],
   symbol:    ['symbol', 'instrument', 'contract', 'ticker', 'market', 'product', 'pair', 'asset'],
   qty:       ['qty', 'quantity', 'size', 'volume', 'lots', 'filledqty', 'amount', 'contracts',
               'positionsize', 'shares', 'units'],
@@ -33,7 +36,7 @@ const FIELDS = {
               'entryprice', 'openprice', 'avgentryprice', 'filledprice'],
   exitPrice: ['exitprice', 'closeprice', 'avgexit', 'avgcloseprice', 'avgexitprice', 'sellprice'],
   pnl:       ['pnl', 'realizedpnl', 'realisedpnl', 'netpnl', 'profit', 'profitloss', 'netprofit',
-              'grossp l', 'grosspl', 'netpl', 'rpnl', 'result'],
+              'grossp l', 'grosspl', 'netpl', 'rpnl', 'result', 'netresult'],
   commission:['commission', 'commissions', 'fee', 'fees', 'comm', 'brokerage'],
   status:    ['status', 'state', 'orderstatus', 'filled'],
   orderType: ['ordertype', 'type', 'ordkind'],
@@ -56,6 +59,7 @@ export function mapColumns(headers) {
   // side and order type; if a real side column exists, let it have it.
   if (out.side && out.orderType && out.side === out.orderType) out.orderType = null;
   if (out.time && out.closeTime && out.time === out.closeTime) out.closeTime = null;
+  if (out.time && out.openTime && out.time === out.openTime) out.openTime = null;
   return out;
 }
 
@@ -73,10 +77,13 @@ function detectDayFirst(values) {
   return dayFirst;                            // null: never resolved, all ambiguous
 }
 
-function parseStamp(raw, dayFirst) {
+function parseStamp(raw, dayFirst, clock) {
   const s = String(raw || '').trim();
   if (!s) return null;
-  const time = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  /* The clock comes from the stamp itself where there is one, and from its own
+     column where the export keeps them apart. */
+  const time = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+    || String(clock || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   const hh = time ? +time[1] : 0, mi = time ? +time[2] : 0;
 
   let iso = s.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
@@ -151,10 +158,18 @@ export function parseBrokerCSV(text, { offsetHours = 0 } = {}) {
   if (shape === 'trades') {
     const trades = [];
     rows.forEach((r, i) => {
-      const st = parseStamp(get(r, 'time'), dayFirst);
+      const st = parseStamp(get(r, 'time'), dayFirst, get(r, 'openTime'));
       if (!st) { skipped.push({ row: i + 2, why: 'could not read the date' }); return; }
       const open = shift(st, offsetHours);
-      const cs = col.closeTime ? parseStamp(get(r, 'closeTime'), dayFirst) : null;
+      /* A close column that is only a clock — "10:00" — belongs to the day the
+         trade opened on. Reading it as no time at all would throw away the
+         one thing it was telling you. */
+      const closeRaw = col.closeTime ? String(get(r, 'closeTime') || '').trim() : '';
+      let cs = closeRaw ? parseStamp(closeRaw, dayFirst) : null;
+      if (!cs && /^\d{1,2}:\d{2}/.test(closeRaw)) {
+        const m = closeRaw.match(/(\d{1,2}):(\d{2})/);
+        cs = { ...st, hh: +m[1], mi: +m[2] };
+      }
       const close = cs ? shift(cs, offsetHours) : null;
       trades.push({
         date: open.date, timeOpen: open.time, timeClose: close ? close.time : null,
@@ -174,7 +189,7 @@ export function parseBrokerCSV(text, { offsetHours = 0 } = {}) {
   const fills = [];
   rows.forEach((r, i) => {
     if (!isFilled(get(r, 'status'))) { skipped.push({ row: i + 2, why: 'not a fill' }); return; }
-    const st = parseStamp(get(r, 'time'), dayFirst);
+    const st = parseStamp(get(r, 'time'), dayFirst, get(r, 'openTime'));
     if (!st) { skipped.push({ row: i + 2, why: 'could not read the date' }); return; }
     const price = parseNumber(get(r, 'price'));
     if (price == null) { skipped.push({ row: i + 2, why: 'no fill price' }); return; }

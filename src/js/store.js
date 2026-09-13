@@ -10,14 +10,37 @@ import { sessionFor, UNITS, todayISO, readableOn, lift, sink } from './calc.js';
 import { findBackground, scrimFor } from './backgrounds.js';
 import { SLOTS, shotName, urlFor, forgetUrl } from './shots.js';
 import { fs, isTauri } from './fs.js';
+import { zip, unzip, bytesOfText, textOfBytes } from './vault.js';
 export { todayISO, isTauri };
 
+/* ============================================================
+   The vault
+
+   A vault is a folder, laid out so that a person opening it in a file manager
+   can see what is what:
+
+     vault.json          what this folder is
+     data/               the journal — four files of plain JSON
+     screenshots/        the charts, as ordinary .jpg files
+
+   Earlier versions kept the four files loose at the top with the replay
+   tucked in its own folder. Those are moved on first open rather than left
+   for the user to tidy.
+   ============================================================ */
 export const FILES = {
+  accounts: 'data/accounts.json',
+  trades:   'data/trades.json',
+  playbook: 'data/playbook.json',
+  replay:   'data/replay.json',
+};
+const LEGACY = {
   accounts: 'accounts.json',
   trades:   'trades.json',
   playbook: 'playbook.json',
   replay:   'replay/weeks.json',
 };
+export const MANIFEST = 'vault.json';
+export const SHOTS = 'screenshots';
 
 export function isSupported() { return fs.isSupported(); }
 
@@ -116,13 +139,38 @@ class Store {
   }
 
   /* Pick a folder (needs a user gesture). */
+  /**
+   * Move the journal somewhere else.
+   *
+   * Everything it holds is named here and carried across, because "choose a
+   * folder" has to mean moving house rather than starting over — a button
+   * that silently left a year of trades behind would be the worst thing in
+   * the app. Pointing at a folder that already HOLDS a journal opens that one
+   * instead; the filesystem layer decides which case it is by looking.
+   */
   async connect() {
-    if (!(await fs.connect())) return false;
+    const carry = this.data
+      ? [...Object.values(FILES),
+         ...this.trades.flatMap(t => [t.shotLtf, t.shotHtf]).filter(Boolean)]
+      : [];
+    /* A folder that already holds a vault — this shape or the older one — is
+       opened rather than written over. */
+    if (!(await fs.connect({ carry, probes: [FILES.trades, LEGACY.trades] }))) return false;
     await this.load();
     return true;
   }
 
   async forget() { await fs.forget(); this.data = null; }
+
+  /* The first run, when there is no vault yet: either take the suggestion or
+     go and find a folder. */
+  async suggestedVault() { return fs.suggest(); }
+  async createVault(path) {
+    if (!(await fs.adopt(path))) return false;
+    await this.load();
+    return true;
+  }
+  async revealVault() { return fs.reveal(); }
 
   get folderName() { return fs.folderName; }
   get folderPath() { return fs.folderPath; }
@@ -148,10 +196,12 @@ class Store {
   async writeJSON(name, value) { return fs.writeText(name, JSON.stringify(value, null, 2)); }
   async writeText(name, text)  { return fs.writeText(name, text); }
   async ensureDir(name)        { return fs.ensureDir(name); }
+  async exists(name)           { return fs.exists(name); }
 
   /* ---------- load / save ---------- */
   async load() {
-    await this.ensureDir('replay');
+    await this.tidyVault();
+    await this.ensureDir('data');
     const [accounts, trades, playbook, replay] = await Promise.all([
       this.readJSON(FILES.accounts, defaultAccounts()),
       this.readJSON(FILES.trades,   { version: 1, trades: [] }),
@@ -159,6 +209,7 @@ class Store {
       this.readJSON(FILES.replay,   { version: 1, weeks: {} }),
     ]);
     this.data = { accounts, trades, playbook, replay };
+    this.heal();
     this.migrate();
     applyTheme(this.theme, this.colours);
     applySurface(this.background, this.glass, this.theme);
@@ -170,10 +221,171 @@ class Store {
       this.writeJSON(FILES.trades, trades),
       this.writeJSON(FILES.playbook, playbook),
       this.writeJSON(FILES.replay, replay),
-      this.ensureDir('screenshots'),
+      this.ensureDir(SHOTS),
+      this.writeText(MANIFEST, JSON.stringify({
+        kind: 'ledger-vault', version: 1, app: 'Ledger',
+        note: 'Your journal. data/ holds the trades, screenshots/ holds the charts.',
+      }, null, 2)),
     ]);
     if (this.pendingMigration) { this.pendingMigration = false; }
     this.emit();
+  }
+
+  /**
+   * Bring an older vault's shape up to date.
+   *
+   * The four files used to sit loose at the top of the folder. They are moved
+   * into data/ and the originals removed, so nobody ends up with two copies
+   * and no way to tell which one the app is reading. A file that will not
+   * move is left exactly where it is: a tidier folder is not worth a lost
+   * trade.
+   */
+  async tidyVault() {
+    try {
+      if (await this.exists(FILES.trades)) return;      // already in its new shape
+      if (!(await this.exists(LEGACY.trades))) return;  // nothing to move
+      await this.ensureDir('data');
+      for (const key of Object.keys(FILES)) {
+        try {
+          const text = await fs.readText(LEGACY[key]);
+          await fs.writeText(FILES[key], text);
+          await fs.remove(LEGACY[key]);
+        } catch { /* not there, or not movable — leave it alone */ }
+      }
+    } catch { /* a vault that cannot be tidied still opens */ }
+  }
+
+  /* ============================================================
+     Exporting and importing a whole vault
+
+     One ZIP with the folder inside it, screenshots and all, so a backup is a
+     single file you can copy to a drive and a restore is that file coming
+     back. It is a real ZIP: you can open it and look, which is the only way a
+     backup is worth anything.
+     ============================================================ */
+  shotNames() {
+    return this.trades.flatMap(t => [t.shotLtf, t.shotHtf]).filter(Boolean);
+  }
+
+  async exportVault() {
+    const entries = [{
+      name: MANIFEST,
+      bytes: bytesOfText(JSON.stringify({
+        kind: 'ledger-vault', version: 1, app: 'Ledger',
+        exported: new Date().toISOString(),
+        accounts: this.allAccounts.length,
+        trades: this.trades.length,
+      }, null, 2)),
+    }];
+
+    for (const [key, name] of Object.entries(FILES)) {
+      entries.push({ name, bytes: bytesOfText(JSON.stringify(this.data[key], null, 2)) });
+    }
+
+    let missing = 0;
+    for (const name of new Set(this.shotNames())) {
+      const blob = await fs.readImage(name).catch(() => null);
+      if (!blob) { missing++; continue; }
+      entries.push({ name, bytes: new Uint8Array(await blob.arrayBuffer()) });
+    }
+
+    const file = await zip(entries);
+    return { file, entries: entries.length, missing,
+             name: `ledger-vault-${todayISO()}.zip` };
+  }
+
+  /**
+   * Read a vault file and see what is in it, without writing anything.
+   * Importing replaces what you have, so it is worth being told first.
+   */
+  async inspectVault(blob) {
+    const files = await unzip(blob);
+    /* A vault someone unzipped, looked at and zipped again can come back with
+       its files at the top rather than under data/. Both are the same vault. */
+    const find = tail => files.find(f => f.name === tail || f.name.endsWith('/' + tail)
+      || f.name.replace(/^[^/]+\//, '') === tail);
+    const trades = find('data/trades.json') || find('trades.json');
+    const accounts = find('data/accounts.json') || find('accounts.json');
+    if (!trades || !accounts) throw new Error('That file is not a Ledger vault.');
+
+    const t = JSON.parse(textOfBytes(trades.bytes));
+    const a = JSON.parse(textOfBytes(accounts.bytes));
+    const shots = files.filter(f => /(^|\/)screenshots\//.test(f.name));
+    return { files, trades: (t.trades || []).length, accounts: (a.accounts || []).length, shots: shots.length };
+  }
+
+  /** Replace this vault with the one in the file. */
+  async importVault(blob) {
+    const { files } = await this.inspectVault(blob);
+    const tail = name => name.replace(/^.*?((data|screenshots)\/)/, '$1');
+
+    /* Everything the old vault had that the new one does not is cleared out
+       first, so a restore leaves the folder as it was on the day it was
+       exported rather than mixing two journals together. */
+    for (const name of new Set(this.shotNames())) await fs.remove(name).catch(() => {});
+
+    let damaged = 0;
+    for (const f of files) {
+      const name = tail(f.name);
+      if (/^data\/.+\.json$/.test(name)) {
+        /* Written only if it is really JSON. A truncated file skipped here
+           becomes a default on load; a truncated file written here would be
+           read back as nothing at all. */
+        const text = textOfBytes(f.bytes);
+        try { JSON.parse(text); } catch { damaged++; continue; }
+        await fs.writeText(name, text);
+      }
+      else if (/^screenshots\/./.test(name)) await fs.writeImage(name, new Blob([f.bytes], { type: 'image/jpeg' }));
+      else if (name === MANIFEST) await fs.writeText(MANIFEST, textOfBytes(f.bytes));
+    }
+    await this.load();
+    return { trades: this.trades.length, accounts: this.allAccounts.length, damaged };
+  }
+
+  /* ============================================================
+     Making a vault whole before anything reads it.
+
+     A vault can arrive with a key missing: an older Ledger wrote it, a write
+     was cut off half way, or somebody unzipped it, edited the JSON by hand
+     and zipped it again — which the format deliberately allows. A missing key
+     has to cost that one key and nothing else. Before this, a playbook with
+     no tagGroups took every trade page down with it, which is the worst
+     possible time to find out: the moment after a restore.
+     ============================================================ */
+  heal() {
+    const d = this.data;
+    const def = defaultPlaybook();
+    const note = () => { this.pendingMigration = true; };
+
+    if (!d.accounts || typeof d.accounts !== 'object') { d.accounts = defaultAccounts(); note(); }
+    if (!Array.isArray(d.accounts.accounts)) { d.accounts.accounts = []; note(); }
+    d.accounts.accounts = d.accounts.accounts.filter(a => a && a.id);
+
+    if (!d.trades || typeof d.trades !== 'object') { d.trades = { version: 1, trades: [] }; note(); }
+    if (!Array.isArray(d.trades.trades)) { d.trades.trades = []; note(); }
+    /* A row with no id cannot be opened, edited or deleted, so it is not a
+       trade — it is a hole that swallows clicks. */
+    const kept = d.trades.trades.filter(t => t && t.id);
+    if (kept.length !== d.trades.trades.length) { d.trades.trades = kept; note(); }
+
+    if (!d.playbook || typeof d.playbook !== 'object') { d.playbook = def; note(); }
+    const pb = d.playbook;
+    if (!Array.isArray(pb.setups)) { pb.setups = []; note(); }
+    if (!Array.isArray(pb.tagGroups)) {
+      /* A flat list of tags is the shape from before groups existed. It is
+         kept, under one group, rather than thrown away. */
+      pb.tagGroups = Array.isArray(pb.tags) && pb.tags.length
+        ? [{ id: 'g_tags', name: 'Tags', tags: pb.tags.filter(t => t && t.id) }]
+        : def.tagGroups;
+      note();
+    }
+    for (const g of pb.tagGroups) if (!Array.isArray(g.tags)) { g.tags = []; note(); }
+    if (!Array.isArray(pb.sessions)) { pb.sessions = DEFAULT_SESSIONS(); note(); }
+    if (!pb.rules  || typeof pb.rules  !== 'object') { pb.rules  = def.rules;  note(); }
+    if (!pb.replay || typeof pb.replay !== 'object') { pb.replay = def.replay; note(); }
+
+    if (!d.replay || typeof d.replay !== 'object') { d.replay = { version: 1, weeks: {} }; note(); }
+    if (!d.replay.weeks || typeof d.replay.weeks !== 'object') { d.replay.weeks = {}; note(); }
   }
 
   /* Folders written by an earlier version get brought up to date in place.

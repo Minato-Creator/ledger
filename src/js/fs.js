@@ -91,6 +91,7 @@ function memoryBackend() {
     async readImage(name) { return files.get('img:' + name) || null; },
     async writeImage(name, blob) { files.set('img:' + name, blob); },
     async deleteImage(name) { files.delete('img:' + name); },
+    async remove(name) { files.delete(name); },
   };
 }
 
@@ -123,28 +124,66 @@ function tauriBackend() {
     get folderName() { return root ? root.split(/[\\/]/).filter(Boolean).pop() : null; },
     get folderPath() { return root; },
 
-    /* There is nothing to restore permission for and nothing to ask. If a
-       folder was chosen before we use it; otherwise we make the default one
-       and get on with it. */
+    /* A vault that was chosen before is opened without a word. The first run
+       is the only time this returns empty-handed, and it is the one time the
+       app should be asking rather than deciding. */
     async tryRestore() {
       sep = await invoke('path_sep');
       const cfg = await readConfig();
-      root = cfg.folder && await invoke('path_exists', { path: cfg.folder })
-        ? cfg.folder
-        : await invoke('default_folder');
+      if (cfg.folder && await invoke('path_exists', { path: cfg.folder })) {
+        root = cfg.folder;
+        await invoke('make_dir', { path: root });
+        return 'connected';
+      }
+      return 'none';
+    },
+
+    /* Where the app would put a vault if you would rather not think about it. */
+    async suggest() { return invoke('default_folder'); },
+    async adopt(path) {
+      root = path;
       await invoke('make_dir', { path: root });
-      if (cfg.folder !== root) await writeConfig({ ...cfg, folder: root });
-      return 'connected';
+      await writeConfig({ folder: root });
+      return true;
+    },
+    async reveal() {
+      if (!root) return false;
+      try { await invoke('open_path', { path: root }); return true; } catch { return false; }
     },
 
     async regrant() { return true; },
 
-    /* Only reached when you deliberately move the journal somewhere else. */
-    async connect() {
-      const picked = await window.__TAURI__.dialog.open({ directory: true, multiple: false, title: 'Choose a folder for your journal' });
+    /* Only reached when you deliberately move the journal somewhere else —
+       and moving it is what this does. Each file is copied one at a time
+       rather than gathered up first, because a year of screenshots is not
+       something to hold in memory on the way past.
+
+       A folder that already contains a journal is left exactly as it is: you
+       were pointing at one, not moving one. */
+    async connect({ carry = [], probes = [] } = {}) {
+      const picked = await window.__TAURI__.dialog.open({ directory: true, multiple: false, title: 'Choose a folder for your vault' });
       if (!picked) return false;
+      const from = root;
       root = picked;
       await invoke('make_dir', { path: root });
+
+      let occupied = false;
+      for (const probe of probes) {
+        if (await invoke('path_exists', { path: resolve(probe) })) { occupied = true; break; }
+      }
+      if (from && from !== picked && !occupied) {
+        for (const name of carry) {
+          const src = join(from, ...String(name).split('/'));
+          try {
+            if (IMAGE.test(name)) {
+              const data = await invoke('read_image', { path: src });
+              if (data) await invoke('write_image', { path: resolve(name), data });
+            } else {
+              await invoke('write_text', { path: resolve(name), contents: await invoke('read_text', { path: src }) });
+            }
+          } catch { /* a file that was never there does not need carrying */ }
+        }
+      }
       await writeConfig({ folder: root });
       return true;
     },
@@ -190,6 +229,9 @@ function tauriBackend() {
       }
       return shotStore.remove(name);
     },
+    async remove(name) {
+      try { await invoke('delete_path', { path: resolve(name) }); } catch { /* already gone */ }
+    },
   };
 }
 
@@ -216,6 +258,9 @@ function base64ToBlob(b64, type = 'image/jpeg') {
    ============================================================ */
 const IDB_NAME = 'ledger-handle', IDB_STORE = 'handles', HANDLE_KEY = 'root';
 
+/* Which of a journal's files are pictures rather than text. */
+const IMAGE = /\.(jpe?g|png|webp)$/i;
+
 function idb() {
   return new Promise((res, rej) => {
     const r = indexedDB.open(IDB_NAME, 1);
@@ -231,6 +276,29 @@ const idbOp = (mode, fn) => idb().then(db => new Promise((res, rej) => {
 const idbGet = k => idbOp('readonly',  s => s.get(k));
 const idbSet = (k, v) => idbOp('readwrite', s => s.put(v, k));
 const idbDel = k => idbOp('readwrite', s => s.delete(k));
+
+/* Copy named files from one folder handle to another, one at a time. Used
+   when a journal moves: the pictures alone can run to hundreds of megabytes,
+   so nothing is gathered up first. */
+async function carryInto(fromRoot, toRoot, names) {
+  const at = async (rootHandle, name, create) => {
+    const parts = String(name).split('/');
+    let dir = rootHandle;
+    for (const seg of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(seg, { create });
+    return { dir, base: parts[parts.length - 1] };
+  };
+  for (const name of names) {
+    try {
+      const src = await at(fromRoot, name, false);
+      const file = await (await src.dir.getFileHandle(src.base)).getFile();
+      const dst = await at(toRoot, name, true);
+      const fh = await dst.dir.getFileHandle(dst.base, { create: true });
+      const w = await fh.createWritable();
+      await w.write(file);
+      await w.close();
+    } catch { /* a file that was never there does not need carrying */ }
+  }
+}
 
 function browserBackend() {
   let root = null;                        // FileSystemDirectoryHandle
@@ -265,11 +333,20 @@ function browserBackend() {
       return (await root.requestPermission({ mode: 'readwrite' })) === 'granted';
     },
 
-    async connect() {
+    async connect({ carry = [], probes = [] } = {}) {
       const handle = await window.showDirectoryPicker({ id: 'ledger-journal', mode: 'readwrite' });
       if (!handle) return false;
       if ((await handle.requestPermission({ mode: 'readwrite' })) !== 'granted') return false;
+      const from = root;
       root = handle;
+
+      /* Same rule as native: an empty folder receives the vault, a folder
+         that already holds one is simply opened. */
+      let occupied = false;
+      for (const probe of probes) if (await this.exists(probe)) { occupied = true; break; }
+      if (from && from !== handle && !occupied) {
+        await carryInto(from, handle, carry);
+      }
       await idbSet(HANDLE_KEY, handle);
       return true;
     },
@@ -311,7 +388,8 @@ function browserBackend() {
       await w.write(blob);
       await w.close();
     },
-    async deleteImage(name) {
+    async deleteImage(name) { return this.remove(name); },
+    async remove(name) {
       try {
         const { dir, base } = await dirFor(name, false);
         await dir.removeEntry(base);
@@ -369,6 +447,7 @@ function localBackend() {
     readImage:   name => shotStore.read(name),
     writeImage:  (name, blob) => shotStore.write(name, blob),
     deleteImage: name => shotStore.remove(name),
+    async remove(name) { localStorage.removeItem(key(name)); },
   };
 }
 
@@ -400,6 +479,11 @@ export const fs = {
     return active.kind === 'native' || (pickerAvailable() && !onFileProtocol() && !embedded());
   },
   isSupported: () => active.isSupported(),
+  /* Only the native shell can offer a folder without a picker, or open one in
+     the file manager. Elsewhere these say so by answering null and false. */
+  suggest: () => (active.suggest ? active.suggest() : Promise.resolve(null)),
+  adopt:   p => (active.adopt ? active.adopt(p) : Promise.resolve(false)),
+  reveal:  () => (active.reveal ? active.reveal() : Promise.resolve(false)),
 
   /* Someone opening this for the first time has no folder to restore and no
      reason to be asked for one before they have seen anything — a folder
@@ -425,18 +509,19 @@ export const fs = {
   readImage:   n => active.readImage(n),
   writeImage:  (n, b) => active.writeImage(n, b),
   deleteImage: n => active.deleteImage(n),
+  remove:      n => active.remove(n),
 
-  async connect() {
+  async connect(opts = {}) {
     /* Native opens the operating system's own folder chooser. Sending it down
        the browser path would reach for showDirectoryPicker, which no desktop
        webview has — the journal could never be moved. */
-    if (active.kind === 'native') return active.connect();
+    if (active.kind === 'native') return active.connect(opts);
     if (!this.canChooseFolder) return false;
-    if (active.kind === 'browser') return active.connect();
+    if (active.kind === 'browser') return active.connect(opts);
 
     const prev = active;
     const next = browserBackend();
-    if (!(await next.connect())) return false;
+    if (!(await next.connect(opts))) return false;
     /* Whatever was already written comes along. Choosing a folder should feel
        like moving house, not like starting over — and a journal that appeared
        to empty itself would be the worst possible way to learn that. Anything

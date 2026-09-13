@@ -54,6 +54,24 @@ fn write_image(path: String, data: String) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|e| format!("{path}: {e}"))
 }
 
+/// Show a folder in the operating system's own file manager. Every platform
+/// spells this differently and none of them need a crate for it.
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let program = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(program)
+        .arg(&path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("{path}: {e}"))
+}
+
 /// Removing one file. Already gone counts as done.
 #[tauri::command]
 fn delete_path(path: String) -> Result<(), String> {
@@ -143,6 +161,7 @@ fn main() {
             read_image,
             write_image,
             delete_path,
+            open_path,
             make_dir,
             path_exists,
             path_sep,

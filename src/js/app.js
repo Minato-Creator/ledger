@@ -33,6 +33,39 @@ const nav = {
   },
 };
 
+/* ---------- first run on the desktop app: where does the vault go? ----------
+
+   The one question worth asking before anything else, because the answer is
+   where every trade you ever log will live. It is asked once, it comes with
+   an answer already filled in, and it is changeable later in Settings. */
+function vaultGate(suggested) {
+  const path = el('span', { class: 'm', style: { fontSize: '12px', color: 'var(--ink-2)',
+    background: 'var(--grey-8)', borderRadius: 'var(--r-btn)', padding: '9px 14px',
+    display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' } }, suggested || '—');
+
+  const go = async (fn) => {
+    try { if (await fn()) boot(); }
+    catch (e) { if (e.name !== 'AbortError') toast(e.message, 'bad'); }
+  };
+
+  const card = el('div', { class: 'gate-card' },
+    el('div', { style: { display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '22px' } },
+      el('div', { class: 'brand-mark' }, icon('mark', 15, 'var(--grey-8)', 2.6)),
+      el('span', { class: 'brand-name', style: { fontSize: '17px' } }, 'ledger')),
+    el('h1', {}, 'Where should your vault live?'),
+    el('div', { class: 'fs', style: { marginTop: '18px' } },
+      'Vault\\\n  vault.json\n  data\\           accounts, trades, playbook\n  screenshots\\    your charts'),
+    el('div', { style: { marginTop: '18px' } }, path),
+    el('div', { class: 'gate-actions', style: { marginTop: '18px' } },
+      el('button', { class: 'btn btn-primary', disabled: !suggested,
+        onClick: () => go(() => store.createVault(suggested)) }, 'Use this folder'),
+      el('button', { class: 'btn btn-quiet', onClick: () => go(() => store.connect()) },
+        icon('folder', 15, 'var(--grey-1)', 1.8), 'Choose another')),
+  );
+  return el('div', { class: 'gate' }, card);
+}
+
 /* ---------- gate: pick the folder ---------- */
 function gate({ mode }) {
   const supported = isSupported();
@@ -254,7 +287,18 @@ async function boot() {
   /* Native has nothing to gate: the folder exists, it is ours, and no browser
      is standing in the way. The gate is a browser problem and only appears
      there. */
-  if (state !== 'connected') { document.body.append(gate({ mode: state })); return; }
+  if (state !== 'connected') {
+    /* The desktop app has a folder to suggest and no permission to ask for,
+       so it gets the vault question rather than the browser's gate. */
+    if (isTauri() && state === 'none') {
+      let suggested = null;
+      try { suggested = await store.suggestedVault(); } catch { /* offer the picker alone */ }
+      document.body.append(vaultGate(suggested));
+      return;
+    }
+    document.body.append(gate({ mode: state }));
+    return;
+  }
   render();
 }
 
