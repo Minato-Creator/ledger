@@ -1,6 +1,6 @@
 [package]
 name = "ledger"
-version = "1.2.0"
+version = "2.6.1"
 description = "A trading journal that keeps your data as plain files in a folder you choose."
 authors = ["Minato"]
 edition = "2021"
@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+ureq = "2"
 
 # A smaller, faster binary. Journal files are tiny; the app should be too.
 [profile.release]

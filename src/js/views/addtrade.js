@@ -34,6 +34,7 @@ export function addTrade(store, nav, existingId = null) {
         ? asText(Number(editing.netResult) || 0)
         : asText(Math.abs(Number(editing.netResult) || 0)),
     status: editing.status === 'open' ? 'open' : 'closed',
+    mode: editing.mode === 'forward' ? 'forward' : 'live',
   } : {
     assetClass: 'Forex', pair: '', side: 'buy', setupId: pb.setups[0]?.id || null,
     sessionId: null, sessionAuto: true,
@@ -41,7 +42,7 @@ export function addTrade(store, nav, existingId = null) {
     entryPrice: '', stopLoss: '', takeProfit: '', exitPrice: '',
     size: '', sizeUnit: 'lots',
     riskPercent: acct.defaultRiskPercent, netResult: '', resultSign: 'win',
-    tagIds: [], grade: '', notes: '', status: 'closed',
+    tagIds: [], grade: '', notes: '', status: 'closed', mode: 'live',
   };
   if (editing) f.sessionAuto = false;
 
@@ -124,6 +125,24 @@ export function addTrade(store, nav, existingId = null) {
     ...[['closed', 'Closed'], ['open', 'Still open']].map(([v, label]) =>
       el('button', { type: 'button', class: f.status === v ? 'is-on' : '',
         onClick: () => { if (f.status === v) return; f.status = v; paintStatus(); recompute(); } }, label)));
+
+  /* ============================================================
+     Live, or a forward test
+
+     A test taken on a demo is a real decision worth keeping, and a worthless
+     line in a funded account's P&L. Both are true, so the trade says which it
+     was and the sidebar decides whether to count it. It defaults to Live: a
+     real trade mislabelled as a test would quietly vanish from your figures,
+     which is the worse mistake of the two.
+     ============================================================ */
+  const modeWrap = el('div', { class: 'seg' },
+    ...[['live', 'Live'], ['forward', 'Forward test']].map(([v, label]) =>
+      el('button', { type: 'button', class: f.mode === v ? 'is-on' : '',
+        onClick: () => { if (f.mode === v) return; f.mode = v; paintMode(); } }, label)));
+
+  function paintMode() {
+    [...modeWrap.children].forEach((b, i) => b.classList.toggle('is-on', (i === 0) === (f.mode === 'live')));
+  }
 
   function paintStatus() {
     const open = isOpen();
@@ -349,6 +368,7 @@ export function addTrade(store, nav, existingId = null) {
       riskPercent: c.parseNumber(f.riskPercent),
       tagIds: f.tagIds, grade: f.grade || null, notes: f.notes || '',
       status: isOpen() ? 'open' : 'closed',
+      mode: f.mode === 'forward' ? 'forward' : 'live',
     };
     /* A running trade carries no result, no exit and no closing time — not a
        zero, not an empty string. Anything that reads this trade later has to
@@ -386,6 +406,7 @@ export function addTrade(store, nav, existingId = null) {
       el('span', { style: { width: '7px', height: '7px', borderRadius: '2px', background: acct.color } }),
       el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-2)' } }, 'Saving to ', el('span', { style: { color: '#fff' } }, acct.name))),
     statusWrap,
+    modeWrap,
     el('div', { class: 'spacer' }),
     editing ? null : el('button', { class: 'btn btn-ghost', onClick: () => nav.go('#/import') },
       icon('upload', 14, 'var(--grey-3)', 1.8), 'Import CSV'),

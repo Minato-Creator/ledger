@@ -1,4 +1,4 @@
-import { el, icon, toast } from '../ui.js';
+import { el, icon, toast, brandMark } from '../ui.js';
 import * as c from '../calc.js';
 import { todayISO } from '../store.js';
 
@@ -181,10 +181,10 @@ export function accounts(store, nav) {
       el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column',
                            alignItems: 'center', justifyContent: 'center', gap: '20px' } },
         el('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' } },
-          el('div', { class: 'brand-mark', style: { width: '40px', height: '40px', borderRadius: '14px' } },
-            icon('mark', 20, 'var(--grey-8)', 2.4)),
+          el('div', { class: 'brand-mark', style: { width: '52px', height: '52px', borderRadius: '18px' } },
+            brandMark(52, 68)),
           el('div', { style: { textAlign: 'center' } },
-            el('h1', { class: 'welcome-title' }, 'Welcome to Ledger'),
+            el('h1', { class: 'welcome-title' }, 'Welcome to Quire'),
             el('p', { class: 'm', style: { margin: '9px 0 0', fontSize: '12.5px', color: 'var(--grey-5)' } },
               'Your edge, in writing.'))),
         create));

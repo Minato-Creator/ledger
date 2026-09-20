@@ -15,7 +15,8 @@
      say what a point is worth, and that stays your answer to give.
    ============================================================ */
 import { parseCSV } from './csv.js';
-import { parseNumber } from './calc.js';
+import { parseNumber, cleanSymbol } from './calc.js';
+export { cleanSymbol };
 
 const norm = h => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -23,7 +24,7 @@ const FIELDS = {
   time:      ['time', 'date', 'datetime', 'datetime', 'ordertime', 'filltime', 'executiontime',
               'transactiontime', 'transactiondate', 'placedtime', 'opentime', 'entrytime',
               'timestamp', 'tradedate', 'closedate', 'closetime'],
-  /* Some exports — Ledger's own among them — keep the day in one column and
+  /* Some exports — Quire's own among them — keep the day in one column and
      the clock in another. Where that happens the two are put back together. */
   openTime:  ['timeopen', 'opentime', 'entrytime', 'timein', 'openclock'],
   closeTime: ['closetime', 'timeclose', 'exittime', 'closedate', 'exitdate', 'dateclosed', 'timeclosed'],
@@ -111,16 +112,6 @@ const shift = (st, hours) => {
            time: `${pad(x.getUTCHours())}:${pad(x.getUTCMinutes())}`,
            stamp: t };
 };
-
-/* Trading platforms prefix and decorate: COMEX:MGC, MGC1!, XAUUSD.pro */
-export function cleanSymbol(raw) {
-  return String(raw || '').trim()
-    .replace(/^[A-Za-z]{2,6}:/, '')                                        // COMEX:MGC
-    .replace(/!+$/, '')                                                    // MGC1!
-    .replace(/[.\-_](pro|raw|ecn|cash|micro|mini|std|spot|fx|m|c|i|z|a|r)$/i, '')  // XAUUSD.pro
-    .replace(/\s+/g, '')
-    .toUpperCase();
-}
 
 const SHORT = /^(s|sell|short|sld|sell short|sellshort|-1)$/i;
 const isFilled = v => {

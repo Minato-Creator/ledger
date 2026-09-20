@@ -100,8 +100,30 @@ function stamp(date, time) {
   return Date.UTC(y, m - 1, d, hh || 0, mm || 0) / 60000;
 }
 
-const samePair = (a, b) => String(a || '').replace(/[^A-Z0-9]/gi, '').toUpperCase()
-                        === String(b || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+/**
+ * The instrument, without the platform's decoration.
+ *
+ * Charting platforms and brokers all name the same metal differently:
+ * OANDA:XAUUSD, CME_MINI:NQ1!, XAUUSD.pro, NAS100.cash. A journal that keeps
+ * the decoration can never tell that two of those are the same trade, so the
+ * prefix goes (everything up to the last colon — broker names are not a fixed
+ * length, and CME_MINI has an underscore in it), then the continuous-contract
+ * marker, then the account-type suffix brokers bolt on.
+ */
+export function cleanSymbol(raw) {
+  return String(raw || '').trim()
+    .replace(/^.*:/, '')                                                   // OANDA:XAUUSD, CME_MINI:NQ1!
+    .replace(/\d*!+$/, '')                                                 // NQ1! -> NQ
+    .replace(/[.\-_](pro|raw|ecn|cash|micro|mini|std|spot|fx|m|c|i|z|a|r)$/i, '')  // XAUUSD.pro
+    .replace(/\s+/g, '')
+    .toUpperCase();
+}
+
+/* Two names are the same instrument once both are stripped back to the name.
+   This runs on the trades as they sit, so a journal imported before the
+   cleaning existed still matches without being imported again. */
+const samePair = (a, b) => cleanSymbol(a).replace(/[^A-Z0-9]/g, '')
+                        === cleanSymbol(b).replace(/[^A-Z0-9]/g, '');
 
 /**
  * Pair up live trades with replay trades for one week.

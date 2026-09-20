@@ -50,6 +50,7 @@ const PATHS = {
   analytics: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   replay:    '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4.5h4.5"/>',
   playbook:  '<path d="M5 4.5h11a3 3 0 0 1 3 3V21H8a3 3 0 0 1-3-3z"/><path d="M5 17.5h14"/>',
+  outlook:   '<path d="M12 3.6a8.4 8.4 0 1 0 8.4 8.4"/><path d="M12 8.6v3.9l2.7 1.6"/><path d="M17.4 3.4v4.2h4.2"/>',
   plus:      '<path d="M12 5v14M5 12h14"/>',
   minus:     '<path d="M5 12h14"/>',
   chevdown:  '<path d="M6 9l6 6 6-6"/>',
@@ -58,9 +59,12 @@ const PATHS = {
   switch:    '<path d="M8 9l4-4 4 4M8 15l4 4 4-4"/>',
   check:     '<path d="M5 13l4.5 4.5L19 7"/>',
   folder:    '<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.2a2 2 0 0 1 1.5.7l1 1.2h7.3A2.5 2.5 0 0 1 21 9.4v8.1a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/>',
+  /* Forex Factory marks an event's weight with a coloured folder, so that is
+     what this is — filled rather than drawn in outline, because at 13px a
+     filled shape is the only one whose colour actually reads. */
+  refresh:   '<path d="M20 12a8 8 0 1 1-2.5-5.8"/><path d="M20 3.6v4.2h-4.2"/>',
   trash:     '<path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/>',
   pencil:    '<path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5z"/>',
-  mark:      '<path d="M4 18 L9 9 L14 15 L20 5"/>',
   download:  '<path d="M12 4v12"/><path d="M7.5 11.5 12 16l4.5-4.5"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/>',
   image:     '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.5" cy="10" r="1.6"/><path d="M3.5 17l4.6-4.2a1.6 1.6 0 0 1 2.2 0L14 16"/><path d="M13.5 14.5l2.4-2.2a1.6 1.6 0 0 1 2.2 0l2.4 2.2"/>',
   expand:    '<path d="M14 4h6v6"/><path d="M10 20H4v-6"/><path d="M20 4l-7 7"/><path d="M4 20l7-7"/>',
@@ -75,6 +79,43 @@ export function icon(name, size = 17, stroke = 'currentColor', width = 1.6) {
   s.setAttribute('stroke', stroke); s.setAttribute('stroke-width', width);
   s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round');
   s.innerHTML = PATHS[name] || '';
+  return s;
+}
+
+/** Forex Factory's folder, filled. The colour is the whole message. */
+export function folderMark(fill, size = 13) {
+  const n = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  n.setAttribute('width', size); n.setAttribute('height', size);
+  n.setAttribute('viewBox', '0 0 24 24'); n.setAttribute('fill', fill);
+  n.innerHTML = '<path d="M3 6.6A2.1 2.1 0 0 1 5.1 4.5h3.3a1.8 1.8 0 0 1 1.3.6l1.2 1.3h8A2.1 2.1 0 0 1 21 8.5v9A2.1 2.1 0 0 1 18.9 19.6H5.1A2.1 2.1 0 0 1 3 17.5z"/>';
+  return n;
+}
+
+/* ---------- the Quire mark ----------
+
+   Four shapes on black: a quire is a set of folded pages bound together, and
+   this is that set seen edge-on. The colours are fixed — the profit and loss
+   colours elsewhere in the app are yours to change, but a mark that changes
+   colour is not a mark. Drawn from one 220-unit grid so the icon, the tab and
+   the sidebar are the same artwork at different sizes rather than three
+   drawings that nearly agree. */
+export const MARK_SHAPES = [
+  ['18', '60', '70', '140', '35', '#0988F0'],
+  ['98', '18', '60', '60', '18', '#F4624A'],
+  ['98', '88', '60', '112', '30', '#E9E9E9'],
+  ['168', '40', '36', '80', '18', '#6C6C6C'],
+];
+
+export function brandMark(size = 26, radius = 49.5) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('width', size); s.setAttribute('height', size);
+  s.setAttribute('viewBox', '0 0 220 220'); s.setAttribute('fill', 'none');
+  s.innerHTML =
+    `<rect width="220" height="220" rx="${radius}" fill="#000000"/>`
+    + `<g transform="translate(110,110) scale(0.8) translate(-110,-110)">`
+    + MARK_SHAPES.map(([x, y, w, h, r, fill]) =>
+        `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${fill}"/>`).join('')
+    + `</g>`;
   return s;
 }
 

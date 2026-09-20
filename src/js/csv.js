@@ -15,6 +15,9 @@ export const COLUMNS = [
   /* Added after the first release. An older backup has no such column and
      reads back as closed, which is what every trade in it was. */
   'status',
+  /* Also added later. Blank, or anything but 'forward', reads as a live
+     trade — which is what every trade written before this column was. */
+  'mode',
 ];
 
 const q = v => {
@@ -50,6 +53,7 @@ export function toCSV(store, accountIds = null) {
       setups.get(t.setupId)?.name,
       (t.tagIds || []).map(id => tags.get(id)?.name).filter(Boolean).join(';'),
       t.grade, t.notes, open ? 'open' : 'closed',
+      t.mode === 'forward' ? 'forward' : 'live',
     ].map(q).join(','));
   }
   return lines.join('\n') + '\n';

@@ -66,13 +66,23 @@ function barList(groups, ctx, { showRate = false } = {}) {
    And a value never lands on a label. A loss reads below its own column, an
    hour reads below the axis, and the two used to meet in the middle. The rows
    are now allotted their own space and the value is clamped out of them. */
-function divergingColumns(buckets, ctx, { width = 1120, height = 262 } = {}) {
+/**
+ * Net result per time bucket, above and below a shared baseline.
+ *
+ * Drawn at the size it is displayed at. It used to be drawn on a fixed
+ * 1120-unit canvas and stretched to fit the card, which on a wide window
+ * scaled everything by about half again — a 13px label came out near 19px and
+ * the bars turned into slabs. One SVG unit is one CSS pixel here, so a size
+ * written in this function is the size on the glass.
+ */
+function divergingColumns(buckets, ctx, { width = 1120, height = 236 } = {}) {
   const { unit: u, account: acct } = ctx;
   const val = b => c.figValue(u, acct, b.net, b.r) ?? 0;
-  const g = svg('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', style: 'display:block;height:auto' });
+  const g = svg('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height: '100%',
+                         style: 'display:block' });
 
-  const plotTop = 8, plotBottom = 196;           // everything below this belongs to the labels
-  const HOUR_Y = 232, COUNT_Y = 250;
+  const plotTop = 10, plotBottom = height - 52;  // everything below this belongs to the labels
+  const HOUR_Y = height - 28, COUNT_Y = height - 11;
   const values = buckets.map(val);
   const maxUp = Math.max(0, ...values);
   const maxDown = Math.max(0, ...values.map(v => -v));
@@ -86,44 +96,120 @@ function divergingColumns(buckets, ctx, { width = 1120, height = 262 } = {}) {
   else upRoom = Math.min(span - 34, Math.max(34, span * (maxUp / (maxUp + maxDown))));
   const baseline = plotTop + upRoom;
 
-  const x0 = 30, plotSpan = width - x0 - 8;
+  const x0 = 18, plotSpan = width - x0 - 12;
   const gap = plotSpan / buckets.length;
-  const bw = Math.min(90, gap * .72);
+  /* Thin marks. A column is a quantity, not a panel — capped so a chart with
+     three busy hours in it does not turn them into slabs. */
+  const bw = Math.min(46, gap * .52);
 
-  g.append(svg('line', { x1: x0, y1: plotTop, x2: width - 8, y2: plotTop, stroke: 'var(--grey-9)', 'stroke-width': 1 }));
-  g.append(svg('line', { x1: x0, y1: baseline, x2: width - 8, y2: baseline, stroke: 'var(--grey-6)', 'stroke-width': 1.4 }));
+  g.append(svg('line', { x1: x0, y1: plotTop, x2: width - 12, y2: plotTop, stroke: 'var(--grey-9)', 'stroke-width': 1 }));
+  g.append(svg('line', { x1: x0, y1: baseline, x2: width - 12, y2: baseline, stroke: 'var(--grey-7)', 'stroke-width': 1 }));
+
+  /* Every figure is written outside its column, the same rule the year chart
+     follows and for the same reason: a number printed inside a bar has to fit
+     inside a bar, and "−$2,390" does not fit in a 46px mark. The bands are
+     shortened by a line's height so a label always has somewhere to go. */
+  const LABEL = 15;
+  const upBand = Math.max(4, (baseline - plotTop) - LABEL);
+  const downBand = Math.max(4, (plotBottom - baseline) - LABEL);
 
   buckets.forEach((b, i) => {
     const v = val(b);
     const cx = x0 + gap * i + gap / 2;
     const up = v >= 0;
-    const room = up ? baseline - plotTop : plotBottom - baseline;
-    const h = v === 0 ? 2 : Math.max(3, Math.abs(v) / (up ? maxUp : maxDown) * room);
+    const band = up ? upBand : downBand;
+    const h = v === 0 ? 2 : Math.max(3, Math.abs(v) / (up ? maxUp : maxDown) * band);
     const top = up ? baseline - h : baseline;
 
     g.append(svg('rect', { class: 'col-fill-svg', x: cx - bw / 2, y: top, width: bw, height: h, rx: 4,
                            fill: v === 0 ? 'var(--grey-6)' : up ? 'var(--profit)' : 'var(--loss)' }));
 
     if (b.count) {
-      /* Inside the column when it is tall enough to hold the figure, outside
-         when it is not — and outside is bounded by the plot, so it can never
-         reach the hour beneath it. */
-      const inside = h > 34;
-      const y = up
-        ? (inside ? top + 20 : Math.max(plotTop + 12, top - 8))
-        : (inside ? top + h - 10 : Math.min(top + h + 15, plotBottom + 12));
-      const fill = v === 0 ? 'var(--grey-3)'
-        : inside ? (up ? 'var(--profit-deep)' : 'var(--loss-deep)')
-        : (up ? 'var(--profit-ink)' : 'var(--loss-ink)');
+      const y = up ? top - 6 : top + h + 13;
       g.append(svg('text', { x: cx, y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
-                             'font-size': 13, fill }, c.fig(u, acct, b.net, b.r, { decimals: 0, rDecimals: 1 })));
+                             'font-size': 11, fill: v === 0 ? 'var(--grey-4)' : up ? 'var(--profit)' : 'var(--loss)' },
+                   c.fig(u, acct, b.net, b.r, { decimals: 0, rDecimals: 1 })));
     }
 
+    /* The hour always; the count only where there is one, so an empty stretch
+       of the day reads as empty rather than as a row of zeroes. */
     g.append(svg('text', { x: cx, y: HOUR_Y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
-                           'font-size': 13, fill: 'var(--grey-5)' }, b.label));
-    g.append(svg('text', { x: cx, y: COUNT_Y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
-                           'font-size': 12, fill: 'var(--grey-4)' }, b.count ? String(b.count) : ''));
+                           'font-size': 10.5, fill: b.count ? 'var(--grey-4)' : 'var(--grey-6)' }, b.label));
+    if (b.count) g.append(svg('text', { x: cx, y: COUNT_Y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
+                           'font-size': 9.5, fill: 'var(--grey-6)' }, String(b.count)));
   });
+  return g;
+}
+
+/* ============================================================
+   A rule, and every time you met it or did not
+
+   One measure against one threshold. The threshold is the point of the
+   chart, so it is a line across the whole plot rather than a number in a
+   caption, and a column that crosses it changes colour — the only place in
+   Quire where a bar is coloured by a rule rather than by profit, because
+   here the rule IS the subject.
+
+   Bars are thin and evenly spaced whatever the count, so twelve trades and
+   two hundred look like the same chart at different densities.
+   ============================================================ */
+function thresholdColumns(rows, { cap, capLabel, fmt, width, height, emptyText }) {
+  const g = svg('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height: '100%',
+                         style: 'display:block' });
+  const padL = 34, padR = 12, padT = 16, padB = 26;
+  const plotW = width - padL - padR, plotH = height - padT - padB;
+  const base = padT + plotH;
+
+  g.append(svg('line', { x1: padL, y1: base, x2: width - padR, y2: base,
+                         stroke: 'var(--grey-7)', 'stroke-width': 1 }));
+
+  if (!rows.length) {
+    g.append(svg('text', { x: width / 2, y: padT + plotH / 2, 'text-anchor': 'middle',
+      'font-family': 'var(--mono)', 'font-size': 11.5, fill: 'var(--grey-6)' }, emptyText || 'Nothing to show yet'));
+    return g;
+  }
+
+  /* The top of the chart clears both the tallest column and the line, so a
+     cap nobody has gone near is still visible rather than pinned to the top
+     edge, and a breach is still inside the plot. */
+  const peak = Math.max(...rows.map(r => r.value), cap || 0) * 1.18 || 1;
+  const y = v => base - (v / peak) * plotH;
+
+  // a quiet grid at the halfway mark, and the numbers that name both lines
+  for (const v of [peak / 2]) {
+    g.append(svg('line', { x1: padL, y1: y(v), x2: width - padR, y2: y(v),
+                           stroke: 'var(--grey-9)', 'stroke-width': 1 }));
+    g.append(svg('text', { x: padL - 7, y: y(v) + 3.5, 'text-anchor': 'end', 'font-family': 'var(--mono)',
+                           'font-size': 9.5, fill: 'var(--grey-6)' }, fmt(v)));
+  }
+
+  const step = plotW / rows.length;
+  const bw = Math.max(2, Math.min(22, step * 0.58));
+
+  rows.forEach((r, i) => {
+    const cx = padL + step * i + step / 2;
+    const h = Math.max(2, (r.value / peak) * plotH);
+    g.append(svg('rect', { x: cx - bw / 2, y: base - h, width: bw, height: h, rx: Math.min(3, bw / 2),
+                           fill: r.over ? 'var(--yellow)' : 'var(--grey-5)' }));
+  });
+
+  /* The line last, so it reads over the columns it is judging. */
+  if (cap) {
+    g.append(svg('line', { x1: padL, y1: y(cap), x2: width - padR, y2: y(cap),
+                           stroke: 'var(--blue-surface)', 'stroke-width': 1.25, 'stroke-dasharray': '4 4' }));
+    g.append(svg('text', { x: width - padR, y: y(cap) - 6, 'text-anchor': 'end', 'font-family': 'var(--mono)',
+                           'font-size': 9.5, fill: 'var(--blue-surface)' }, capLabel));
+  }
+
+  /* Only the ends are labelled. A date under every column is a wall of text
+     nobody reads, and the span is what you actually want to know. */
+  if (rows[0].label) {
+    g.append(svg('text', { x: padL, y: height - 8, 'text-anchor': 'start', 'font-family': 'var(--mono)',
+                           'font-size': 9.5, fill: 'var(--grey-6)' }, rows[0].label));
+    if (rows.length > 1) g.append(svg('text', { x: width - padR, y: height - 8, 'text-anchor': 'end',
+                           'font-family': 'var(--mono)', 'font-size': 9.5, fill: 'var(--grey-6)' },
+                           rows[rows.length - 1].label));
+  }
   return g;
 }
 
@@ -177,7 +263,7 @@ export function analytics(store, nav) {
           el('p', {}, isYear ? 'A year fills in as you trade it.' : 'Log some trades, or widen the period.'))));
   }
 
-  const ctx = { unit: store.displayUnit, account: acct, cur };
+  const ctx = { unit: store.displayUnit, account: acct, cur, nav };
   const body = tab === 'overview' ? overview(store, acct, trades, s, ctx)
              : tab === 'timing'   ? timing(store, acct, trades, ctx)
              : tab === 'year'     ? yearly(store, acct, all, ctx)
@@ -188,6 +274,24 @@ export function analytics(store, nav) {
 /* ============================================================
    Overview — where your outcomes land, and what earns
    ============================================================ */
+/* Tags, rolled up. Lives out here because the page that shows them and the
+   page that counts rule-breaks both need the same numbers. */
+function tagRollup(store, acct, trades) {
+  const counts = new Map();
+  const allTags = store.playbook.tagGroups.flatMap(g => g.tags);
+  for (const t of trades) for (const id of (t.tagIds || [])) {
+    const g = counts.get(id) || { id, count: 0, net: 0, r: 0, rKnown: true };
+    g.count += 1; g.net += Number(t.netResult) || 0;
+    const tr = c.rMultiple(acct, t);
+    if (tr != null && isFinite(tr)) g.r += tr; else g.rKnown = false;
+    counts.set(id, g);
+  }
+  for (const g of counts.values()) if (!g.rKnown) g.r = null;
+  return [...counts.values()]
+    .map(g => ({ ...g, label: allTags.find(t => t.id === g.id)?.name || '—', wins: 0, losses: 0 }))
+    .sort((a, b) => a.net - b.net);
+}
+
 function overview(store, acct, trades, s, ctx) {
   const { unit: u, cur } = ctx;
   const f = (d, r, o) => c.fig(u, acct, d, r, o);
@@ -227,7 +331,7 @@ function overview(store, acct, trades, s, ctx) {
     t => store.playbook.setups.find(x => x.id === t.setupId)?.name || 'No setup');
   const pairs = groupBy(acct, trades, t => (t.pair || '—').toUpperCase(), (t, k) => k);
 
-  const bySetup = el('div', { class: 'card', style: { width: '588px', flex: 'none' } },
+  const bySetup = el('div', { class: 'card', style: { flex: '1', minWidth: 0 } },
     el('h2', {}, 'By setup'),
     barList(setups, ctx, { showRate: true }));
 
@@ -235,9 +339,20 @@ function overview(store, acct, trades, s, ctx) {
     el('h2', {}, 'By instrument'),
     barList(pairs, ctx));
 
+  /* Tags sit here with setups and instruments, because they answer the same
+     question those two do — where the money came from — rather than the one
+     Discipline asks, which is whether you kept to your own rules. */
+  const tags = tagRollup(store, acct, trades);
+  const byTag = el('div', { class: 'card', style: { flex: '1', minWidth: 0 } },
+    el('h2', {}, 'By tag'),
+    tags.length ? barList(tags, ctx)
+      : el('div', { class: 'm', style: { marginTop: '16px', fontSize: '11.5px', lineHeight: 1.6, color: 'var(--grey-5)' } },
+          'Nothing tagged in this window.'));
+
   return el('div', { class: 'view' },
     el('section', { class: 'row', style: { height: '380px', flex: 'none' } }, chart, expectancy),
-    el('section', { class: 'row', style: { flex: '1', alignItems: 'flex-start', minHeight: 0, overflowY: 'auto' } }, bySetup, byPair));
+    el('section', { class: 'row', style: { flex: '1', alignItems: 'flex-start', minHeight: 0, overflowY: 'auto' } },
+      bySetup, byPair, byTag));
 }
 
 /* ============================================================
@@ -273,7 +388,8 @@ function timing(store, acct, trades, ctx) {
       el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '12px' } },
         el('span', { style: { width: '12px', height: '9px', borderRadius: '2px', background: 'var(--orange)' } }),
         el('span', { class: 'note' }, 'loss'))),
-    el('div', { style: { marginTop: '10px' } }, divergingColumns(shown, ctx)),
+    el('div', { style: { marginTop: '10px', height: '236px', display: 'flex' } },
+      fitted((w, h) => divergingColumns(shown, ctx, { width: w, height: h }), 236)),
     untimed ? el('div', { class: 'm', style: { marginTop: '6px', fontSize: '10.5px', color: 'var(--grey-5)' } },
       `${untimed} without an open time`) : null,
   );
@@ -355,20 +471,6 @@ function discipline(store, acct, trades, ctx) {
   const outsideNet = outside.reduce((s, t) => s + (Number(t.netResult) || 0), 0);
   const outsideR = c.summarise(acct, outside).netR;
 
-  const tagCounts = new Map();
-  const allTags = store.playbook.tagGroups.flatMap(g => g.tags);
-  for (const t of trades) for (const id of (t.tagIds || [])) {
-    const g = tagCounts.get(id) || { id, count: 0, net: 0, r: 0, rKnown: true };
-    g.count += 1; g.net += Number(t.netResult) || 0;
-    const tr = c.rMultiple(acct, t);
-    if (tr != null && isFinite(tr)) g.r += tr; else g.rKnown = false;
-    tagCounts.set(id, g);
-  }
-  for (const g of tagCounts.values()) if (!g.rKnown) g.r = null;
-  const tagRows = [...tagCounts.values()]
-    .map(g => ({ ...g, label: allTags.find(t => t.id === g.id)?.name || '—' }))
-    .sort((a, b) => a.net - b.net);
-
   const stat = (label, value, sub, tone) => el('div', { class: 'card', style: { padding: '26px 26px 24px' } },
     el('div', { class: 'eyebrow' }, label),
     el('div', { class: 'kpi-val', style: { marginTop: 'auto', color: tone || 'var(--ink)' } }, value),
@@ -378,6 +480,97 @@ function discipline(store, acct, trades, ctx) {
     ...overRisk.map(t => t.id),
     ...trades.filter(t => overDays.some(([d]) => d === t.date)).map(t => t.id),
   ]).size;
+
+  /* ---------- risk taken, against the cap ----------
+     The stat above counts how many trades went over. This says by how much,
+     and whether the ones that did were worth it — a cap you break for your
+     best trades is a different problem from one you break on tilt. */
+  const risked = trades.map(t => Number(t.riskPercent)).filter(v => v > 0);
+  const avgRisk = risked.length ? risked.reduce((a, b) => a + b, 0) / risked.length : null;
+  const maxRisk = risked.length ? Math.max(...risked) : null;
+
+  /* ---------- the breaks themselves ----------
+     A count tells you there were three. This tells you which three, so the
+     next thing you do is open one rather than wonder. */
+  const breaks = [];
+  for (const t of overRisk) breaks.push({ date: t.date, id: t.id,
+    what: `${Number(t.riskPercent).toFixed(2)}% on ${t.pair}`, why: 'over the risk cap',
+    net: Number(t.netResult) || 0, r: c.rMultiple(acct, t) });
+  for (const [date, n] of overDays) {
+    const dayNet = trades.filter(t => t.date === date).reduce((a, t) => a + (Number(t.netResult) || 0), 0);
+    const dayR = c.summarise(acct, trades.filter(t => t.date === date)).netR;
+    breaks.push({ date, id: null, what: `${n} trades`, why: `limit is ${maxPerDay}`, net: dayNet, r: dayR });
+  }
+  breaks.sort((a, b) => b.date.localeCompare(a.date));
+
+  /* Tight to its content. It used to carry flex:1 from when it sat in a
+     horizontal row, where that meant "share the width"; in a vertical rail
+     the same line means "take every pixel nobody else claimed", which is how
+     one short sentence ended up in a box the height of the page. */
+  const breaksCard = el('div', { class: 'card', style: { flex: 'none', minWidth: 0 } },
+    el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
+      el('h2', {}, 'Where the rules went'),
+      el('span', { class: 'note' }, breaks.length ? `${breaks.length} break${breaks.length === 1 ? '' : 's'}` : 'clean')),
+    breaks.length
+      ? el('div', { class: 'risk-list', style: { marginTop: '14px' } },
+          ...breaks.slice(0, 9).map(b => el(b.id ? 'button' : 'div', { class: 'break-row',
+            onClick: b.id ? () => ctx.nav.go('#/trade/' + b.id) : null },
+            el('span', { class: 'm top' },
+              el('span', { class: 'd' }, c.shortDate(b.date).replace(/^0/, '')),
+              el('span', { class: 'what' }, b.what),
+              el('span', { class: 'o', style: { color: b.net > 0 ? 'var(--green)' : b.net < 0 ? 'var(--orange)' : 'var(--grey-4)' } },
+                f(b.net, b.r, { decimals: 0, rDecimals: 1 }))),
+            el('span', { class: 'm why' }, b.why))))
+      : el('div', { style: { marginTop: '18px', display: 'flex', alignItems: 'flex-start', gap: '11px' } },
+          el('span', { style: { width: '3px', alignSelf: 'stretch', minHeight: '34px', borderRadius: '2px', background: 'var(--green)' } }),
+          el('span', { class: 'm', style: { fontSize: '11.5px', lineHeight: 1.7, color: 'var(--grey-4)' } },
+            trades.length
+              ? `Every one of these ${trades.length} trades sat inside your own limits.`
+              : 'Nothing logged in this window.')));
+
+  /* ---------- the middle: one chart per rule ---------- */
+  const seq = trades.slice().sort((a, b) =>
+    (a.date + (a.timeOpen || '')).localeCompare(b.date + (b.timeOpen || '')));
+
+  const riskRows = seq.filter(t => Number(t.riskPercent) > 0).map(t => ({
+    value: Number(t.riskPercent),
+    over: !!(riskCap && Number(t.riskPercent) > riskCap + 1e-9),
+    label: c.shortDate(t.date).replace(/^0/, ''),
+  }));
+
+  const dayRows = [...perDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, n]) => ({
+    value: n,
+    over: !!(maxPerDay && n > maxPerDay),
+    label: c.shortDate(date).replace(/^0/, ''),
+  }));
+
+  const chartCard = (title, note, rows, opts) => el('div', { class: 'card', style: { flex: '1', minHeight: 0,
+      display: 'flex', flexDirection: 'column' } },
+    el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
+      el('h2', {}, title),
+      el('span', { class: 'note' }, note)),
+    el('div', { style: { flex: '1', minHeight: '150px', display: 'flex', marginTop: '10px' } },
+      fitted((w, h) => thresholdColumns(rows, { ...opts, width: w, height: h }), 150)));
+
+  const middle = el('div', { style: { flex: '1', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' } },
+    chartCard('Risk per trade',
+      [riskCap ? `cap ${riskCap.toFixed(2)}%` : 'no cap set',
+       avgRisk != null ? `avg ${avgRisk.toFixed(2)}%` : null,
+       maxRisk != null ? `biggest ${maxRisk.toFixed(2)}%` : null].filter(Boolean).join(' · '),
+      riskRows, {
+      cap: riskCap, capLabel: riskCap ? `cap ${riskCap.toFixed(2)}%` : '',
+      fmt: v => v.toFixed(2) + '%',
+      emptyText: 'No risk recorded on these trades' }),
+    chartCard('Trades per day', maxPerDay ? `limit ${maxPerDay} a day` : 'no limit set', dayRows, {
+      cap: maxPerDay, capLabel: maxPerDay ? `limit ${maxPerDay}` : '',
+      fmt: v => String(Math.round(v)),
+      emptyText: 'Nothing logged in this window' }),
+  );
+
+  const rightRail = el('div', { style: { width: '340px', flex: 'none', display: 'flex',
+      flexDirection: 'column', gap: '8px', minHeight: 0, overflowY: 'auto' } },
+    afterLossCard(acct, trades, ctx),
+    breaksCard);
 
   return el('div', { class: 'view' },
     el('section', { class: 'grid4', style: { height: '160px', flex: 'none' } },
@@ -392,11 +585,10 @@ function discipline(store, acct, trades, ctx) {
         `those trades netted ${f(outsideNet, outsideR, { decimals: 0, rDecimals: 1 })}`,
         outside.length ? 'var(--blue-surface)' : 'var(--ink)'),
     ),
-    el('section', { class: 'row', style: { flex: '1', minHeight: 0 } },
-      el('div', { class: 'card', style: { flex: '1', minWidth: 0 } },
-        el('h2', {}, 'By tag'),
-        barList(tagRows.map(t => ({ ...t, wins: 0, losses: 0 })), ctx)),
-      afterLossCard(acct, trades, ctx))
+    /* Charts in the middle, the reading down the right. The stats along the
+       top say what happened; the charts say when; the rail says what it did
+       to you afterwards. */
+    el('section', { class: 'row', style: { flex: '1', minHeight: 0 } }, middle, rightRail)
   );
 }
 
@@ -428,7 +620,11 @@ function afterLossCard(acct, trades, ctx) {
   const gap = enough && a.next.expectancy != null && a.all.expectancy != null
     ? a.next.expectancy - a.all.expectancy : null;
 
-  return el('div', { class: 'card light', style: { width: '408px', flex: 'none' } },
+  /* Content height, like the card under it. Stretching this one to fill the
+     rail only pushed its closing line to the floor and left a hand's width of
+     nothing in the middle of it — space inside a card reads as a mistake,
+     where space under one reads as a page with room on it. */
+  return el('div', { class: 'card light', style: { flex: 'none', minWidth: 0 } },
     el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
       el('h2', {}, 'After a loss'),
       el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-6)' } },

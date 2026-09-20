@@ -19,7 +19,7 @@
      stop distance, not to recompute R.
    ============================================================ */
 import { parseCSV } from './csv.js';
-import { sessionFor } from './calc.js';
+import { sessionFor, cleanSymbol } from './calc.js';
 
 const FIELDS = {
   id:      ['id', 'tradeid', 'ticket', 'orderid'],
@@ -95,7 +95,7 @@ function toNumber(v) {
  * Returns { trades, skipped, headers, mapped, missing } — never throws on a
  * bad row. A row we cannot read is counted and reported, not dropped silently.
  */
-export function parseReplayCSV(text, playbook, { offsetHours = 8 } = {}) {
+export function parseReplayCSV(text, playbook, { offsetHours = 0 } = {}) {
   const records = parseCSV(text);
   if (!records.length) return { trades: [], skipped: [], headers: [], mapped: {}, missing: ['date', 'pair', 'side', 'r'] };
 
@@ -114,7 +114,10 @@ export function parseReplayCSV(text, playbook, { offsetHours = 8 } = {}) {
     }
     const st = parseStamp(get(rec, 'date'));
     if (!st) { skipped.push({ row: i + 2, why: 'could not read the date' }); return; }
-    const pair = String(get(rec, 'pair') || '').trim();
+    /* FX Replay writes the platform's own name — OANDA:XAUUSD. The journal
+       keeps the instrument, not the platform, so it reads the same as the
+       trade you typed and can be matched against it. */
+    const pair = cleanSymbol(get(rec, 'pair'));
     if (!pair) { skipped.push({ row: i + 2, why: 'no instrument' }); return; }
     const r = toNumber(get(rec, 'r'));
     if (r == null) { skipped.push({ row: i + 2, why: 'no R multiple' }); return; }

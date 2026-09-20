@@ -6,6 +6,7 @@ import * as c from '../calc.js';
    preference, not journal data. */
 let cursor = null;          // { y, m }  m is 0-11
 let cellMode = 'value';     // value (in the app's unit) | count
+let selected = null;        // the day whose trades are open in the rail
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const iso = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -93,6 +94,7 @@ export function calendar(store, nav) {
     if (mm < 0) { mm = 11; yy--; }
     if (mm > 11) { mm = 0; yy++; }
     cursor = { y: yy, m: mm };
+    selected = null;
     nav.refresh();
   };
 
@@ -110,12 +112,17 @@ export function calendar(store, nav) {
         `${MONTHS[m]} ${y}`),
       navBtn('chevright', () => step(1), 'Next month')),
     el('button', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-6)' },
-      onClick: () => { const n = new Date(); cursor = { y: n.getFullYear(), m: n.getMonth() }; nav.refresh(); } }, 'Today'),
+      onClick: () => { const n = new Date(); cursor = { y: n.getFullYear(), m: n.getMonth() };
+                       selected = null; nav.refresh(); } }, 'Today'),
     el('div', { class: 'spacer' }),
     el('div', { class: 'seg' },
       ...[['value', u === 'R' ? 'R' : u === '%' ? 'Return' : 'Net P&L'], ['count', 'Trades']].map(([k, label]) =>
         el('button', { class: k === cellMode ? 'is-on' : '', onClick: () => { cellMode = k; nav.refresh(); } }, label))),
   );
+
+  /* Clicking the open day again closes it — the same click that opened it,
+     which is what everyone tries. */
+  const openDay = (date) => { selected = selected === date ? null : date; nav.refresh(); };
 
   /* ---------- the grid ---------- */
   const cells = [];
@@ -130,10 +137,18 @@ export function calendar(store, nav) {
     const isToday = date === today;
     const ring = isToday ? '2px solid var(--blue)' : 'none';
 
+    const isOpen = date === selected;
+    /* The day you are reading sits inside a ring of its own, so the rail and
+       the grid never disagree about which day is on screen. */
+    const outline = isOpen ? '2px solid var(--ink)' : ring;
+
     if (!v) {
-      cells.push(el('div', {
+      cells.push(el('button', {
+        class: 'cal-day',
         style: { borderRadius: '16px', padding: '9px 11px', background: past ? 'var(--cell-quiet)' : 'var(--cell)',
-                 outline: ring, outlineOffset: '1px' } },
+                 outline, outlineOffset: '1px', textAlign: 'left' },
+        title: `${c.longDate(date)} · no trades`,
+        onClick: () => openDay(date) },
         el('span', { class: 'm', style: { fontSize: '11px', color: isToday ? 'var(--blue-surface)' : 'var(--grey-6)' } }, String(d))));
       continue;
     }
@@ -146,10 +161,11 @@ export function calendar(store, nav) {
        day has no colour to borrow. */
     const ink = sh.ink;
     cells.push(el('button', {
+      class: 'cal-day',
       style: { borderRadius: '16px', padding: '9px 11px', background: sh.bg, textAlign: 'left',
-               display: 'flex', flexDirection: 'column', outline: ring, outlineOffset: '1px' },
+               display: 'flex', flexDirection: 'column', outline, outlineOffset: '1px' },
       title: `${c.longDate(date)} · ${v.count} trade${v.count === 1 ? '' : 's'} · ${c.money(v.net, { currency: cur })} · ${c.rFmt(v.r)} · ${c.pctSigned(c.asPercent(acct, v.net))}`,
-      onClick: () => nav.go('#/trades') },
+      onClick: () => openDay(date) },
       el('div', { style: { display: 'flex', alignItems: 'baseline' } },
         el('span', { class: 'm', style: { fontSize: '11px', opacity: sh.strong ? 1 : .8, color: ink } }, String(d)),
         el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '9.5px', opacity: .6, color: ink } }, String(v.count))),
@@ -249,6 +265,88 @@ export function calendar(store, nav) {
     el('div', { class: 'm', style: { fontSize: '15px', color: col } }, val),
     el('div', { class: 'm', style: { fontSize: '10px', color: 'var(--grey-5)', marginTop: '3px' } }, date));
 
+
+  /* ============================================================
+     One day, opened
+
+     The month rail answers "how did September go". This answers "what did I
+     do on the 18th", which is the question you have when you click a square.
+     It takes the rail's place rather than sitting beside it, because both at
+     once is two summaries competing on a 320px column.
+     ============================================================ */
+  function dayPanel(date) {
+    const dayTrades = store.tradesFor(acct.id)
+      .filter(t => t.date === date)
+      .sort((a, b) => (a.timeOpen || '').localeCompare(b.timeOpen || ''));
+    const open = store.openFor(acct.id).filter(t => t.date === date);
+    const v = daily.get(date);
+    const plan = store.outlookFor(date);
+
+    const rs = dayTrades.map(t => c.rMultiple(acct, t)).filter(r => r != null && isFinite(r));
+    const dayR = rs.length === dayTrades.length && rs.length ? rs.reduce((a, b) => a + b, 0) : null;
+    const wins = dayTrades.filter(t => c.outcome(t) === 'win').length;
+    const losses = dayTrades.filter(t => c.outcome(t) === 'loss').length;
+    const flats = dayTrades.length - wins - losses;
+
+    const tone = !v ? 'var(--ink-2)' : v.net > 0 ? 'var(--green)' : v.net < 0 ? 'var(--orange)' : 'var(--ink-2)';
+
+    const row = (t, isOpen) => {
+      const r = c.rMultiple(acct, t);
+      const o = c.outcome(t);
+      const col = isOpen ? 'var(--yellow)'
+        : o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-2)';
+      return el('button', { class: 'day-row', onClick: () => nav.go('#/trade/' + t.id) },
+        el('span', { class: 'm t' }, t.timeOpen || '—'),
+        el('span', { class: 'm p' }, t.pair),
+        el('span', { class: 'm s', style: { color: t.side === 'buy' ? 'var(--green)' : 'var(--orange)' } },
+          t.side === 'buy' ? '\u25B2' : '\u25BC'),
+        el('span', { class: 'm v', style: { color: col } },
+          isOpen ? 'open' : u === 'R' ? (r == null ? '\u2014' : c.rFmt(r))
+                 : c.fig(u, acct, t.netResult, r, { decimals: 0 })));
+    };
+
+    /* What you wrote that morning, if you wrote anything. One line — the
+       Outlook page is where it is read properly. */
+    const planLine = plan && plan.instruments.length
+      ? el('button', { class: 'day-plan', onClick: () => nav.go('#/outlook/' + date) },
+          el('span', { class: 'm k' }, 'Outlook'),
+          el('span', { class: 'm w' },
+            plan.instruments.filter(i => i.pair).map(i => `${i.pair} ${i.bias}`).join(' \u00b7 ') || 'written'),
+          icon('chevright', 12, 'var(--grey-5)', 2))
+      : null;
+
+    return el('div', { class: 'card', style: { flex: '1', minHeight: 0, display: 'flex', flexDirection: 'column' } },
+      el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        el('div', { class: 'eyebrow', style: { margin: 0 } }, c.longDate(date)),
+        el('button', { style: { marginLeft: 'auto', width: '26px', height: '26px', borderRadius: '9px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--grey-5)' },
+          title: 'Back to the month', onClick: () => openDay(date) }, icon('close', 13, 'currentColor', 2))),
+
+      dayTrades.length || open.length
+        ? el('div', {},
+            el('div', { class: 'kpi-val', style: { marginTop: '14px', color: tone } },
+              v ? f(v.net, v.r) : '\u2014'),
+            el('div', { class: 'm', style: { marginTop: '8px', fontSize: '10.5px', color: 'var(--grey-5)' } },
+              `${dayTrades.length} trade${dayTrades.length === 1 ? '' : 's'}`
+              + (dayTrades.length ? ` \u00b7 ${wins} W \u00b7 ${losses} L` + (flats ? ` \u00b7 ${flats} BE` : '') : '')
+              + (open.length ? ` \u00b7 ${open.length} still open` : '')
+              + (u !== 'R' && dayR != null ? ` \u00b7 ${c.rFmt(dayR)}` : '')))
+        : el('div', { class: 'm', style: { marginTop: '16px', fontSize: '12px', lineHeight: 1.6, color: 'var(--grey-5)' } },
+            date > todayISO() ? 'Not here yet.' : 'You did not trade on this day.'),
+
+      planLine,
+
+      dayTrades.length || open.length
+        ? el('div', { class: 'day-rows' },
+            ...open.map(t => row(t, true)),
+            ...dayTrades.map(t => row(t, false)))
+        : null,
+
+      el('button', { class: 'btn btn-quiet', style: { marginTop: 'auto', width: '100%', justifyContent: 'center' },
+        onClick: () => nav.go('#/new') }, 'Log a trade'),
+    );
+  }
+
   const rail = el('div', { style: { width: '320px', flex: 'none', display: 'flex', flexDirection: 'column', gap: '8px' } },
     el('div', { class: 'card light', style: { height: '196px', flex: 'none' } },
       el('div', { class: 'eyebrow' }, MONTHS[m] + ' net'),
@@ -312,5 +410,9 @@ export function calendar(store, nav) {
         dayBox('Worst day', worst ? f(worst[1].net, worst[1].r, { decimals: 0, rDecimals: 1 }) : '—', 'var(--orange)', worst ? c.shortDate(worst[0]) : ''))),
   );
 
-  return el('div', { class: 'view' }, head, el('div', { class: 'row', style: { flex: '1' } }, grid, rail));
+  const side = selected
+    ? el('div', { style: { width: '320px', flex: 'none', display: 'flex', flexDirection: 'column' } }, dayPanel(selected))
+    : rail;
+
+  return el('div', { class: 'view' }, head, el('div', { class: 'row', style: { flex: '1' } }, grid, side));
 }

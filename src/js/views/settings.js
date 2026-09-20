@@ -14,13 +14,13 @@ const COLOURS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'JPY'];
 
 export function settings(store, nav) {
+  /* The folder used to be named in a pill up here as well as in the Vault
+     card below, and only the pill could move it — which is why nobody found
+     it. One box owns the vault now: where it is, and everything you can do
+     to it. */
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Settings'),
     el('div', { class: 'spacer' }),
-    /* Wherever a folder can be chosen, this is the button that chooses it —
-       on the desktop app, and in any browser that will open one. Where it
-       cannot, the same pill just says where things are. */
-    folderPill(store, nav),
   );
 
   /* ============================================================
@@ -161,7 +161,7 @@ export function settings(store, nav) {
      findable either way. */
   async function doCsvExport() {
     const text = toCSV(store, null);
-    const name = `ledger-trades-${new Date().toISOString().slice(0, 10)}.csv`;
+    const name = `quire-trades-${new Date().toISOString().slice(0, 10)}.csv`;
     try { await store.writeText(name, text); } catch { /* the folder copy is best-effort */ }
     const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
     const a = el('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove();
@@ -197,17 +197,41 @@ export function settings(store, nav) {
             onClick: () => { vaultAsk.hidden = true; } }, 'Cancel'))));
   }
 
-  const vaultButton = (label, ic, onClick) => el('button', { class: 'btn btn-quiet',
-    style: { flex: '1', justifyContent: 'center', padding: '9px 10px', fontSize: '11.5px' }, onClick },
-    icon(ic, 13, 'var(--grey-1)', 1.8), label);
+  const vaultButton = (label, ic, onClick, why) => el('button',
+    { class: 'btn btn-quiet' + (why ? ' is-off' : ''), disabled: !!why, title: why || '',
+      style: { flex: '1', justifyContent: 'center', padding: '9px 10px', fontSize: '11.5px' },
+      onClick: why ? () => toast(why, 'warn') : onClick },
+    icon(ic, 13, why ? 'var(--grey-5)' : 'var(--grey-1)', 1.8), label);
+
+  /* Why the folder cannot be chosen here, in the words of the thing stopping
+     it. An absent button is a mystery; a button that says what is in its way
+     is an answer. */
+  const noPicker =
+    store.isPreview ? 'This is a preview copy — it has nowhere to move a vault to.'
+    : !store.canChooseFolder
+      ? (typeof window !== 'undefined' && window.self !== window.top
+          ? 'A page inside a frame cannot open a folder picker. Open Quire in its own window.'
+          : typeof location !== 'undefined' && location.protocol === 'file:'
+            ? 'A file opened straight from disk cannot open a folder picker. Use the desktop app.'
+            : 'This browser cannot open a folder picker. Chrome or Edge can, and so can the desktop app.')
+      : null;
 
   const vaultCard = el('section', { class: 'card', style: { flex: 'none' } },
     el('h2', {}, 'Vault'),
     vaultNote,
+    /* Two rows, because they are two different questions. Where it lives,
+       then how to carry it. Moving used to be hidden behind the folder name
+       in the corner, which is nowhere. */
     el('div', { style: { marginTop: '14px', display: 'flex', gap: '7px' } },
       store.isNative ? vaultButton('Locate', 'folder', async () => {
         if (!(await store.revealVault())) toast('Could not open that folder', 'warn');
       }) : null,
+      vaultButton('Move vault', 'folder', async () => {
+        try {
+          if (await store.connect()) { toast('Vault is now in ' + store.folderName); nav.refresh(); }
+        } catch (e) { if (e.name !== 'AbortError') toast(e.message, 'bad'); }
+      }, noPicker)),
+    el('div', { style: { marginTop: '7px', display: 'flex', gap: '7px' } },
       vaultButton('Export', 'download', doVaultExport),
       vaultButton('Import', 'upload', () => vaultFile.click())),
     vaultAsk, vaultFile,
@@ -333,25 +357,3 @@ export function settings(store, nav) {
 }
 
 /* Where the journal lives, and — when that is a choice — the way to change it. */
-function folderPill(store, nav) {
-  const pill = { fontSize: '11.5px', color: 'var(--grey-8)', background: 'var(--grey-2)',
-                 borderRadius: 'var(--r-pill)', padding: '5px 12px',
-                 display: 'inline-flex', alignItems: 'center', gap: '7px' };
-  if (!store.canChooseFolder) {
-    return el('span', { class: 'm', title: 'Your journal folder — copy it to back up', style: pill },
-      store.folderName ? 'Folder · ' + store.folderName : 'No folder');
-  }
-  const onFolder = store.isNative || !store.isLocal;
-  return el('button', { class: 'm', style: pill,
-    title: onFolder ? (store.folderPath || '') + ' — click to move your journal somewhere else'
-                    : 'Click to keep your journal in a folder on your computer instead',
-    onClick: async () => {
-      try {
-        if (await store.connect()) { toast('Journal is now in ' + store.folderName); nav.refresh(); }
-      } catch (e) { if (e.name !== 'AbortError') toast(e.message, 'bad'); }
-    } },
-    icon('folder', 12, 'var(--grey-8)', 1.8),
-    onFolder
-      ? (store.isNative ? (store.folderName || 'Choose a folder') : 'Folder · ' + store.folderName)
-      : 'Use a folder');
-}

@@ -1,5 +1,5 @@
 /* ============================================================
-   Ledger — design tokens
+   Quire — design tokens
    Palette, spacing, radii and motion read from reown.com's
    published tokens. Change a value here, every screen follows.
    ============================================================ */
@@ -84,7 +84,8 @@ a:hover { color:var(--blue-strong); }
 
 /* ---------- sidebar ---------- */
 .brand { display:flex; align-items:center; gap:9px; padding-left:6px; }
-.brand-mark { width:32px; height:32px; border-radius:11px; background:var(--grey-1); display:flex; align-items:center; justify-content:center; flex:none; }
+.brand-mark { width:32px; height:32px; border-radius:11px; display:flex; align-items:center; justify-content:center; flex:none; }
+.brand-mark svg { display:block; border-radius:11px; }
 .brand-name { font:400 15px var(--mono); letter-spacing:-.01em; color:var(--ink); }
 
 .acct-switch { position:relative; }
@@ -481,12 +482,11 @@ select.field:hover {
    here was lighter than the dark theme's own surface and inverted the meaning. */
 [data-theme="dark"] { --cell:#151817; --cell-quiet:#0C0E0D; }
 
-/* The mark is a pale tile with dark ink; in dark mode it is the other way
-   round. Same variable trick as the pale cards. */
-[data-theme="dark"] .brand-mark {
-  --grey-8:#E8EBEA;
-  background:#1E2120;
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
+/* The mark brings its own black tile, in both themes — it is the app's face
+   and has to look the same everywhere it appears. On a dark ground a hairline
+   keeps its edge from dissolving into the sidebar. */
+[data-theme="dark"] .brand-mark svg {
+  box-shadow:0 0 0 1px rgba(255,255,255,.07);
 }
 [data-theme="dark"] ::-webkit-scrollbar-thumb { border-color:var(--card); }
 
@@ -795,3 +795,203 @@ html[data-glass="on"] .field:focus { box-shadow:inset 0 0 0 1px var(--blue), 0 0
   .dir { height:42px; }
   .shots-stack { gap:10px; }
 }
+
+/* ============================================================
+   Daily outlook
+
+   A page you write on. The block is the unit: one instrument, its bias,
+   what you think, and the chart you thought it from. Everything here is
+   sized so a block fits a laptop screen without scrolling inside itself —
+   the page scrolls, the writing never does.
+   ============================================================ */
+.outlook-scroll { flex:1; min-height:0; overflow-y:auto; padding:2px 2px 8px; }
+.outlook-list { display:flex; flex-direction:column; gap:8px; }
+
+.outlook-block { padding:20px 22px; }
+.ob-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.ob-head .spacer { margin-left:auto; }
+
+/* The instrument's name is the block's title, so it is typed into something
+   that reads as a title rather than a form field. */
+.ins-field {
+  width:150px; height:38px; background:var(--grey-9); border-radius:var(--r-btn);
+  padding:0 13px; font:400 14px var(--mono); letter-spacing:-.01em; color:var(--ink);
+  transition:box-shadow var(--d-snap) var(--e-standard);
+}
+.ins-field::placeholder { color:var(--grey-6); }
+.ins-field:focus { box-shadow:inset 0 0 0 1px var(--grey-5); }
+
+.ob-head .seg { background:var(--grey-9); border-radius:var(--r-pill); padding:3px; display:flex; gap:2px; }
+.ob-head .seg .bias {
+  font:400 11.5px var(--mono); color:var(--ink-4); padding:6px 14px; border-radius:var(--r-pill);
+  transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard);
+}
+.ob-head .seg .bias:hover { color:var(--ink-2); }
+.ob-head .seg .bias.is-on { background:var(--inset); color:var(--ink); }
+.ob-head .seg .bias-long.is-on { background:var(--green); color:#07240F; }
+.ob-head .seg .bias-short.is-on { background:var(--orange); color:#2A0C06; }
+
+.ob-quiet { font-size:10.5px; color:var(--grey-5); }
+.ob-quiet:hover { color:var(--ink-2); }
+.ob-x { width:28px; height:28px; border-radius:9px; display:flex; align-items:center; justify-content:center;
+        color:var(--grey-5); transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard); }
+.ob-x:hover { background:var(--grey-7); color:var(--orange); }
+
+/* Writing left, chart right — the same split as the trade form, so there is
+   nothing new to learn about where things are. */
+.ob-body { margin-top:16px; display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:16px; align-items:stretch; }
+.outlook-notes {
+  width:100%; min-height:190px; resize:vertical; background:var(--grey-9);
+  border-radius:var(--r-inset); padding:16px 18px;
+  font:400 13.5px var(--sans); line-height:1.75; color:var(--ink-2);
+  transition:box-shadow var(--d-snap) var(--e-standard);
+}
+.outlook-notes::placeholder { color:var(--grey-6); line-height:1.7; }
+.outlook-notes:focus { box-shadow:inset 0 0 0 1px var(--grey-6); color:var(--ink); }
+.ob-chart { display:flex; }
+.shot-zone.outlook-shot { aspect-ratio:auto; flex:1; min-height:190px; }
+
+/* What you actually did, once there is something to say. */
+.ob-verdict {
+  margin-top:14px; padding-top:14px; border-top:1px solid var(--grey-7);
+  display:flex; align-items:center; gap:13px;
+}
+.ob-verdict .bar { width:3px; align-self:stretch; min-height:22px; border-radius:2px; }
+.ob-verdict .txt { font:400 12.5px var(--sans); line-height:1.6; color:var(--ink-3); }
+.ob-verdict .txt b { color:var(--ink-2); font-weight:500; }
+.ob-verdict .r { margin-left:auto; font:400 15px var(--mono); letter-spacing:-.01em; }
+
+.outlook-add {
+  display:flex; align-items:center; justify-content:center; gap:9px;
+  padding:15px; border-radius:var(--r-card); border:1px dashed var(--grey-7);
+  color:var(--grey-4); font-size:12px;
+  transition:border-color var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard);
+}
+.outlook-add:hover { border-color:var(--grey-6); color:var(--ink-3); }
+
+/* The day, and the days either side. */
+.day-nav { display:flex; align-items:center; gap:2px; background:var(--grey-8); border-radius:var(--r-pill); padding:4px; }
+.day-nav button { width:28px; height:28px; border-radius:var(--r-pill); display:flex; align-items:center;
+                  justify-content:center; color:var(--grey-4);
+                  transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard); }
+.day-nav button:hover:not(:disabled) { background:var(--grey-7); color:var(--ink); }
+.day-nav button:disabled { opacity:.32; cursor:default; }
+.day-nav .d { font:400 11.5px var(--mono); color:var(--ink); padding:0 10px; }
+
+/* A laptop, or a narrow window: the chart goes under the writing rather than
+   squeezing both into columns too narrow for either. */
+@media (max-width:1180px) {
+  .ob-body { grid-template-columns:1fr; }
+  .shot-zone.outlook-shot { min-height:220px; }
+}
+
+[data-theme="dark"] .ins-field,
+[data-theme="dark"] .outlook-notes,
+[data-theme="dark"] .ob-head .seg { background:#121413; }
+[data-theme="dark"] .day-nav { background:var(--card); }
+
+/* ---------- one day, opened from the calendar ----------
+   A row is a trade you can open. Four columns, fixed, so the times and the
+   figures line up down the list rather than jostling with the instrument
+   names beside them. */
+.cal-day { transition:outline-color var(--d-snap) var(--e-standard), filter var(--d-snap) var(--e-standard); }
+.cal-day:hover { filter:brightness(1.12); }
+.cal-day:active { filter:brightness(1.02); }
+
+.day-rows { margin-top:14px; flex:1; min-height:0; overflow-y:auto;
+            display:flex; flex-direction:column; gap:1px; }
+.day-row {
+  display:grid; grid-template-columns:44px 1fr 14px auto; align-items:center; gap:9px;
+  padding:9px 10px; border-radius:12px; text-align:left;
+  transition:background var(--d-snap) var(--e-standard);
+}
+.day-row:hover { background:var(--grey-7); }
+.day-row .t { font-size:10.5px; color:var(--grey-5); font-variant-numeric:tabular-nums; }
+.day-row .p { font-size:11.5px; color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.day-row .s { font-size:9px; }
+.day-row .v { font-size:11.5px; font-variant-numeric:tabular-nums; }
+
+.day-plan {
+  margin-top:14px; display:flex; align-items:center; gap:9px; width:100%;
+  padding:10px 12px; border-radius:var(--r-inset); background:var(--grey-9); text-align:left;
+  transition:background var(--d-snap) var(--e-standard);
+}
+.day-plan:hover { background:var(--grey-7); }
+.day-plan .k { font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--grey-5); }
+.day-plan .w { font-size:11px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis;
+               white-space:nowrap; margin-left:auto; }
+
+/* ---------- discipline: risk taken, and where the rules went ----------
+   A row is a trade you can open. Five columns so the dates, the percentages
+   and the R line up down the list instead of drifting with the names. */
+.risk-list { margin-top:16px; display:flex; flex-direction:column; gap:1px; }
+.risk-row {
+  display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+  padding:8px 9px; border-radius:11px;
+  transition:background var(--d-snap) var(--e-standard);
+}
+button.risk-row:hover { background:var(--grey-7); }
+.risk-row .d { font-size:10.5px; color:var(--grey-5); width:44px; flex:none; font-variant-numeric:tabular-nums; }
+.risk-row .p { font-size:11px; color:var(--ink-3); width:74px; flex:none;
+               overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.risk-row .track { flex:1; min-width:30px; height:6px; border-radius:3px; background:var(--grey-9); overflow:hidden; }
+.risk-row .track .fill { display:block; height:100%; border-radius:3px; }
+.risk-row .v { font-size:10.5px; width:48px; text-align:right; flex:none; font-variant-numeric:tabular-nums; }
+.risk-row .o { font-size:11px; width:56px; text-align:right; flex:none; font-variant-numeric:tabular-nums; }
+/* A rule break carries three things and a reason, which will not sit on one
+   line in a 340px rail — so it does not try to. */
+.break-row {
+  display:flex; flex-direction:column; gap:3px; width:100%; text-align:left;
+  padding:9px 10px; border-radius:11px;
+  transition:background var(--d-snap) var(--e-standard);
+}
+button.break-row:hover { background:var(--grey-7); }
+.break-row .top { display:flex; align-items:baseline; gap:9px; }
+.break-row .d { font-size:10.5px; color:var(--grey-5); flex:none; font-variant-numeric:tabular-nums; }
+.break-row .what { font-size:11.5px; color:var(--ink-2); overflow:hidden;
+                   text-overflow:ellipsis; white-space:nowrap; }
+.break-row .o { margin-left:auto; font-size:11.5px; flex:none; font-variant-numeric:tabular-nums; }
+.break-row .why { font-size:10px; color:var(--grey-5); }
+
+/* A button that is here but cannot act. Dimmed, still readable, and it says
+   why when you press it — the alternative was removing it, which just made
+   people look for it. */
+.btn.is-off { color:var(--grey-5); cursor:help; }
+.btn.is-off:hover { background:var(--grey-8); color:var(--grey-4); }
+
+/* ---------- the day's red folders ----------
+   A strip, not a table. Each event is one line you can read without stopping:
+   folder, currency, what it is, when, how long away. */
+.news-strip { padding:16px 18px; flex:none; margin-bottom:8px; }
+.ns-head { display:flex; align-items:center; gap:9px; }
+.ns-head .spacer { margin-left:auto; }
+.ns-head .t { font-size:12px; color:var(--ink); }
+.ns-head .n { font-size:10.5px; color:var(--grey-5); }
+.ns-head .w { font-size:10px; color:var(--grey-6); }
+.ns-refresh {
+  width:24px; height:24px; border-radius:8px; display:flex; align-items:center;
+  justify-content:center; color:var(--grey-5);
+  transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard);
+}
+.ns-refresh:hover:not(:disabled) { background:var(--grey-7); color:var(--ink); }
+.ns-refresh:disabled { opacity:.4; cursor:default; }
+
+.ns-row { margin-top:12px; display:flex; flex-direction:column; gap:1px; }
+.ns-ev {
+  display:flex; align-items:center; gap:10px; padding:7px 9px; border-radius:10px;
+}
+.ns-ev .cur { font-size:10.5px; color:var(--ink-3); width:34px; flex:none; }
+.ns-ev .ttl { font-size:11.5px; color:var(--ink-2); overflow:hidden;
+              text-overflow:ellipsis; white-space:nowrap; }
+.ns-ev .at  { margin-left:auto; font-size:11.5px; color:var(--ink); flex:none;
+              font-variant-numeric:tabular-nums; }
+.ns-ev .rel { font-size:10px; color:var(--grey-5); width:66px; text-align:right; flex:none; }
+
+/* Within the hour: the one thing on this strip that should catch your eye. */
+.ns-ev.is-soon { background:rgba(244,98,74,.10); }
+.ns-ev.is-soon .at { color:var(--orange); }
+.ns-ev.is-soon .rel { color:var(--orange); }
+/* Already printed — kept, because what has happened is part of the day. */
+.ns-ev.is-past { opacity:.45; }
+
+.ns-empty { margin-top:12px; font-size:11.5px; color:var(--grey-5); }

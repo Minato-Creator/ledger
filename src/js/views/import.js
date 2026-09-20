@@ -132,7 +132,7 @@ export function importTrades(store, nav) {
             el('button', { onClick: () => setOffset(offsetHours + 1) }, icon('plus', 11, 'var(--grey-2)', 2.6))))),
       ...list.map(priceRow),
       el('p', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)', padding: '11px 0' } },
-        'Your broker decides this, not Ledger. A move of one point on one contract, in your account currency.'));
+        'Your broker decides this, not Quire. A move of one point on one contract, in your account currency.'));
 
     /* --- the trades themselves --- */
     const cols = '30px 88px 104px 1fr 54px 82px 82px 76px 104px';

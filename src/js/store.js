@@ -32,6 +32,8 @@ export const FILES = {
   trades:   'data/trades.json',
   playbook: 'data/playbook.json',
   replay:   'data/replay.json',
+  outlooks: 'data/outlooks.json',
+  news:     'data/news.json',
 };
 const LEGACY = {
   accounts: 'accounts.json',
@@ -77,7 +79,7 @@ export function applySurface(background, glass, theme) {
     return;
   }
   /* Enough to hold the picture down behind small text, not so much that the
-     picture stops being a picture. It does not depend on the theme: Ledger's
+     picture stops being a picture. It does not depend on the theme: Quire's
      panels are dark and its writing is light in both, so what the scrim has to
      protect is the same either way. */
   const scrim = scrimFor(bg);
@@ -202,13 +204,15 @@ class Store {
   async load() {
     await this.tidyVault();
     await this.ensureDir('data');
-    const [accounts, trades, playbook, replay] = await Promise.all([
+    const [accounts, trades, playbook, replay, outlooks, news] = await Promise.all([
       this.readJSON(FILES.accounts, defaultAccounts()),
       this.readJSON(FILES.trades,   { version: 1, trades: [] }),
       this.readJSON(FILES.playbook, defaultPlaybook()),
       this.readJSON(FILES.replay,   { version: 1, weeks: {} }),
+      this.readJSON(FILES.outlooks, { version: 1, days: {} }),
+      this.readJSON(FILES.news,     { version: 1, fetchedAt: null, events: [] }),
     ]);
-    this.data = { accounts, trades, playbook, replay };
+    this.data = { accounts, trades, playbook, replay, outlooks, news };
     this.heal();
     this.migrate();
     applyTheme(this.theme, this.colours);
@@ -221,9 +225,11 @@ class Store {
       this.writeJSON(FILES.trades, trades),
       this.writeJSON(FILES.playbook, playbook),
       this.writeJSON(FILES.replay, replay),
+      this.writeJSON(FILES.outlooks, outlooks),
+      this.writeJSON(FILES.news, news),
       this.ensureDir(SHOTS),
       this.writeText(MANIFEST, JSON.stringify({
-        kind: 'ledger-vault', version: 1, app: 'Ledger',
+        kind: 'quire-vault', version: 1, app: 'Quire',
         note: 'Your journal. data/ holds the trades, screenshots/ holds the charts.',
       }, null, 2)),
     ]);
@@ -263,15 +269,22 @@ class Store {
      back. It is a real ZIP: you can open it and look, which is the only way a
      backup is worth anything.
      ============================================================ */
+  /* Every picture the journal owns, wherever it is referenced from. The vault
+     walks this list, so a chart that is not named here is a chart a restore
+     silently loses — which is why the outlooks are read here and not only the
+     trades. */
   shotNames() {
-    return this.trades.flatMap(t => [t.shotLtf, t.shotHtf]).filter(Boolean);
+    const fromTrades = this.trades.flatMap(t => [t.shotLtf, t.shotHtf]);
+    const fromOutlooks = Object.values(this.data.outlooks?.days || {})
+      .flatMap(day => (day.instruments || []).map(i => i.shot));
+    return [...fromTrades, ...fromOutlooks].filter(Boolean);
   }
 
   async exportVault() {
     const entries = [{
       name: MANIFEST,
       bytes: bytesOfText(JSON.stringify({
-        kind: 'ledger-vault', version: 1, app: 'Ledger',
+        kind: 'quire-vault', version: 1, app: 'Quire',
         exported: new Date().toISOString(),
         accounts: this.allAccounts.length,
         trades: this.trades.length,
@@ -291,7 +304,7 @@ class Store {
 
     const file = await zip(entries);
     return { file, entries: entries.length, missing,
-             name: `ledger-vault-${todayISO()}.zip` };
+             name: `quire-vault-${todayISO()}.zip` };
   }
 
   /**
@@ -304,9 +317,14 @@ class Store {
        its files at the top rather than under data/. Both are the same vault. */
     const find = tail => files.find(f => f.name === tail || f.name.endsWith('/' + tail)
       || f.name.replace(/^[^/]+\//, '') === tail);
+    /* A vault exported before the app was called Quire says ledger-vault
+       inside and is otherwise identical. It is the same journal, so it opens.
+       Nothing checks the manifest's name — the two JSON files are what make a
+       vault a vault — but it is worth saying out loud that old backups keep
+       working, because that is the whole point of having them. */
     const trades = find('data/trades.json') || find('trades.json');
     const accounts = find('data/accounts.json') || find('accounts.json');
-    if (!trades || !accounts) throw new Error('That file is not a Ledger vault.');
+    if (!trades || !accounts) throw new Error('That file is not a Quire vault.');
 
     const t = JSON.parse(textOfBytes(trades.bytes));
     const a = JSON.parse(textOfBytes(accounts.bytes));
@@ -345,7 +363,7 @@ class Store {
   /* ============================================================
      Making a vault whole before anything reads it.
 
-     A vault can arrive with a key missing: an older Ledger wrote it, a write
+     A vault can arrive with a key missing: an older version wrote it, a write
      was cut off half way, or somebody unzipped it, edited the JSON by hand
      and zipped it again — which the format deliberately allows. A missing key
      has to cost that one key and nothing else. Before this, a playbook with
@@ -386,6 +404,19 @@ class Store {
 
     if (!d.replay || typeof d.replay !== 'object') { d.replay = { version: 1, weeks: {} }; note(); }
     if (!d.replay.weeks || typeof d.replay.weeks !== 'object') { d.replay.weeks = {}; note(); }
+
+    if (!d.news || typeof d.news !== 'object') { d.news = { version: 1, fetchedAt: null, events: [] }; note(); }
+    if (!Array.isArray(d.news.events)) { d.news.events = []; note(); }
+
+    if (!d.outlooks || typeof d.outlooks !== 'object') { d.outlooks = { version: 1, days: {} }; note(); }
+    if (!d.outlooks.days || typeof d.outlooks.days !== 'object') { d.outlooks.days = {}; note(); }
+    /* A day whose instrument list is missing is a day with nothing written,
+       not a reason for the page to throw. */
+    for (const [date, day] of Object.entries(d.outlooks.days)) {
+      if (!day || typeof day !== 'object') { delete d.outlooks.days[date]; note(); continue; }
+      if (!Array.isArray(day.instruments)) { day.instruments = []; note(); }
+      day.instruments = day.instruments.filter(x => x && x.id);
+    }
   }
 
   /* Folders written by an earlier version get brought up to date in place.
@@ -413,16 +444,130 @@ class Store {
     }
     // v3 — replay comparison settings live beside the sessions they depend on.
     if ((pb.version || 1) < 3) {
-      pb.replay = pb.replay || { windowMins: 15, csvOffsetHours: 8 };
+      pb.replay = pb.replay || { windowMins: 15, csvOffsetHours: 0 };
       pb.version = 3;
       this.pendingMigration = true;
     }
   }
 
   async save(which) {
-    const map = { accounts: FILES.accounts, trades: FILES.trades, playbook: FILES.playbook, replay: FILES.replay };
+    const map = { accounts: FILES.accounts, trades: FILES.trades, playbook: FILES.playbook,
+                  replay: FILES.replay, outlooks: FILES.outlooks, news: FILES.news };
     await this.writeJSON(map[which], this.data[which]);
     this.emit();
+  }
+
+  /* ============================================================
+     The morning's outlook
+
+     One entry per day, holding a block per instrument: a bias, what you wrote
+     and one chart. Kept in its own file rather than on the trades, because an
+     outlook is written before there are any trades to hang it on — and
+     because a day you planned and then did not trade is a real day, worth
+     keeping.
+
+     A day with nothing written is not stored at all. An empty key for every
+     date you ever opened the page would make the file grow with your
+     attention rather than your work.
+     ============================================================ */
+  outlookFor(date) {
+    return this.data.outlooks.days[date] || null;
+  }
+
+  /** The day, ready to edit — created in memory, written only once it holds
+      something worth keeping. */
+  draftOutlook(date) {
+    const found = this.outlookFor(date);
+    if (found) return structuredClone(found);
+    return { date, instruments: [], updatedAt: null };
+  }
+
+  /** True when there is anything in this day worth a line in the file. */
+  static outlookHasContent(day) {
+    return (day.instruments || []).some(i =>
+      (i.notes || '').trim() || i.shot || (i.bias && i.bias !== 'neutral') || (i.pair || '').trim());
+  }
+
+  async saveOutlook(day) {
+    const date = day.date;
+    if (!date) return null;
+    if (Store.outlookHasContent(day)) {
+      day.updatedAt = new Date().toISOString();
+      this.data.outlooks.days[date] = day;
+    } else {
+      /* Everything was cleared out. Delete the day rather than keep a husk,
+         and take its pictures with it so the folder does not fill up with
+         charts nothing points at. */
+      const old = this.data.outlooks.days[date];
+      for (const i of (old?.instruments || [])) if (i.shot) await this.dropImage(i.shot);
+      delete this.data.outlooks.days[date];
+    }
+    await this.save('outlooks');
+    return this.data.outlooks.days[date] || null;
+  }
+
+  /** Which days have an outlook, newest first. */
+  outlookDates() {
+    return Object.keys(this.data.outlooks.days).sort().reverse();
+  }
+
+  /** Where one instrument's chart lives. Named off the day and the block, so
+      the folder reads as a diary and a deleted block orphans nothing. */
+  outlookShotName(date, instrumentId) {
+    return `${SHOTS}/outlook-${date}-${instrumentId}.jpg`;
+  }
+
+  async putOutlookShot(date, instrumentId, blob) {
+    const name = this.outlookShotName(date, instrumentId);
+    await fs.ensureDir(SHOTS);
+    await fs.writeImage(name, blob);
+    forgetUrl(name);
+    return name;
+  }
+
+  /** Remove a picture from the folder. Used when a block is deleted or its
+      chart replaced; failing to delete is not worth losing the edit over. */
+  async dropImage(name) {
+    if (!name) return;
+    try { await fs.deleteImage(name); } catch { /* the record matters more */ }
+    forgetUrl(name);
+  }
+
+  /** The trades taken on a day, for reading an outlook back against what you
+      actually did. Closed trades only — an open one has no verdict yet. */
+  tradesOn(accountId, date) {
+    return this.tradesFor(accountId).filter(t => t.date === date);
+  }
+
+  /* ============================================================
+     The economic calendar
+
+     Held like everything else: a file in the vault, read at startup, written
+     when it changes. Nothing here decides when to fetch — the page that shows
+     it does, because a background timer in a journal is a thing that runs on
+     a plane and fails silently.
+     ============================================================ */
+  get news() { return this.data.news; }
+
+  /** Minutes since the feed was last read, or null if it never has been. */
+  newsAge() {
+    const at = this.data.news.fetchedAt;
+    if (!at) return null;
+    const mins = Math.round((Date.now() - new Date(at)) / 60000);
+    return isFinite(mins) ? mins : null;
+  }
+
+  async saveNews(events) {
+    this.data.news = { version: 1, fetchedAt: new Date().toISOString(), events };
+    await this.save('news');
+    return this.data.news;
+  }
+
+  /** A failed fetch is recorded, so the page can say so without guessing. */
+  async newsFailed(reason) {
+    this.data.news.lastError = String(reason || 'could not be reached');
+    this.data.news.lastTriedAt = new Date().toISOString();
+    await this.save('news');
   }
 
   /* ---------- accessors ---------- */
@@ -457,14 +602,44 @@ class Store {
       you have most likely forgotten to close. */
   openFor(accountId) {
     return this.trades
-      .filter(t => t.accountId === accountId && t.status === 'open')
+      .filter(t => t.accountId === accountId && t.status === 'open' && this.inScope(t))
       .sort((a, b) => (a.date + (a.timeOpen || '')).localeCompare(b.date + (b.timeOpen || '')));
   }
 
   allTradesFor(accountId) {
     return this.trades
-      .filter(t => t.accountId === accountId)
+      .filter(t => t.accountId === accountId && this.inScope(t))
       .sort((a, b) => (b.date + (b.timeClose || '')).localeCompare(a.date + (a.timeClose || '')));
+  }
+
+  /* ============================================================
+     Live, or live and the tests as well
+
+     A forward test is a real decision and a fake dollar. Counting it in a
+     funded account's balance would be a lie; throwing it away would lose the
+     only record of a decision you actually made. So both are kept and one
+     switch decides which the app is currently talking about.
+
+     Filtering here, at the single place every page asks for its trades, is
+     why the dashboard, calendar, analytics, playbook and the account balance
+     all follow it without a line of their own. A trade saved before this
+     existed has no mode at all, and reads as live — so nothing you have
+     already logged moves.
+     ============================================================ */
+  inScope(t) {
+    return this.includeTests || t.mode !== 'forward';
+  }
+
+  get includeTests() { return !!this.data.accounts.includeTests; }
+
+  async setIncludeTests(on) {
+    this.data.accounts.includeTests = !!on;
+    await this.save('accounts');
+  }
+
+  /** How many forward tests are being left out right now. */
+  testCountFor(accountId) {
+    return this.trades.filter(t => t.accountId === accountId && t.mode === 'forward').length;
   }
 
   /* Which unit every figure is read in. A display preference, so it lives
@@ -674,7 +849,7 @@ function defaultPlaybook() {
     ],
     sessions: DEFAULT_SESSIONS(),
     rules: { maxTradesPerDay: 3, dailyLossCapPercent: 3 },
-    replay: { windowMins: 15, csvOffsetHours: 8 },
+    replay: { windowMins: 15, csvOffsetHours: 0 },
   };
 }
 

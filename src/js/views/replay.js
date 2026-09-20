@@ -29,7 +29,7 @@ const VERDICTS = {
 export function replay(store, nav) {
   const pb = store.playbook;
   const acct = store.activeAccount;
-  const cfg = pb.replay || (pb.replay = { windowMins: 15, csvOffsetHours: 8 });
+  const cfg = pb.replay || (pb.replay = { windowMins: 15, csvOffsetHours: 0 });
   const weeks = store.replayWeeks;
   const live = store.tradesFor(acct.id);
 
@@ -200,19 +200,25 @@ export function replay(store, nav) {
   );
 
   /* ---------- the table ---------- */
-  const COLS = '78px 116px 100px 84px 1fr 78px 78px 92px';
+  const COLS = '70px 108px 108px 92px 74px 1fr 72px 72px 88px';
   const sideCell = t => el('span', { class: 'm', style: { fontSize: '11.5px', color: t.side === 'buy' ? 'var(--green)' : 'var(--orange)' } },
     (t.side === 'buy' ? '▲ ' : '▼ ') + (t.side === 'buy' ? 'Long' : 'Short'));
 
   const rows = pairs.map(p => {
     const t = p.live || p.replay;
     const v = VERDICTS[p.verdict];
-    const times = `${p.live ? p.live.timeOpen : '—'} · ${p.replay ? p.replay.timeOpen : '—'}`;
+    /* Both clocks, side by side. Yours first, the replay's second — so a
+       trade you held longer than the backtest did shows up as a wider pair of
+       numbers rather than something you have to work out. */
+    const clock = pick => `${p.live ? (pick(p.live) || '—') : '—'} · ${p.replay ? (pick(p.replay) || '—') : '—'}`;
+    const entries = clock(t => t.timeOpen);
+    const exits   = clock(t => t.timeClose);
     const sess = p.sessionMismatch ? `${p.liveSession} / ${p.replaySession}` : (p.liveSession || p.replaySession);
     return el('div', { class: 'tbl-row', style: { gridTemplateColumns: COLS, cursor: p.live ? 'pointer' : 'default' },
       onClick: () => p.live && nav.go('#/trade/' + p.live.id) },
       el('span', { class: 'td' }, c.shortDate(t.date).replace(/^0/, '')),
-      el('span', { class: 'num', style: { textAlign: 'left' } }, times),
+      el('span', { class: 'num', style: { textAlign: 'left' } }, entries),
+      el('span', { class: 'num', style: { textAlign: 'left', color: 'var(--grey-4)' } }, exits),
       el('span', { class: 'ins' }, t.pair),
       sideCell(t),
       el('span', { class: 'td', style: { color: p.sessionMismatch ? 'var(--yellow)' : 'var(--grey-3)',
@@ -229,12 +235,13 @@ export function replay(store, nav) {
     el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '12px' } },
       el('h2', {}, 'Live against replay'),
       el('span', { class: 'note' }, replayWeek.length && pairs.length
-        ? `${pairs.length} pair${pairs.length === 1 ? '' : 's'} · entry is live · replay`
+        ? `${pairs.length} pair${pairs.length === 1 ? '' : 's'} · yours · replay`
         : 'nothing to compare yet')),
     replayWeek.length && pairs.length
       ? el('div', { class: 'tbl', style: { marginTop: '18px', flex: '1', minHeight: 0 } },
           el('div', { class: 'tbl-head', style: { gridTemplateColumns: COLS } },
-            el('span', {}, 'Day'), el('span', {}, 'Entry'), el('span', {}, 'Pair'), el('span', {}, 'Side'),
+            el('span', {}, 'Day'), el('span', {}, 'Entry'), el('span', {}, 'Exit'),
+            el('span', {}, 'Pair'), el('span', {}, 'Side'),
             el('span', {}, 'Session'),
             el('span', { style: { textAlign: 'right' } }, 'Live'),
             el('span', { style: { textAlign: 'right' } }, 'Replay'),
@@ -266,6 +273,44 @@ export function replay(store, nav) {
   const divergedGap = tally.diverged.length
     ? sum(tally.diverged, p => (p.liveR ?? 0) - (p.replayR ?? 0)) : null;
 
+  /* ---------- how much of the week you actually collected ----------
+
+     One number: your R as a share of the R your own replay found. Above 100
+     means you beat it, which is allowed and worth seeing.
+
+     A percentage only means something when the replay made money. A replay
+     week that lost, or scratched, has no edge to have captured a share of —
+     dividing by it would print a confident figure that means nothing, so
+     those weeks get a sentence instead. This is the same rule the rest of the
+     app follows: say nothing rather than invent a number. */
+  const capture = (liveRSum != null && replayRSum != null && replayRSum > 0.05)
+    ? (liveRSum / replayRSum) * 100 : null;
+
+  const captureCard = el('section', { class: 'card', style: { flex: 'none' } },
+    el('div', { class: 'eyebrow' }, 'Similarity'),
+    capture != null
+      ? el('div', {},
+          el('div', { class: 'kpi-val', style: { marginTop: '14px',
+              color: capture >= 90 ? 'var(--green)' : capture >= 50 ? 'var(--yellow)' : 'var(--orange)' } },
+            String(Math.round(capture)),
+            el('span', { class: 'unit' }, '%')),
+          /* A bar, clipped at 100, so a glance says "about a tenth" without
+             reading the figure. Past 100 it simply fills. */
+          el('div', { style: { marginTop: '14px', height: '6px', borderRadius: '3px',
+                               background: 'var(--grey-7)', overflow: 'hidden' } },
+            el('div', { style: { height: '100%', borderRadius: '3px',
+                width: Math.max(0, Math.min(100, capture)) + '%',
+                background: capture >= 90 ? 'var(--green)' : capture >= 50 ? 'var(--yellow)' : 'var(--orange)' } })),
+          el('div', { class: 'm', style: { marginTop: '12px', fontSize: '11px', lineHeight: 1.6, color: 'var(--grey-4)' } },
+            c.rFmt(liveRSum) + ' captured of ' + c.rFmt(replayRSum) + ' available'))
+      : el('div', { class: 'm', style: { marginTop: '14px', fontSize: '11.5px', lineHeight: 1.6, color: 'var(--grey-4)' } },
+          replayRSum == null ? 'Import this week\u2019s replay and it works out how much of it you collected.'
+          : liveRSum == null ? 'Log this week\u2019s trades and it works out how much of the replay you collected.'
+          : replayRSum <= 0.05 ? 'The replay week made nothing, so there is no edge to have captured a share of. Your week: '
+                                 + c.rFmt(liveRSum) + '.'
+          : '\u2014'),
+  );
+
   const rail = el('div', { style: { width: '332px', flex: 'none', display: 'flex', flexDirection: 'column',
                                     gap: '8px', minHeight: 0, alignItems: 'stretch' } },
     el('section', { class: 'card', style: { flex: 'none' } },
@@ -291,7 +336,8 @@ export function replay(store, nav) {
                tally.extra.length === 1 ? '' : 's', tally.extra.length === 1 ? ' is' : ' are',
                ' what your replay never found.']
             : ['Live and replay agree on this week.'])),
-    ));
+    ),
+    captureCard);
 
   return el('div', { class: 'view' }, head, stripCard, figures,
     el('div', { class: 'row', style: { flex: '1', minHeight: 0 } }, tableCard, rail));

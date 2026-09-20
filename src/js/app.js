@@ -3,7 +3,7 @@
    ============================================================ */
 import { store, isSupported, isTauri } from './store.js';
 import { fs } from './fs.js';
-import { el, icon, clear, toast } from './ui.js';
+import { el, icon, clear, toast, brandMark } from './ui.js';
 import * as c from './calc.js';
 import { dashboard } from './views/dashboard.js';
 import { trades } from './views/trades.js';
@@ -16,6 +16,7 @@ import { analytics } from './views/analytics.js';
 import { playbook } from './views/playbook.js';
 import { replay } from './views/replay.js';
 import { importTrades } from './views/import.js';
+import { outlook } from './views/outlook.js';
 
 const root = document.getElementById('app');
 const embeddedHere = () => { try { return window.self !== window.top; } catch { return true; } };
@@ -51,8 +52,8 @@ function vaultGate(suggested) {
 
   const card = el('div', { class: 'gate-card' },
     el('div', { style: { display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '22px' } },
-      el('div', { class: 'brand-mark' }, icon('mark', 15, 'var(--grey-8)', 2.6)),
-      el('span', { class: 'brand-name', style: { fontSize: '17px' } }, 'ledger')),
+      el('div', { class: 'brand-mark' }, brandMark(32, 68)),
+      el('span', { class: 'brand-name', style: { fontSize: '17px' } }, 'Quire')),
     el('h1', {}, 'Where should your vault live?'),
     el('div', { class: 'fs', style: { marginTop: '18px' } },
       'Vault\\\n  vault.json\n  data\\           accounts, trades, playbook\n  screenshots\\    your charts'),
@@ -71,8 +72,8 @@ function gate({ mode }) {
   const supported = isSupported();
   const card = el('div', { class: 'gate-card' },
     el('div', { style: { display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '24px' } },
-      el('div', { class: 'brand-mark' }, icon('mark', 15, 'var(--grey-8)', 2.6)),
-      el('span', { class: 'brand-name', style: { fontSize: '17px' } }, 'ledger')),
+      el('div', { class: 'brand-mark' }, brandMark(32, 68)),
+      el('span', { class: 'brand-name', style: { fontSize: '17px' } }, 'Quire')),
     el('h1', {}, mode === 'needs-permission' ? 'Reconnect your journal' : 'Choose where your journal lives'),
   );
 
@@ -89,7 +90,7 @@ function gate({ mode }) {
 
   if (mode === 'needs-permission') {
     card.append(
-      el('p', {}, 'You have used Ledger here before. Browsers ask again each session before letting a page touch your folder — one click and everything is back.'),
+      el('p', {}, 'You have used Quire here before. Browsers ask again each session before letting a page touch your folder — one click and everything is back.'),
       el('div', { class: 'gate-actions' },
         el('button', { class: 'btn btn-primary', onClick: async () => {
           try { if (await store.regrant()) boot(); else toast('Permission declined', 'warn'); }
@@ -101,10 +102,10 @@ function gate({ mode }) {
   }
 
   card.append(
-    el('p', {}, 'Pick an empty folder — anywhere you like. Ledger writes your accounts, trades and playbook into it as plain files you can open, copy and back up yourself.'),
+    el('p', {}, 'Pick an empty folder — anywhere you like. Quire writes your accounts, trades and playbook into it as plain files you can open, copy and back up yourself.'),
     el('p', {}, 'Nothing is uploaded anywhere. To move to another machine, copy the folder.'),
     el('div', { class: 'fs' },
-      'Ledger\\\n  accounts.json      your accounts\n  trades.json        every trade\n  playbook.json      setups, tags, sessions\n  screenshots\\\n  replay\\            your FX Replay exports'),
+      'Quire\\\n  accounts.json      your accounts\n  trades.json        every trade\n  playbook.json      setups, tags, sessions\n  screenshots\\\n  replay\\            your FX Replay exports'),
     el('div', { class: 'gate-actions' },
       el('button', { class: 'btn btn-primary', onClick: async () => {
         try { if (await store.connect()) boot(); }
@@ -118,6 +119,7 @@ function gate({ mode }) {
 /* ---------- sidebar ---------- */
 const NAV_ITEMS = [
   ['#/', 'dashboard', 'Dashboard'],
+  ['#/outlook', 'outlook', 'Outlook'],
   ['#/trades', 'trades', 'Trades'],
   ['#/calendar', 'calendar', 'Calendar'],
   ['#/analytics', 'analytics', 'Analytics'],
@@ -153,8 +155,8 @@ function sidebar() {
 
   return el('aside', { class: 'sidebar' },
     el('div', { class: 'brand' },
-      el('div', { class: 'brand-mark' }, icon('mark', 15, 'var(--grey-8)', 2.6)),
-      el('span', { class: 'brand-name' }, 'ledger')),
+      el('div', { class: 'brand-mark' }, brandMark(32, 68)),
+      el('span', { class: 'brand-name' }, 'Quire')),
 
     el('div', { class: 'acct-switch' },
       el('button', { class: 'acct-btn', onClick: e => { e.stopPropagation(); menuOpen = !menuOpen; render(); } },
@@ -176,6 +178,27 @@ function sidebar() {
       ...c.UNITS.map(u => el('button', { class: store.displayUnit === u ? 'is-on' : '',
         title: u === '$' ? 'Show money' : u === '%' ? 'Show percent of starting balance' : 'Show R multiples',
         onClick: async () => { if (store.displayUnit !== u) { await store.setDisplayUnit(u); render(); } } }, u))),
+
+    /* ============================================================
+       What the numbers are counting
+
+       The unit switch above says what a figure is measured in. This one says
+       which trades it is measured over. It only appears once there is a
+       forward test to include, because a switch with nothing on the other
+       side of it is furniture.
+       ============================================================ */
+    acct && store.testCountFor(acct.id)
+      ? el('div', { class: 'unit-switch', style: { marginTop: '6px' } },
+          ...[[false, 'Live', 'Count only the trades you took for real'],
+              [true, '+ Tests', 'Count forward tests as well']]
+            .map(([on, label, why]) => el('button', {
+              class: store.includeTests === on ? 'is-on' : '', title: why,
+              style: { fontSize: '11px' },
+              onClick: async () => {
+                if (store.includeTests === on) return;
+                await store.setIncludeTests(on); render();
+              } }, label)))
+      : null,
 
     el('nav', { class: 'nav' },
       ...NAV_ITEMS.map(([href, ic, label]) =>
@@ -224,6 +247,7 @@ function route() {
   if (!store.accounts.length && seg !== 'accounts' && seg !== 'settings') return accounts(store, nav);
   switch (seg) {
     case '':          return dashboard(store, nav);
+    case 'outlook':   return outlook(store, nav, arg);
     case 'trades':    return trades(store, nav);
     case 'new':       return addTrade(store, nav);
     case 'edit':      return addTrade(store, nav, arg);

@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 /* ============================================================
-   Ledger — the native shell.
+   Quire — the native shell.
 
    A handful of file commands and two path commands, and that is the whole
    backend. Screenshots go over the same bridge as base64 and land as ordinary
@@ -140,7 +140,7 @@ fn config_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
-/// First run, no questions asked: Documents/Ledger. Somewhere you can find
+/// First run, no questions asked: Documents/Quire. Somewhere you can find
 /// it, back it up, and open the files yourself.
 #[tauri::command]
 fn default_folder(app: tauri::AppHandle) -> Result<String, String> {
@@ -149,7 +149,55 @@ fn default_folder(app: tauri::AppHandle) -> Result<String, String> {
         .document_dir()
         .or_else(|_| app.path().home_dir())
         .map_err(|e| e.to_string())?;
-    Ok(base.join("Ledger").to_string_lossy().to_string())
+    Ok(base.join("Quire").to_string_lossy().to_string())
+}
+
+/// The allowlist, on its own so it can be tested without a network.
+///
+/// A webview that can ask the shell to fetch any URL is a hole: a page bug,
+/// or anything that gets to run script in it, could read an intranet address
+/// or post somewhere. So the shell will call exactly one host, over https,
+/// and nothing else — including addresses that merely end with the right
+/// letters, which is the trick this check exists to refuse.
+fn check_url(url: &str) -> Result<(), String> {
+    const ALLOWED: [&str; 1] = ["nfs.faireconomy.media"];
+
+    let rest = url.strip_prefix("https://").ok_or("only https")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    /* No credentials in the authority: https://nfs.faireconomy.media@evil.example
+       is a request to evil.example. */
+    if authority.contains('@') {
+        return Err("that address carries credentials".into());
+    }
+    let host = authority.split(':').next().unwrap_or("");
+    if !ALLOWED.contains(&host) {
+        return Err(format!("{host} is not a host this app will call"));
+    }
+    Ok(())
+}
+
+/// Fetch a URL and hand back the body as text.
+///
+/// The economic calendar is the one thing in Quire that comes from somewhere
+/// else. It is fetched here rather than in the page for two reasons: a
+/// webview will not make a cross-site request without the other end's
+/// permission, and doing it in Rust means no exception has to be carved into
+/// the app's content policy to allow it.
+///
+/// Only https, and only a host on the list — this command is reachable from
+/// the page, and a general-purpose "fetch anything" handed to a webview is a
+/// hole, not a feature.
+#[tauri::command]
+fn fetch_text(url: String) -> Result<String, String> {
+    check_url(&url)?;
+
+    let res = ureq::get(&url)
+        .timeout(std::time::Duration::from_secs(20))
+        .set("User-Agent", "Quire")
+        .call()
+        .map_err(|e| e.to_string())?;
+
+    res.into_string().map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -166,14 +214,42 @@ fn main() {
             path_exists,
             path_sep,
             config_dir,
-            default_folder
+            default_folder,
+            fetch_text
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Ledger");
+        .expect("error while running Quire");
 }
 
 /* Base64 written by hand is base64 worth testing. A bug here would not throw;
    it would quietly corrupt every screenshot the desktop app ever saved. */
+#[cfg(test)]
+mod url_tests {
+    use super::check_url;
+
+    #[test]
+    fn allows_the_one_host_over_https() {
+        assert!(check_url("https://nfs.faireconomy.media/ff_calendar_thisweek.json").is_ok());
+        assert!(check_url("https://nfs.faireconomy.media/anything?x=1#y").is_ok());
+    }
+
+    #[test]
+    fn refuses_everything_else() {
+        for bad in [
+            "http://nfs.faireconomy.media/x",              // not https
+            "https://evil.example/x",                      // another host
+            "https://nfs.faireconomy.media.evil.example/x",// ends with the right letters
+            "https://evilnfs.faireconomy.media/x",         // starts with the wrong ones
+            "https://nfs.faireconomy.media@evil.example/x",// credentials trick
+            "file:///etc/passwd",
+            "https://127.0.0.1/x",
+            "",
+        ] {
+            assert!(check_url(bad).is_err(), "should have refused {bad}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{b64_decode, b64_encode};
