@@ -303,11 +303,79 @@ export function settings(store, nav) {
              padding: '6px 9px', fontSize: '11.5px', color: '#fff', textAlign: 'right' },
     onChange: async e => { await store.setUserName(e.target.value); nav.refresh(); } });
 
+  /* ---------- the colour behind your initials ----------
+     A dropdown rather than a row of swatches, because the thing being chosen
+     has a name and the name is worth reading. Each option is the square
+     itself with your own initials on it, so you are picking the thing rather
+     than a sample of it. */
+  const USER_COLOURS = [
+    ['#F4624A', 'Coral'],  ['#E5342B', 'Red'],    ['#F97316', 'Orange'],
+    ['#FFB800', 'Yellow'], ['#18AC65', 'Green'],  ['#0EA5A5', 'Teal'],
+    ['#0988F0', 'Blue'],   ['#7C5CFF', 'Purple'], ['#FB7185', 'Pink'],
+    ['#8C5A3C', 'Brown'],  ['#9A9A9A', 'Grey'],   ['#E9E9E9', 'White'],
+    ['#3D3D3D', 'Black'],
+  ];
+
+  const colourWrap = el('div', { class: 'drop' });
+  let colourOpen = false;
+
+  function awayFromColours(e) {
+    if (!colourWrap.isConnected) return closeColours();
+    if (e.type === 'keydown' && e.key !== 'Escape') return;
+    if (e.type === 'pointerdown' && colourWrap.contains(e.target)) return;
+    colourOpen = false; paintColours();
+  }
+  function closeColours() {
+    document.removeEventListener('pointerdown', awayFromColours, true);
+    document.removeEventListener('keydown', awayFromColours, true);
+  }
+
+  const initialsOf = () => (store.userName || 'You').split(' ').filter(Boolean)
+    .map(w => w[0]).slice(0, 2).join('').toUpperCase();
+
+  const chip = (hex, size) => el('span', { class: 'avatar', style: {
+      background: hex, width: size + 'px', height: size + 'px',
+      borderRadius: Math.round(size / 2.8) + 'px',
+      boxShadow: 'inset 0 0 0 1px rgba(128,128,128,.28)' } },
+    el('span', { class: 'm', style: { fontSize: Math.round(size * 0.4) + 'px', color: c.inkOn(hex) } }, initialsOf()));
+
+  function paintColours() {
+    const current = store.userColour;
+    const named = USER_COLOURS.find(([hex]) => hex.toLowerCase() === current.toLowerCase());
+    colourWrap.replaceChildren(
+      el('button', { type: 'button', class: 'b' + (colourOpen ? ' is-open' : ''),
+        onClick: () => { colourOpen = !colourOpen; paintColours(); } },
+        chip(current, 22),
+        el('span', { class: 'n' }, named ? named[1] : current.toUpperCase()),
+        el('span', { class: 'c' }, '▾')),
+      el('div', { class: 'drop-menu', hidden: !colourOpen },
+        ...USER_COLOURS.map(([hex, name]) => el('button', { type: 'button',
+          class: 'drop-opt' + (hex.toLowerCase() === current.toLowerCase() ? ' is-on' : ''),
+          onClick: async () => {
+            colourOpen = false;
+            if (hex.toLowerCase() === current.toLowerCase()) return paintColours();
+            await store.setUserColour(hex);
+            nav.refresh();
+          } },
+          chip(hex, 20), el('span', { class: 'n' }, name),
+          hex.toLowerCase() === current.toLowerCase()
+            ? el('span', { class: 'k' }, icon('check', 11, 'var(--ink)', 2.4)) : null))));
+    closeColours();
+    if (colourOpen) {
+      document.addEventListener('pointerdown', awayFromColours, true);
+      document.addEventListener('keydown', awayFromColours, true);
+    }
+  }
+  paintColours();
+
   const appearanceCard = el('section', { class: 'card', style: { flex: 'none' } },
     el('h2', {}, 'Appearance'),
     el('div', { style: { marginTop: '18px', display: 'flex', alignItems: 'center', gap: '10px' } },
       el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Name'),
       el('div', { style: { marginLeft: 'auto' } }, nameField)),
+    el('div', { style: { marginTop: '14px', display: 'flex', alignItems: 'center', gap: '10px' } },
+      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Profile colour'),
+      el('div', { style: { marginLeft: 'auto' } }, colourWrap)),
     el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
     el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
       el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Theme'),

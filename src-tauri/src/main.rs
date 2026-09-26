@@ -160,7 +160,9 @@ fn default_folder(app: tauri::AppHandle) -> Result<String, String> {
 /// and nothing else — including addresses that merely end with the right
 /// letters, which is the trick this check exists to refuse.
 fn check_url(url: &str) -> Result<(), String> {
-    const ALLOWED: [&str; 1] = ["nfs.faireconomy.media"];
+    /* Every host this app will call, named one at a time. A feed added to
+       the app is a deliberate line here, not something a URL can decide. */
+    const ALLOWED: [&str; 2] = ["nfs.faireconomy.media", "investinglive.com"];
 
     let rest = url.strip_prefix("https://").ok_or("only https")?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
@@ -228,9 +230,11 @@ mod url_tests {
     use super::check_url;
 
     #[test]
-    fn allows_the_one_host_over_https() {
+    fn allows_the_named_hosts_over_https() {
         assert!(check_url("https://nfs.faireconomy.media/ff_calendar_thisweek.json").is_ok());
         assert!(check_url("https://nfs.faireconomy.media/anything?x=1#y").is_ok());
+        assert!(check_url("https://investinglive.com/feed/").is_ok());
+        assert!(check_url("https://investinglive.com/feed/centralbank/").is_ok());
     }
 
     #[test]
@@ -241,6 +245,9 @@ mod url_tests {
             "https://nfs.faireconomy.media.evil.example/x",// ends with the right letters
             "https://evilnfs.faireconomy.media/x",         // starts with the wrong ones
             "https://nfs.faireconomy.media@evil.example/x",// credentials trick
+            "https://investinglive.com.evil.example/feed/", // the new host, spoofed
+            "https://evilinvestinglive.com/feed/",
+            "http://investinglive.com/feed/",               // not https
             "file:///etc/passwd",
             "https://127.0.0.1/x",
             "",

@@ -1,4 +1,4 @@
-import { el, icon, toast } from '../ui.js';
+import { el, icon, toast, confirmButton } from '../ui.js';
 import * as c from '../calc.js';
 import { DEFAULT_SESSIONS } from '../store.js';
 
@@ -119,22 +119,33 @@ export function playbook(store, nav) {
             el('input', { class: 'eyebrow', value: g.name,
               style: { background: 'transparent', width: '140px' },
               onChange: async e => { g.name = e.target.value.trim() || g.name; await save(); } }),
-            el('button', { class: 'm', style: { marginLeft: 'auto', fontSize: '10.5px', color: 'var(--grey-5)' },
-              onClick: async () => {
+            confirmButton({
+              label: 'remove group', armedLabel: 'confirm remove',
+              className: 'm', style: { marginLeft: 'auto', fontSize: '10.5px', color: 'var(--grey-5)' },
+              armedStyle: { marginLeft: 'auto', fontSize: '10.5px', color: 'var(--orange)' },
+              onArm: () => { if (g.tags.length) toast('Empty the group first', 'warn'); },
+              onConfirm: async () => {
                 if (g.tags.length) return toast('Empty the group first', 'warn');
                 pb.tagGroups = pb.tagGroups.filter(x => x.id !== g.id); await save();
-              } }, 'remove group')),
+              } })),
           el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '5px' } },
             ...g.tags.map(t => el('span', { class: 'tag', style: { display: 'inline-flex', alignItems: 'center', gap: '7px' } },
               t.name,
-              el('button', { title: 'Remove', style: { color: 'var(--grey-5)', fontSize: '13px', lineHeight: 1 },
-                onClick: async () => {
+              /* Deleting a tag takes it off every trade that carried it, so
+                 the × arms into a word and says how many that is. */
+              confirmButton({
+                label: '×', title: 'Remove',
+                armedLabel: (() => { const n = store.trades.filter(x => (x.tagIds || []).includes(t.id)).length;
+                  return n ? `delete · ${n} trade${n === 1 ? '' : 's'}` : 'delete?'; })(),
+                style: { color: 'var(--grey-5)', fontSize: '13px', lineHeight: 1 },
+                armedStyle: { color: 'var(--orange)', fontSize: '10.5px', lineHeight: 1 },
+                onConfirm: async () => {
                   const used = store.trades.filter(x => (x.tagIds || []).includes(t.id)).length;
                   for (const x of store.trades) if ((x.tagIds || []).includes(t.id)) x.tagIds = x.tagIds.filter(i => i !== t.id);
                   g.tags = g.tags.filter(x => x.id !== t.id);
                   if (used) await store.save('trades');
                   await save();
-                } }, '×'))),
+                } }))),
             el('button', { class: 'tag-add', onClick: () => addTag(g) }, '+')))),
         el('button', { class: 'tag-add', style: { alignSelf: 'flex-start', borderRadius: 'var(--r-btn)', padding: '7px 14px' },
           onClick: async () => {
@@ -199,12 +210,17 @@ export function playbook(store, nav) {
           timeField(s.start, v => s.start = v),
           el('span', { class: 'm', style: { fontSize: '10px', color: 'var(--grey-5)' } }, '–'),
           timeField(s.end, v => s.end = v),
-          el('button', { title: 'Remove', style: { marginLeft: 'auto', color: 'var(--grey-5)', fontSize: '14px' },
-            onClick: async () => {
+          confirmButton({
+            label: '×', title: 'Remove',
+            armedLabel: (() => { const n = store.trades.filter(t => t.sessionId === s.id).length;
+              return n ? `delete · ${n} trade${n === 1 ? '' : 's'}` : 'delete?'; })(),
+            style: { marginLeft: 'auto', color: 'var(--grey-5)', fontSize: '14px' },
+            armedStyle: { marginLeft: 'auto', color: 'var(--orange)', fontSize: '10.5px' },
+            onConfirm: async () => {
               for (const t of store.trades) if (t.sessionId === s.id) t.sessionId = null;
               pb.sessions.splice(i, 1);
               await store.save('trades'); await save();
-            } }, '×')))),
+            } })))),
       el('div', { style: { marginTop: '14px', display: 'flex', gap: '7px', flexWrap: 'wrap' } },
         el('button', { class: 'tag-add', onClick: async () => {
           const name = await inlineInput(sessionsCard, 'Name this session');

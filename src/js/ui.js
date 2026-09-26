@@ -63,6 +63,7 @@ const PATHS = {
      what this is — filled rather than drawn in outline, because at 13px a
      filled shape is the only one whose colour actually reads. */
   refresh:   '<path d="M20 12a8 8 0 1 1-2.5-5.8"/><path d="M20 3.6v4.2h-4.2"/>',
+  wire:      '<path d="M4 5.5h16v13H7a3 3 0 0 1-3-3z"/><path d="M20 8.5h1.5a1.5 1.5 0 0 1 1.5 1.5v6a2.5 2.5 0 0 1-5 0"/><path d="M7 9h7M7 12.5h7M7 16h4"/>',
   trash:     '<path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/>',
   pencil:    '<path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5z"/>',
   download:  '<path d="M12 4v12"/><path d="M7.5 11.5 12 16l4.5-4.5"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/>',
@@ -210,4 +211,135 @@ export function toast(message, tone = 'ok') {
     t.style.opacity = '0';
     t.style.transform = 'translate(-50%, 6px)';
   }, 2600);
+}
+
+/* The mark a forward test carries where its size and its money would be.
+   Quiet — it is a label, not a figure, and the row it sits in already has a
+   result of its own in the R column. */
+export const ft = () => el('span', { class: 'ft-mark' }, 'FT');
+
+/* ============================================================
+   Nothing deletes on one click
+
+   Every destructive button in Quire arms itself first. The first click turns
+   it orange and makes it say what it is about to do; the second does it. It
+   disarms on its own after a few seconds, and the moment you click anywhere
+   else — so a stray click costs you nothing, and a deliberate one costs you
+   a second click.
+
+   A modal was the other option and it is worse here: it takes the whole
+   window away from you to ask a question you can answer in place, and it
+   would need its own focus handling on every page. This asks where the thing
+   you are deleting still is.
+   ============================================================ */
+export const ARM_MS = 4000;
+
+export function confirmButton({
+  label,                       // what it reads normally: text, or a node (an icon)
+  armedLabel = 'Confirm',      // what it reads once armed
+  title = '',
+  armedTitle = 'Click again, or click away to cancel',
+  className = '',
+  armedClassName = null,       // defaults to className
+  style = {},
+  armedStyle = null,           // defaults to an orange version of style
+  onConfirm,
+  onArm = null,
+} = {}) {
+  let armed = false, timer = null;
+
+  const away = (e) => {
+    if (!btn.isConnected) return stand();
+    if (e.type === 'keydown' && e.key !== 'Escape') return;
+    if (e.type === 'pointerdown' && btn.contains(e.target)) return;
+    disarm();
+  };
+  /* Take the listeners off and stop the clock, without touching how the
+     button looks — used both when disarming and when the page has gone. */
+  function stand() {
+    clearTimeout(timer); timer = null;
+    document.removeEventListener('pointerdown', away, true);
+    document.removeEventListener('keydown', away, true);
+  }
+  function disarm() { armed = false; stand(); paint(); }
+  function arm() {
+    armed = true;
+    stand();
+    timer = setTimeout(disarm, ARM_MS);
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('keydown', away, true);
+    paint();
+    if (onArm) onArm();
+  }
+
+  const btn = el('button', { type: 'button' });
+  function paint() {
+    btn.className = (armed ? (armedClassName ?? className) : className) || '';
+    btn.setAttribute('title', armed ? armedTitle : title);
+    btn.removeAttribute('style');
+    const s = armed
+      ? (armedStyle ?? { ...style, color: 'var(--orange)', background: 'transparent' })
+      : style;
+    for (const [k, v] of Object.entries(s)) {
+      if (v == null) continue;
+      if (k.startsWith('--')) btn.style.setProperty(k, String(v));
+      else btn.style[k] = v;
+    }
+    btn.replaceChildren(...[armed ? armedLabel : label].flat(Infinity)
+      .filter(x => x != null && x !== false)
+      .map(x => x instanceof Node ? x : document.createTextNode(String(x))));
+  }
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!armed) return arm();
+    disarm();
+    await onConfirm(e);
+  });
+  paint();
+  return btn;
+}
+
+/* ============================================================
+   A picture, full size
+
+   Over everything, with the others an arrow key away. Escape closes it; so
+   does clicking the backdrop, because that is what everyone tries first.
+
+   It takes names and a way to turn a name into a URL rather than a store, so
+   the trade page and the outlook page share one viewer instead of each
+   growing their own.
+   ============================================================ */
+export function lightbox({ items, urlFor, at = 0 }) {
+  if (!items || !items.length) return null;
+  let i = Math.max(0, Math.min(at, items.length - 1));
+
+  const img = el('img', { alt: '' });
+  const label = el('span', { class: 't' });
+  const count = el('span', { class: 'n' });
+  const box = el('div', { class: 'lightbox' },
+    el('div', { class: 'bar' }, label, count,
+      el('div', { class: 'spacer', style: { flex: 1 } }),
+      el('button', { class: 'x', onClick: close }, icon('close', 14, 'var(--grey-1)', 2))),
+    el('div', { class: 'stage', onClick: e => { if (e.target !== img) close(); } }, img));
+
+  async function show(n) {
+    i = (n + items.length) % items.length;
+    label.textContent = items[i].label || '';
+    count.textContent = items.length > 1 ? `${i + 1} / ${items.length}` : '';
+    const url = await urlFor(items[i].name);
+    if (url) img.src = url;
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowRight') show(i + 1);
+    else if (e.key === 'ArrowLeft') show(i - 1);
+  }
+  function close() {
+    document.removeEventListener('keydown', onKey);
+    box.remove();
+  }
+  document.addEventListener('keydown', onKey);
+  document.body.append(box);
+  show(i);
+  return box;
 }

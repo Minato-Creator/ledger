@@ -109,3 +109,34 @@ export function whenText(iso, now = Date.now()) {
   if (body === 'now') return 'now';
   return m > 0 ? `in ${body}` : `${body} ago`;
 }
+
+/* ---------- the week ----------
+   The feed is this week, so there is no week to work out: grouping what came
+   back by day is the whole job. Days with nothing on them are left out —
+   a Tuesday with no red folders is not a row, it is a Tuesday. */
+export function eventsByDay(events) {
+  const days = new Map();
+  for (const e of events || []) {
+    const d = localDay(e.at);
+    if (!days.has(d)) days.set(d, []);
+    days.get(d).push(e);
+  }
+  for (const list of days.values()) list.sort((a, b) => a.at.localeCompare(b.at));
+  return [...days.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+/* ---------- one fetch, two pages ----------
+   The outlook strip and the newswire both want this calendar. Neither should
+   be the one that owns it, and neither should fetch it twice in a minute
+   because you walked from one to the other. */
+export async function ensureNews(store, { force = false } = {}) {
+  const age = store.newsAge();
+  if (!force && age != null && age < FRESH_MINS && store.news.events.length) return store.news;
+  try {
+    const events = parseFeed(await fetchFeed());
+    return await store.saveNews(events);
+  } catch (e) {
+    await store.newsFailed(e.message);
+    throw e;
+  }
+}

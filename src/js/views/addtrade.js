@@ -1,4 +1,4 @@
-import { el, icon, toast } from '../ui.js';
+import { el, icon, toast, confirmButton } from '../ui.js';
 import * as c from '../calc.js';
 import { todayISO } from '../store.js';
 import { SLOTS, prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
@@ -35,13 +35,14 @@ export function addTrade(store, nav, existingId = null) {
         : asText(Math.abs(Number(editing.netResult) || 0)),
     status: editing.status === 'open' ? 'open' : 'closed',
     mode: editing.mode === 'forward' ? 'forward' : 'live',
+    rText: editing.rMultiple == null ? '' : asText(Math.abs(Number(editing.rMultiple))),
   } : {
     assetClass: 'Forex', pair: '', side: 'buy', setupId: pb.setups[0]?.id || null,
     sessionId: null, sessionAuto: true,
     date: todayISO(), timeOpen: '', timeClose: '',
     entryPrice: '', stopLoss: '', takeProfit: '', exitPrice: '',
     size: '', sizeUnit: 'lots',
-    riskPercent: acct.defaultRiskPercent, netResult: '', resultSign: 'win',
+    riskPercent: acct.defaultRiskPercent, netResult: '', resultSign: 'win', rText: '',
     tagIds: [], grade: '', notes: '', status: 'closed', mode: 'live',
   };
   if (editing) f.sessionAuto = false;
@@ -59,39 +60,64 @@ export function addTrade(store, nav, existingId = null) {
     return f.resultSign === 'loss' ? -raw : raw;
   }
   const isOpen = () => f.status === 'open';
+  /* A forward test is a decision taken on a demo. It has an R because you
+     risked a unit and made or lost multiples of it; it has no money, because
+     none was ever at stake. So the result is typed as R and the money side of
+     this form — the amount, the dollar 1R — is not asked for. */
+  const isForward = () => f.mode === 'forward';
+
+  /** The R a forward test states, with its sign from the same switch. */
+  function signedR() {
+    const raw = c.parseNumberOrNull(f.rText);
+    if (raw == null) return null;
+    if (f.resultSign === 'breakeven') return raw;
+    return f.resultSign === 'loss' ? -Math.abs(raw) : Math.abs(raw);
+  }
 
   function recompute() {
     const open = isOpen();
+    const fwd = isForward();
     const risk = c.parseNumber(f.riskPercent) ?? 0;
     const oneR = acct.startingBalance * risk / 100;
-    const typedResult = open ? null : c.parseNumberOrNull(f.netResult);
-    const unreadable = !open && String(f.netResult ?? '').trim() !== '' && typedResult == null;
-    const net = open ? 0 : signedResult();
-    const r = open || !oneR ? null : net / oneR;
+    const typedResult = open ? null : fwd ? signedR() : c.parseNumberOrNull(f.netResult);
+    const typedRaw = fwd ? f.rText : f.netResult;
+    const unreadable = !open && String(typedRaw ?? '').trim() !== '' && typedResult == null;
+    const net = open || fwd ? 0 : signedResult();
+    const r = open ? null : fwd ? signedR() : (!oneR ? null : net / oneR);
     const planned = c.plannedR({ entryPrice: f.entryPrice, stopLoss: f.stopLoss, takeProfit: f.takeProfit });
     const dur = c.durationMins(f.timeOpen, f.timeClose);
 
     const flat = f.resultSign === 'breakeven';
-    out.result.textContent = open ? 'Open' : typedResult == null ? '—' : c.money(net, { currency: acct.currency });
+    out.result.textContent = open ? 'Open'
+      : typedResult == null ? '—'
+      : fwd ? c.rFmt(r)
+      : c.money(net, { currency: acct.currency });
     /* A break-even is shown in its real amount but not in a colour: it moved
        the account without being a win or a loss, and colouring it either way
        would say otherwise. */
-    out.result.className = 'kpi-val ' + (open || flat || net === 0 ? '' : net > 0 ? 'pos' : 'neg');
+    const sign = fwd ? (r ?? 0) : net;
+    out.result.className = 'kpi-val ' + (open || flat || sign === 0 ? '' : sign > 0 ? 'pos' : 'neg');
     out.result.style.color = open ? 'var(--yellow)' : '';
     out.rShown.textContent = open ? '—' : c.rFmt(r);
-    out.rShown.style.color = open || flat || net === 0 ? 'var(--ink)'
-      : net > 0 ? 'var(--profit)' : 'var(--loss)';
+    out.rShown.style.color = open || flat || sign === 0 ? 'var(--ink)'
+      : sign > 0 ? 'var(--profit)' : 'var(--loss)';
+    /* 1R in money means nothing on a forward test — there was no money. */
     out.oneR.textContent = oneR ? c.money(oneR, { sign: false, currency: acct.currency }) : '—';
+    if (out.moneyCells) out.moneyCells.forEach(n => { n.hidden = fwd; });
     out.planned.textContent = planned == null ? '—' : `1 : ${planned.toFixed(2)}`;
     out.duration.textContent = c.durationFmt(dur);
     /* An open trade is asked for less: what you are in, and what you have put
        at risk. The result is the one thing it cannot have yet. */
-    out.save.disabled = open ? !(f.pair && risk > 0) : !(f.pair && typedResult != null && risk > 0);
+    /* A forward test needs an instrument and an R; it is not asked for a risk
+       percentage, because a percentage of nothing is nothing. */
+    out.save.disabled = open ? !(f.pair && (fwd || risk > 0))
+                       : fwd ? !(f.pair && typedResult != null)
+                       : !(f.pair && typedResult != null && risk > 0);
     out.save.textContent = open ? (editing ? 'Save changes' : 'Save as open')
                                 : (editing ? 'Save changes' : 'Save trade');
     // A forgiving reader has to say what it could not read, or a typo just
     // greys the save button out with no reason given.
-    out.resultNote.textContent = unreadable ? 'Cannot read that as an amount' : '';
+    out.resultNote.textContent = unreadable ? (fwd ? 'Cannot read that as an R' : 'Cannot read that as an amount') : '';
 
     // Labels are exact: the entry time decides, with no tolerance anywhere near it.
     // Once you have picked a session by hand we stop touching it.
@@ -142,6 +168,7 @@ export function addTrade(store, nav, existingId = null) {
 
   function paintMode() {
     [...modeWrap.children].forEach((b, i) => b.classList.toggle('is-on', (i === 0) === (f.mode === 'live')));
+    if (out.riskRow) { paintResultRow(); recompute(); }
   }
 
   function paintStatus() {
@@ -149,8 +176,7 @@ export function addTrade(store, nav, existingId = null) {
     [...statusWrap.children].forEach((b, i) => b.classList.toggle('is-on', (i === 0) === !open));
     /* A running trade has no result, so the field is not there. Nothing has
        to say why: the figure at the top already reads Open. */
-    out.resultCell.hidden = open;
-    out.riskRow.style.gridTemplateColumns = open ? 'minmax(0,200px)' : 'minmax(0,200px) minmax(0,1fr)';
+    paintResultRow();
     /* An exit price and a closing time are things a running trade has not got.
        Greyed rather than removed, so it is obvious where they will go. */
     for (const node of [out.exitField, out.closeField]) {
@@ -222,8 +248,10 @@ export function addTrade(store, nav, existingId = null) {
       const head = el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '7px' } },
         el('span', { class: 'lbl', style: { margin: 0 } }, slot.label),
         staged || kept
-          ? el('button', { type: 'button', class: 'm', style: { marginLeft: 'auto', fontSize: '10px', color: 'var(--grey-4)' },
-              onClick: () => clearShot(slot.key) }, 'Remove')
+          ? confirmButton({ label: 'Remove', armedLabel: 'Confirm remove', className: 'm',
+              style: { marginLeft: 'auto', fontSize: '10px', color: 'var(--grey-4)' },
+              armedStyle: { marginLeft: 'auto', fontSize: '10px', color: 'var(--orange)' },
+              onConfirm: () => clearShot(slot.key) })
           : null);
 
       const zone = el('button', { type: 'button', class: 'shot-zone' + (focusedSlot === slot.key ? ' is-target' : ''),
@@ -305,23 +333,92 @@ export function addTrade(store, nav, existingId = null) {
   }
   paintSetups();
 
-  /* ---------- tags ---------- */
-  const tagWrap = el('div', { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' } });
-  function paintTags() {
-    const all = pb.tagGroups.flatMap(g => g.tags.map(t => ({ ...t, group: g })));
-    tagWrap.replaceChildren(
-      ...all.map(t => el('button', { type: 'button', class: 'tag' + (f.tagIds.includes(t.id) ? ' is-on' : ''),
-        onClick: () => {
-          f.tagIds = f.tagIds.includes(t.id) ? f.tagIds.filter(x => x !== t.id) : [...f.tagIds, t.id];
-          paintTags();
-        } }, t.name)),
-      el('button', { type: 'button', class: 'tag-add', onClick: addTag }, '+ new tag'));
+  /* ============================================================
+     Tags, by group
+
+     Every tag in the journal laid out in one row was fine with nine of them
+     and unusable with forty. The group is the question — what went wrong,
+     what the market was doing, how it was executed — so the group is what you
+     see, and its tags live inside it.
+
+     The panel ticks rather than chooses. A trade can carry two mistakes; a
+     dropdown that allowed one would quietly throw the second away, and the
+     tag you did not record is the one you never fix.
+     ============================================================ */
+  const tagWrap = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '9px' } });
+  let openGroup = null;
+
+  /* Clicking anywhere else puts the panel away. The listener exists only
+     while one is open, and takes itself off once the form is gone. */
+  function awayFromTags(e) {
+    if (!tagWrap.isConnected) return closeTags();
+    if (e.type === 'keydown' && e.key !== 'Escape') return;
+    if (e.type === 'pointerdown' && tagWrap.contains(e.target)) return;
+    openGroup = null; paintTags();
   }
-  async function addTag() {
-    const name = await inlinePrompt(tagWrap, 'Name this tag');
+  function closeTags() {
+    document.removeEventListener('pointerdown', awayFromTags, true);
+    document.removeEventListener('keydown', awayFromTags, true);
+  }
+
+  const chosen = id => f.tagIds.includes(id);
+  function toggleTag(id) {
+    f.tagIds = chosen(id) ? f.tagIds.filter(x => x !== id) : [...f.tagIds, id];
     paintTags();
-    if (!name) return;
-    const g = pb.tagGroups[0];
+  }
+
+  function paintTags() {
+    const groups = pb.tagGroups || [];
+
+    const drops = groups.map(g => {
+      const n = g.tags.filter(t => chosen(t.id)).length;
+      const open = openGroup === g.id;
+      return el('div', { class: 'tag-drop' + (open ? ' is-open' : '') },
+        el('button', { type: 'button', class: 'b',
+          onClick: () => { openGroup = open ? null : g.id; paintTags(); } },
+          el('span', {}, g.name),
+          n ? el('span', { class: 'n' }, String(n)) : null,
+          el('span', { class: 'c' }, '▾')),
+        el('div', { class: 'tag-menu', hidden: !open },
+          ...g.tags.map(t => el('button', { type: 'button', class: 'tag-opt' + (chosen(t.id) ? ' is-on' : ''),
+            onClick: () => toggleTag(t.id) },
+            /* The same box the import table ticks with — one checkbox in the
+               app, not two that nearly match. */
+            el('span', { class: 'tick' + (chosen(t.id) ? ' is-on' : '') }, chosen(t.id) ? icon('check', 11, '#fff', 3) : null),
+            t.name)),
+          el('button', { type: 'button', class: 'tag-opt is-add', onClick: () => addTag(g) },
+            el('span', { class: 'tick is-add' }, '＋'), 'new tag')));
+    });
+
+    /* What is on the trade, in one line, whichever group it came from —
+       so you can see the answer without opening anything. */
+    const picked = groups.flatMap(g => g.tags.filter(t => chosen(t.id)));
+    const chips = picked.map(t => el('button', { type: 'button', class: 'tag-chip',
+      onClick: () => toggleTag(t.id) }, t.name, el('span', { class: 'x' }, '×')));
+
+    /* replaceChildren is not el(): a null here becomes the word "null" on the
+       page, so the empty row is left out rather than passed in. */
+    tagWrap.replaceChildren(...[
+      el('div', { class: 'tag-groups' }, ...drops,
+        groups.length ? null : el('button', { type: 'button', class: 'tag-add', onClick: () => addTag(null) }, '+ new tag')),
+      chips.length ? el('div', { class: 'tag-chips' }, ...chips) : null,
+    ].filter(Boolean));
+
+    closeTags();
+    if (openGroup) {
+      document.addEventListener('pointerdown', awayFromTags, true);
+      document.addEventListener('keydown', awayFromTags, true);
+    }
+  }
+
+  /* A tag made here joins the group it was made in, rather than whichever
+     group happened to be first. */
+  async function addTag(group) {
+    openGroup = null; paintTags();
+    const name = await inlinePrompt(tagWrap, 'Name this tag');
+    if (!name) { paintTags(); return; }
+    let g = group || pb.tagGroups[0];
+    if (!g) { g = { id: 'g_' + crypto.randomUUID().slice(0, 6), name: 'Tags', tags: [] }; pb.tagGroups.push(g); }
     const t = { id: 'tg_' + crypto.randomUUID().slice(0, 6), name };
     g.tags.push(t); await store.save('playbook');
     f.tagIds = [...f.tagIds, t.id]; paintTags();
@@ -375,10 +472,21 @@ export function addTrade(store, nav, existingId = null) {
        be able to tell "nothing yet" from "nothing gained". */
     if (isOpen()) {
       payload.netResult = null;
+      payload.rMultiple = null;
       payload.exitPrice = null;
       payload.timeClose = null;
+    } else if (isForward()) {
+      /* No money was at stake, so none is recorded. The R is the result, and
+         it is stored rather than derived — there is nothing to derive it
+         from. */
+      payload.netResult = null;
+      payload.exitPrice = numOrNull(f.exitPrice);
+      payload.rMultiple = signedR();
+      payload.riskPercent = null;
+      payload.outcome = f.resultSign === 'breakeven' ? 'breakeven' : null;
     } else {
       payload.netResult = signedResult();
+      payload.rMultiple = null;
       /* Stored only when it is a break-even, because that is the only label
          the amount cannot be read back from. */
       payload.outcome = f.resultSign === 'breakeven' ? 'breakeven' : null;
@@ -445,10 +553,12 @@ export function addTrade(store, nav, existingId = null) {
     el('div', { class: 'ts-val' }, value));
   const rule = () => el('i', {});
 
+  /* On a forward test the result IS the R, and 1R in money never existed. The
+     two cells that would repeat it, and the rules beside them, come out rather
+     than standing there holding a dash. */
+  out.moneyCells = [rule(), cell('R', out.rShown), rule(), cell('1R', out.oneR)];
   const strip = el('section', { class: 'card trade-strip' },
-    cell('Result', out.result), rule(),
-    cell('R', out.rShown), rule(),
-    cell('1R', out.oneR), rule(),
+    cell('Result', out.result), ...out.moneyCells, rule(),
     cell('Planned', out.planned), rule(),
     cell('Time', out.duration));
 
@@ -468,15 +578,43 @@ export function addTrade(store, nav, existingId = null) {
           [...e.currentTarget.parentNode.children].forEach(x => x.classList.toggle('is-on', x === e.currentTarget));
         } }, label)));
 
-  out.riskRow = grid('minmax(0,200px) minmax(0,1fr)',
-    labelled('Risk %', el('div', { class: 'suffix' },
-      field({ inputmode: 'decimal', ...bind('riskPercent') }),
-      el('span', {}, '%'))),
-    out.resultCell = labelled('Net result', el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-      el('div', { class: 'prefix', style: { flex: '1' } },
-        el('span', {}, '$'),
-        field({ inputmode: 'decimal', placeholder: '0.00', ...bind('netResult') })),
-      signWrap, out.resultNote)));
+  /* The money row and the R row are the same row wearing different clothes.
+     Which one you get is decided by Live or Forward test in the header, and
+     nothing else on the form changes — the prices, the times and the charts
+     are worth keeping whichever kind of trade it was. */
+  const moneyCell = labelled('Net result', el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+    el('div', { class: 'prefix', style: { flex: '1' } },
+      el('span', {}, '$'),
+      field({ inputmode: 'decimal', placeholder: '0.00', ...bind('netResult') })),
+    signWrap, out.resultNote));
+
+  const rCell = labelled('Result in R', el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+    el('div', { class: 'suffix', style: { flex: '1' } },
+      field({ inputmode: 'decimal', placeholder: '2.00', ...bind('rText') }),
+      el('span', {}, 'R')),
+    signWrap, out.resultNote));
+
+  const riskCell = labelled('Risk %', el('div', { class: 'suffix' },
+    field({ inputmode: 'decimal', ...bind('riskPercent') }),
+    el('span', {}, '%')));
+
+  out.riskRow = grid('minmax(0,200px) minmax(0,1fr)');
+  out.riskBand = el('div', { class: 'band result-band' }, out.riskRow);
+  /* One row, three shapes: risk and money for a live trade, R alone for a
+     forward test, and risk alone while a live trade is still running. A
+     forward test that is still running has nothing to ask for at all, so the
+     band goes rather than sitting there empty. */
+  function paintResultRow() {
+    const fwd = isForward(), open = isOpen();
+    out.riskRow.replaceChildren(...(fwd ? (open ? [] : [rCell]) : open ? [riskCell] : [riskCell, moneyCell]));
+    out.riskRow.style.gridTemplateColumns = fwd ? 'minmax(0,1fr)'
+      : open ? 'minmax(0,200px)' : 'minmax(0,200px) minmax(0,1fr)';
+    /* signWrap and resultNote are one element each, moved between the two
+       cells rather than duplicated — two sign switches would be two states
+       to keep in step, and they would drift. */
+    if (!open) (fwd ? rCell : moneyCell).querySelector('div').append(signWrap, out.resultNote);
+    out.riskBand.hidden = fwd && open;
+  }
 
   const colLeft = el('div', { class: 'col' },
     band(grid('minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.3fr)',
@@ -496,13 +634,16 @@ export function addTrade(store, nav, existingId = null) {
         labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
         labelled('Closed', out.closeField = field({ type: 'time', ...bind('timeClose') })))),
 
-    band(out.riskRow),
+    out.riskBand,
 
-    band(grid('1fr 1fr',
-      labelled('Setup', setupWrap),
-      labelled('Session', sessionWrap))),
-
-    band(labelled('Tags', tagWrap)),
+    /* Setup, session and tags are one question asked three ways — what kind of
+       trade was this — so they share a band and one hairline instead of two.
+       It also buys back the room the chosen tags take up underneath. */
+    band(
+      grid('1fr 1fr',
+        labelled('Setup', setupWrap),
+        labelled('Session', sessionWrap)),
+      labelled('Tags', tagWrap)),
 
     el('div', { class: 'band', style: { flex: '1', minHeight: '120px', display: 'flex', flexDirection: 'column' } },
       el('span', { class: 'lbl' }, 'Notes'),

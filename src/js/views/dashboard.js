@@ -1,4 +1,4 @@
-import { el, icon, lineChart, clear } from '../ui.js';
+import { el, icon, lineChart, clear, ft } from '../ui.js';
 import * as c from '../calc.js';
 
 let period = '30D';
@@ -169,9 +169,11 @@ export function tradeRow(t, acct, store, cols, nav) {
     el('span', { class: 'td', style: { color: long ? 'var(--green)' : 'var(--orange)' } }, long ? '▲ Long' : '▼ Short'),
     el('span', { class: 'td' }, c.shortDate(t.date)),
     el('span', { style: { fontSize: '12px', color: 'var(--grey-3)' } }, setup ? setup.name : '—'),
-    el('span', { class: 'num' }, t.size ? `${t.size} ${t.sizeUnit || ''}`.trim() : '—'),
+    el('span', { class: 'num' }, c.isForward(t) ? ft() : (t.size ? `${t.size} ${t.sizeUnit || ''}`.trim() : '—')),
     el('span', { class: 'num', style: { color: 'var(--grey-1)' } }, c.rFmt(r)),
-    el('span', { class: 'pl', style: { color: o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-2)' } },
-      c.tradeFig(store.displayUnit, acct, t)),
+    c.isForward(t)
+      ? el('span', { class: 'pl' }, ft())
+      : el('span', { class: 'pl', style: { color: o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-2)' } },
+          c.tradeFig(store.displayUnit, acct, t)),
   );
 }

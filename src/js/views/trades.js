@@ -1,4 +1,4 @@
-import { el, icon } from '../ui.js';
+import { el, icon, ft } from '../ui.js';
 import * as c from '../calc.js';
 import { tradeRow } from './dashboard.js';
 
@@ -113,6 +113,7 @@ function scheduleRefresh(nav) { clearTimeout(refreshTimer); refreshTimer = setTi
 
 function fullRow(t, acct, store, cols, nav) {
   const o = c.outcome(t);
+  const fwd = c.isForward(t);
   const r = c.rMultiple(acct, t);
   const setup = store.playbook.setups.find(s => s.id === t.setupId);
   const mark = o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-4)';
@@ -131,12 +132,14 @@ function fullRow(t, acct, store, cols, nav) {
       ...tags.slice(0, 2).map(tag => el('span', { class: 'm', style: {
         marginLeft: '6px', padding: '1px 7px', borderRadius: 'var(--r-pill)',
         background: 'var(--grey-7)', color: 'var(--grey-2)', fontSize: '10px' } }, tag.name))),
-    el('span', { class: 'num' }, t.size ?? '—'),
+    el('span', { class: 'num' }, fwd ? ft() : (t.size ?? '—')),
     el('span', { class: 'num' }, t.entryPrice ?? '—'),
     el('span', { class: 'num' }, t.exitPrice ?? '—'),
     el('span', { class: 'num', style: { color: 'var(--grey-1)' } }, r == null ? '—' : (r < 0 ? '−' : '+') + Math.abs(r).toFixed(2)),
-    el('span', { class: 'pl', style: { color: o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-2)' } },
-      c.tradeFig(store.displayUnit, acct, t)),
+    fwd
+      ? el('span', { class: 'pl' }, ft())
+      : el('span', { class: 'pl', style: { color: o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-2)' } },
+          c.tradeFig(store.displayUnit, acct, t)),
   );
 }
 

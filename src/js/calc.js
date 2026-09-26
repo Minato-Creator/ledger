@@ -12,8 +12,17 @@ export function oneR(account, trade) {
   return account.startingBalance * pct / 100;
 }
 
-/** R multiple = net result / 1R. */
+/**
+ * R multiple = net result / 1R — unless the trade carries its own.
+ *
+ * A forward test has no money in it. Its R is typed straight in, because
+ * dividing a dollar figure that does not exist by a risk that was never taken
+ * would be arithmetic on nothing. Where a trade states its R, that is the
+ * answer; everywhere else it is still worked out from the money.
+ */
 export function rMultiple(account, trade) {
+  const stated = trade == null ? null : Number(trade.rMultiple);
+  if (trade && trade.rMultiple != null && isFinite(stated)) return stated;
   const r = oneR(account, trade);
   if (!r) return null;
   return Number(trade.netResult) / r;
@@ -33,6 +42,12 @@ export function rMultiple(account, trade) {
  */
 export function outcome(trade) {
   if (trade && trade.outcome === 'breakeven') return 'breakeven';
+  /* A trade with no money but a stated R is judged on that R — a forward test
+     that made two and a half is a win, not a scratch. */
+  if (trade && trade.netResult == null && trade.rMultiple != null && isFinite(Number(trade.rMultiple))) {
+    const r = Number(trade.rMultiple);
+    return r > 0 ? 'win' : r < 0 ? 'loss' : 'breakeven';
+  }
   const n = Number(trade.netResult);
   if (!isFinite(n)) return 'breakeven';
   if (n > 0) return 'win';
@@ -361,6 +376,27 @@ function hslToHex(h, s, l) {
   return '#' + [f(0), f(8), f(4)].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Black or white, whichever can be read on top of this colour.
+ *
+ * For writing laid directly on a solid swatch — initials on an avatar. The
+ * test is relative luminance rather than lightness, because a saturated
+ * yellow and a saturated blue can share a lightness and need opposite ink.
+ */
+export function inkOn(hex) {
+  const h = String(hex || '').replace('#', '');
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h.padEnd(6, '0');
+  const ch = i => {
+    const v = parseInt(full.slice(i * 2, i * 2 + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const L = 0.2126 * ch(0) + 0.7152 * ch(1) + 0.0722 * ch(2);
+  /* The crossover where black and white are equally readable. Above it black
+     wins, below it white does — so every swatch gets the ink with the most
+     contrast rather than the one that happens to suit most of them. */
+  return L > 0.1791 ? '#141716' : '#FFFFFF';
+}
+
 /** The same colour, pulled dark enough for a pale card or pale enough for a
  *  dark one. Pure white and pure black are the cases this exists for. */
 export function readableOn(hex, surface) {
@@ -435,9 +471,27 @@ export function fig(unit, account, d, r, opts = {}) {
   return money(d, { currency: account?.currency, ...opts });
 }
 
+/* ============================================================
+   A forward test, in a table
+
+   It has no size, because nothing was bought, and no money, because none was
+   at stake. Those two columns would read as a zero or a dash, which says the
+   wrong thing — a dash means "not filled in". FT says what it actually is,
+   and marks the row as a test at a glance. The R it made is in the R column
+   beside them, where it always was, so nothing is lost by saying FT here.
+   ============================================================ */
+export const isForward = (trade) => trade != null && trade.mode === 'forward';
+export const FT = 'FT';
+
 /** The same, for a single trade — it knows its own R. */
 export function tradeFig(unit, account, trade, opts = {}) {
-  return fig(unit, account, Number(trade.netResult) || 0, rMultiple(account, trade), opts);
+  const r = rMultiple(account, trade);
+  /* A forward test has no money in it. In a money or percent column it would
+     come out as $0.00, which reads as a trade that scratched — so a trade
+     that has only an R is shown in R whatever unit is switched on. */
+  if (unit !== 'R' && trade && trade.netResult == null && trade.rMultiple != null
+      && isFinite(Number(trade.rMultiple))) return rFmt(r, opts.rDecimals ?? 2);
+  return fig(unit, account, Number(trade.netResult) || 0, r, opts);
 }
 
 /** Which raw number a chart axis or bar should be drawn from, in this unit. */

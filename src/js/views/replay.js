@@ -19,9 +19,15 @@ let strain = null;          // year shown in the strip
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+/* Two of these mean the same trade is on both sides of the row — matched and
+   diverged. Those rows are tinted in their own verdict's colour, because the
+   thing you are looking for on this page is which of your trades your replay
+   actually found, and reading a word in the last column to find out is work
+   the page can do for you. The rgb triplet is for that tint; --green is the
+   profit colour and follows whatever you picked in settings. */
 const VERDICTS = {
-  matched:  { label: 'Matched',  col: 'var(--green)'  },
-  diverged: { label: 'Diverged', col: 'var(--yellow)' },
+  matched:  { label: 'Matched',  col: 'var(--green)',  rgb: 'var(--profit-rgb)', paired: true },
+  diverged: { label: 'Diverged', col: 'var(--yellow)', rgb: 'var(--yellow-rgb)', paired: true },
   missed:   { label: 'Missed',   col: 'var(--blue)'   },
   extra:    { label: 'Extra',    col: 'var(--orange)' },
 };
@@ -29,7 +35,8 @@ const VERDICTS = {
 export function replay(store, nav) {
   const pb = store.playbook;
   const acct = store.activeAccount;
-  const cfg = pb.replay || (pb.replay = { windowMins: 15, csvOffsetHours: 0 });
+  const cfg = pb.replay || (pb.replay = { windowMins: 15, csvClock: 'local' });
+  if (cfg.csvClock == null) cfg.csvClock = Number(cfg.csvOffsetHours) ? 'utc' : 'local';
   const weeks = store.replayWeeks;
   const live = store.tradesFor(acct.id);
 
@@ -62,7 +69,7 @@ export function replay(store, nav) {
     try { text = await file.text(); }
     catch { return toast('Could not read that file', 'bad'); }
 
-    const res = parseReplayCSV(text, pb, { offsetHours: cfg.csvOffsetHours });
+    const res = parseReplayCSV(text, pb, { clock: cfg.csvClock });
     if (res.missing.length) {
       return toast('That CSV has no ' + res.missing.join(', ') + ' column — nothing imported', 'bad');
     }
@@ -81,7 +88,8 @@ export function replay(store, nav) {
     // A week you import again is replaced, not merged — a re-export of the
     // same session is the truth about it, and merging would double it up.
     for (const [k, trades] of byWeek) {
-      weeks[k] = { importedAt: new Date().toISOString(), source: file.name, trades };
+      weeks[k] = { importedAt: new Date().toISOString(), source: file.name,
+                   format: res.source, clock: res.clock, trades };
     }
     await store.save('replay');
     try { await store.writeText('replay/' + file.name, text); } catch { /* the copy is a courtesy */ }
@@ -100,6 +108,14 @@ export function replay(store, nav) {
     el('span', { class: 'val' }, fmt(val)),
     el('button', { onClick: () => set(val + 1) }, icon('plus', 11, 'var(--grey-2)', 2.6)));
 
+  /* A week already on the page was read under whatever clock was set at the
+     time. When that has since changed, the times it is showing are the old
+     ones until the file is read again — so it says so rather than quietly
+     disagreeing with the file on disk. */
+  const thisWeek = weeks[cursor];
+  const fxWeek = thisWeek?.format === 'fxreplay';
+  const staleWeek = !!thisWeek?.staleClock;
+
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Replay'),
     el('span', { class: 'sub' }, `${cursor.replace('-W', ' · week ')} · ${c.shortDate(range.start)} – ${c.shortDate(range.end)}`),
@@ -109,16 +125,26 @@ export function replay(store, nav) {
         cfg.windowMins = Math.min(120, Math.max(1, v));
         await store.save('playbook'); nav.refresh();
       }, v => '± ' + v + 'm'),
-      el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)', marginLeft: '6px' } }, 'CSV clock'),
-      el('div', { class: 'seg' },
-        ...[[0, 'UTC'], [8, 'Perth +8']].map(([h, label]) =>
-          el('button', { class: cfg.csvOffsetHours === h ? 'is-on' : '',
-            onClick: async () => {
-              if (cfg.csvOffsetHours === h) return;
-              cfg.csvOffsetHours = h; await store.save('playbook');
-              toast('Re-import your CSVs to move them onto the new clock', 'warn');
-              nav.refresh();
-            } }, label))),
+      /* What the switch actually asks is which clock the file was written on,
+         so that is what it says. An FX Replay export answers it itself, and
+         the switch steps out of the way rather than lying about having an
+         effect. */
+      el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)', marginLeft: '6px' } }, 'CSV times'),
+      fxWeek
+        ? el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--ink-3)' },
+              title: 'An FX Replay export is written on your own clock, so its times are used exactly as written' },
+            'as written · FX Replay')
+        : el('div', { class: 'seg' },
+            ...[['local', 'My clock'], ['utc', 'UTC']].map(([v, label]) =>
+              el('button', { class: cfg.csvClock === v ? 'is-on' : '',
+                title: v === 'local' ? 'The file is already on your clock — use its times as written'
+                                     : 'The file is written in UTC — put it on your clock',
+                onClick: async () => {
+                  if (cfg.csvClock === v) return;
+                  cfg.csvClock = v; await store.save('playbook');
+                  toast('Import the CSV again to move it onto the new clock', 'warn');
+                  nav.refresh();
+                } }, label))),
       el('button', { class: 'btn btn-light', style: { marginLeft: '6px' },
         title: weeks[cursor]
           ? `${weeks[cursor].source} · imported ${c.shortDate(weeks[cursor].importedAt.slice(0, 10))} · importing again replaces this week`
@@ -210,15 +236,22 @@ export function replay(store, nav) {
     /* Both clocks, side by side. Yours first, the replay's second — so a
        trade you held longer than the backtest did shows up as a wider pair of
        numbers rather than something you have to work out. */
-    const clock = pick => `${p.live ? (pick(p.live) || '—') : '—'} · ${p.replay ? (pick(p.replay) || '—') : '—'}`;
+    const clock = pick => [
+      el('span', { class: 'side-live' }, (p.live && pick(p.live)) || '—'),
+      el('span', { class: 'dot' }, ' · '),
+      el('span', { class: 'side-replay' }, (p.replay && pick(p.replay)) || '—'),
+    ];
     const entries = clock(t => t.timeOpen);
     const exits   = clock(t => t.timeClose);
     const sess = p.sessionMismatch ? `${p.liveSession} / ${p.replaySession}` : (p.liveSession || p.replaySession);
-    return el('div', { class: 'tbl-row', style: { gridTemplateColumns: COLS, cursor: p.live ? 'pointer' : 'default' },
+    return el('div', { class: 'tbl-row' + (v.paired ? ' is-paired' : ''),
+      style: { gridTemplateColumns: COLS, cursor: p.live ? 'pointer' : 'default',
+               '--v': v.col, '--v-rgb': v.rgb || null },
+      title: v.paired ? 'The same trade on both sides — yours and your replay\u2019s' : '',
       onClick: () => p.live && nav.go('#/trade/' + p.live.id) },
       el('span', { class: 'td' }, c.shortDate(t.date).replace(/^0/, '')),
-      el('span', { class: 'num', style: { textAlign: 'left' } }, entries),
-      el('span', { class: 'num', style: { textAlign: 'left', color: 'var(--grey-4)' } }, exits),
+      el('span', { class: 'num pair-cell', style: { textAlign: 'left' } }, ...entries),
+      el('span', { class: 'num pair-cell is-quiet', style: { textAlign: 'left' } }, ...exits),
       el('span', { class: 'ins' }, t.pair),
       sideCell(t),
       el('span', { class: 'td', style: { color: p.sessionMismatch ? 'var(--yellow)' : 'var(--grey-3)',
@@ -339,6 +372,17 @@ export function replay(store, nav) {
     ),
     captureCard);
 
-  return el('div', { class: 'view' }, head, stripCard, figures,
+  const staleNote = staleWeek
+    ? el('div', { class: 'card', style: { flex: 'none', flexDirection: 'row', alignItems: 'center', gap: '12px',
+                                          padding: '13px 18px', boxShadow: 'inset 0 0 0 1px var(--yellow)' } },
+        el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--ink-2)', flex: '1' } },
+          'This week was read on the old clock, which moved every backtest eight hours. ',
+          el('span', { style: { color: 'var(--yellow)' } }, 'Import the CSV again'),
+          ' and the times will be the ones FX Replay shows.'),
+        el('button', { class: 'btn btn-light', style: { flex: 'none' }, onClick: () => fileInput.click() },
+          icon('upload', 13, 'var(--grey-8)', 1.9), 'Import CSV'))
+    : null;
+
+  return el('div', { class: 'view' }, head, staleNote, stripCard, figures,
     el('div', { class: 'row', style: { flex: '1', minHeight: 0 } }, tableCard, rail));
 }

@@ -1,4 +1,4 @@
-import { el, icon, toast } from '../ui.js';
+import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { SLOTS } from '../shots.js';
 
@@ -36,9 +36,13 @@ export function tradeDetail(store, nav, id) {
     open
       ? el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/edit/' + t.id) }, 'Close it')
       : el('button', { class: 'btn btn-quiet', onClick: () => nav.go('#/edit/' + t.id) }, 'Edit'),
-    el('button', { class: 'btn btn-ghost', onClick: async () => {
-      await store.deleteTrade(t.id); toast('Trade deleted'); nav.go('#/trades');
-    } }, 'Delete'),
+    /* A trade and its charts, gone for good — so the button asks first. */
+    confirmButton({
+      label: 'Delete', armedLabel: 'Confirm delete',
+      className: 'btn btn-ghost', armedClassName: 'btn btn-ghost is-armed',
+      onConfirm: async () => {
+        await store.deleteTrade(t.id); toast('Trade deleted'); nav.go('#/trades');
+      } }),
   );
 
   /* ---------- the charts ----------
@@ -130,7 +134,10 @@ function chartTile(store, trade, slot, present) {
   const name = trade[slot.field];
   const tile = el('button', { class: 'shot-view is-waiting',
     title: slot.label,
-    onClick: () => { if (tile.dataset.url) lightbox(store, trade, slot, present); } },
+    onClick: () => { if (tile.dataset.url) lightbox({
+      items: present.map(s => ({ label: s.label, name: trade[s.field] })),
+      urlFor: n => store.shotUrl(n),
+      at: present.findIndex(s => s.key === slot.key) }); } },
     el('span', { class: 'zoom' }, icon('expand', 12, '#fff', 1.9)),
     el('span', { class: 'shot-tag' }, slot.label));
 
@@ -146,37 +153,3 @@ function chartTile(store, trade, slot, present) {
   return tile;
 }
 
-/* Full size, over everything, with the other chart one arrow key away. Escape
-   closes it; so does clicking the backdrop, because that is what everyone
-   tries first. */
-function lightbox(store, trade, slot, present) {
-  let at = present.findIndex(s => s.key === slot.key);
-  const img = el('img', { alt: '' });
-  const label = el('span', { class: 't' });
-  const box = el('div', { class: 'lightbox' },
-    el('div', { class: 'bar' }, label,
-      el('div', { class: 'spacer', style: { flex: 1 } }),
-
-      el('button', { class: 'x', onClick: close }, icon('close', 14, 'var(--grey-1)', 2))),
-    el('div', { class: 'stage', onClick: e => { if (e.target !== img) close(); } }, img));
-
-  async function show(i) {
-    at = (i + present.length) % present.length;
-    const s = present[at];
-    label.textContent = s.label;
-    const url = await store.shotUrl(trade[s.field]);
-    if (url) img.src = url;
-  }
-  function onKey(e) {
-    if (e.key === 'Escape') close();
-    else if (e.key === 'ArrowRight') show(at + 1);
-    else if (e.key === 'ArrowLeft') show(at - 1);
-  }
-  function close() {
-    document.removeEventListener('keydown', onKey);
-    box.remove();
-  }
-  document.addEventListener('keydown', onKey);
-  document.body.append(box);
-  show(at);
-}

@@ -72,6 +72,43 @@ function parseStamp(raw) {
 }
 
 /** Move a parsed stamp by whole hours and hand back { date, time }. */
+/* ============================================================
+   Which clock a CSV is written on
+
+   FX Replay writes the clock you were looking at while you took the trade.
+   Its export said 2026/09/15 17:14:55 and its own screen said 5:14:55 PM —
+   the same instant, on your clock, with nothing to convert. Treating those
+   stamps as UTC and adding eight hours moved every backtest into the next
+   session, which is how a week that lined up exactly came out as nothing
+   matched.
+
+   So an export we recognise as FX Replay's is read exactly as written, and
+   no setting can move it. The switch is for the other kind of file — an
+   export genuinely written in UTC — and when it is used the machine does the
+   conversion, so it stays right through daylight saving at both ends rather
+   than being a number somebody typed once.
+   ============================================================ */
+const FXR_MARKS = ['upnl', 'rpnl', 'avgriskreward', 'maxriskreward',
+                   'initialsl', 'amountclosed', 'currentrealizedbalance', 'datestart'];
+
+export function looksLikeFxReplay(headers) {
+  const seen = new Set((headers || []).map(h => String(h).toLowerCase().replace(/[^a-z]/g, '')));
+  return FXR_MARKS.filter(m => seen.has(m)).length >= 3;
+}
+
+/** A stamp put on your clock, given which clock it was written on. */
+export function onClock(st, clock) {
+  const p = n => String(n).padStart(2, '0');
+  /* Already yours: read as written. Not a conversion — a conversion is what
+     put these trades eight hours out. */
+  if (clock !== 'utc') {
+    return { date: `${st.y}-${p(st.mo)}-${p(st.d)}`, time: `${p(st.h)}:${p(st.mi)}` };
+  }
+  const d = new Date(Date.UTC(st.y, st.mo - 1, st.d, st.h, st.mi));
+  return { date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+           time: `${p(d.getHours())}:${p(d.getMinutes())}` };
+}
+
 export function shiftStamp(st, hours) {
   const t = Date.UTC(st.y, st.mo - 1, st.d, st.h, st.mi) + hours * 3600e3;
   const d = new Date(t);
@@ -95,14 +132,24 @@ function toNumber(v) {
  * Returns { trades, skipped, headers, mapped, missing } — never throws on a
  * bad row. A row we cannot read is counted and reported, not dropped silently.
  */
-export function parseReplayCSV(text, playbook, { offsetHours = 0 } = {}) {
+export function parseReplayCSV(text, playbook, opts = {}) {
   const records = parseCSV(text);
-  if (!records.length) return { trades: [], skipped: [], headers: [], mapped: {}, missing: ['date', 'pair', 'side', 'r'] };
+  if (!records.length) return { trades: [], skipped: [], headers: [], mapped: {}, missing: ['date', 'pair', 'side', 'r'],
+                                source: 'generic', clock: 'local' };
 
   const headers = Object.keys(records[0]);
+  const source = looksLikeFxReplay(headers) ? 'fxreplay' : 'generic';
+  /* An FX Replay export is on your clock whatever the switch says — the file
+     itself is the evidence, and a setting cannot make it otherwise. */
+  const clock = source === 'fxreplay' ? 'local' : (opts.clock === 'utc' ? 'utc' : 'local');
+  /* The old hours-to-add form, kept so a caller that means a raw shift still
+     gets one. Nothing in the app passes it. */
+  const put = opts.offsetHours != null ? (st => shiftStamp(st, opts.offsetHours))
+                                       : (st => onClock(st, clock));
+
   const mapped = mapHeaders(headers);
   const missing = ['date', 'pair', 'side', 'r'].filter(f => !mapped[f]);
-  if (missing.length) return { trades: [], skipped: [], headers, mapped, missing };
+  if (missing.length) return { trades: [], skipped: [], headers, mapped, missing, source, clock };
 
   const get = (rec, f) => (mapped[f] ? rec[mapped[f]] : '');
   const trades = [], skipped = [];
@@ -122,9 +169,9 @@ export function parseReplayCSV(text, playbook, { offsetHours = 0 } = {}) {
     const r = toNumber(get(rec, 'r'));
     if (r == null) { skipped.push({ row: i + 2, why: 'no R multiple' }); return; }
 
-    const { date, time } = shiftStamp(st, offsetHours);
+    const { date, time } = put(st);
     const endRaw = mapped.dateEnd ? parseStamp(get(rec, 'dateEnd')) : null;
-    const end = endRaw ? shiftStamp(endRaw, offsetHours) : null;
+    const end = endRaw ? put(endRaw) : null;
 
     trades.push({
       id: 'rp_' + (String(get(rec, 'id') || '').trim() || date + '_' + time.replace(':', '') + '_' + i),
@@ -141,7 +188,7 @@ export function parseReplayCSV(text, playbook, { offsetHours = 0 } = {}) {
   });
 
   const initial = toNumber(get(records[0], 'initial'));
-  return { trades, skipped, headers, mapped, missing: [], initialBalance: initial };
+  return { trades, skipped, headers, mapped, missing: [], initialBalance: initial, source, clock };
 }
 
 /* ---------- ISO weeks ----------

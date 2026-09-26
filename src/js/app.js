@@ -15,6 +15,7 @@ import { calendar } from './views/calendar.js';
 import { analytics } from './views/analytics.js';
 import { playbook } from './views/playbook.js';
 import { replay } from './views/replay.js';
+import { wire } from './views/wire.js';
 import { importTrades } from './views/import.js';
 import { outlook } from './views/outlook.js';
 
@@ -124,6 +125,7 @@ const NAV_ITEMS = [
   ['#/calendar', 'calendar', 'Calendar'],
   ['#/analytics', 'analytics', 'Analytics'],
   ['#/replay', 'replay', 'Replay'],
+  ['#/wire', 'wire', 'Newswire'],
   ['#/playbook', 'playbook', 'Playbook'],
 ];
 
@@ -187,16 +189,20 @@ function sidebar() {
        forward test to include, because a switch with nothing on the other
        side of it is furniture.
        ============================================================ */
-    acct && store.testCountFor(acct.id)
-      ? el('div', { class: 'unit-switch', style: { marginTop: '6px' } },
-          ...[[false, 'Live', 'Count only the trades you took for real'],
-              [true, '+ Tests', 'Count forward tests as well']]
-            .map(([on, label, why]) => el('button', {
-              class: store.includeTests === on ? 'is-on' : '', title: why,
-              style: { fontSize: '11px' },
+    /* It appears once there is a forward test to count, and stays put while
+       the app is reading anything other than live — otherwise a journal whose
+       last test was deleted would be stuck on a view with nothing in it and
+       no switch to leave by. */
+    acct && (store.testCountFor(acct.id) || store.tradeScope !== 'live')
+      ? el('div', { class: 'unit-switch scope-switch', style: { marginTop: '6px' } },
+          ...[['live', 'Live', 'Only the trades you took for real'],
+              ['forward', 'Forward test', 'Only the forward tests'],
+              ['all', 'All', 'Both, counted together']]
+            .map(([v, label, why]) => el('button', {
+              class: store.tradeScope === v ? 'is-on' : '', title: why,
               onClick: async () => {
-                if (store.includeTests === on) return;
-                await store.setIncludeTests(on); render();
+                if (store.tradeScope === v) return;
+                await store.setTradeScope(v); render();
               } }, label)))
       : null,
 
@@ -227,10 +233,8 @@ function settingsRow(base) {
   const initials = who.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
   return el('button', { class: 'acct-item', style: { background: base === '#/settings' ? 'var(--inset)' : 'transparent' },
     onClick: () => nav.go('#/settings') },
-    el('span', { style: { width: '28px', height: '28px', borderRadius: '10px', flex: 'none',
-                          background: who ? 'var(--orange)' : 'var(--inset-2, var(--grey-8))',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center' } },
-      who ? el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-8)' } }, initials)
+    el('span', { class: 'avatar', style: { background: who ? store.userColour : 'var(--inset-2, var(--grey-8))' } },
+      who ? el('span', { class: 'm', style: { fontSize: '11px', color: store.userInk } }, initials)
           : icon('user', 15, 'var(--grey-4)', 1.7)),
     who
       ? el('span', { style: { minWidth: 0 } },
@@ -259,6 +263,7 @@ function route() {
     case 'analytics': return analytics(store, nav);
     case 'playbook':  return playbook(store, nav);
     case 'replay':    return replay(store, nav);
+    case 'wire':      return wire(store, nav);
     default:          return dashboard(store, nav);
   }
 }

@@ -6,7 +6,7 @@
    This file only knows about accounts, trades, playbook and replay.
    ============================================================ */
 
-import { sessionFor, UNITS, todayISO, readableOn, lift, sink } from './calc.js';
+import { sessionFor, UNITS, todayISO, readableOn, lift, sink, inkOn } from './calc.js';
 import { findBackground, scrimFor } from './backgrounds.js';
 import { SLOTS, shotName, urlFor, forgetUrl } from './shots.js';
 import { fs, isTauri } from './fs.js';
@@ -34,6 +34,7 @@ export const FILES = {
   replay:   'data/replay.json',
   outlooks: 'data/outlooks.json',
   news:     'data/news.json',
+  wire:     'data/wire.json',
 };
 const LEGACY = {
   accounts: 'accounts.json',
@@ -204,15 +205,16 @@ class Store {
   async load() {
     await this.tidyVault();
     await this.ensureDir('data');
-    const [accounts, trades, playbook, replay, outlooks, news] = await Promise.all([
+    const [accounts, trades, playbook, replay, outlooks, news, wire] = await Promise.all([
       this.readJSON(FILES.accounts, defaultAccounts()),
       this.readJSON(FILES.trades,   { version: 1, trades: [] }),
       this.readJSON(FILES.playbook, defaultPlaybook()),
       this.readJSON(FILES.replay,   { version: 1, weeks: {} }),
       this.readJSON(FILES.outlooks, { version: 1, days: {} }),
       this.readJSON(FILES.news,     { version: 1, fetchedAt: null, events: [] }),
+      this.readJSON(FILES.wire,     { version: 1, fetchedAt: null, seenAt: null, items: [] }),
     ]);
-    this.data = { accounts, trades, playbook, replay, outlooks, news };
+    this.data = { accounts, trades, playbook, replay, outlooks, news, wire };
     this.heal();
     this.migrate();
     applyTheme(this.theme, this.colours);
@@ -227,6 +229,7 @@ class Store {
       this.writeJSON(FILES.replay, replay),
       this.writeJSON(FILES.outlooks, outlooks),
       this.writeJSON(FILES.news, news),
+      this.writeJSON(FILES.wire, wire),
       this.ensureDir(SHOTS),
       this.writeText(MANIFEST, JSON.stringify({
         kind: 'quire-vault', version: 1, app: 'Quire',
@@ -276,7 +279,7 @@ class Store {
   shotNames() {
     const fromTrades = this.trades.flatMap(t => [t.shotLtf, t.shotHtf]);
     const fromOutlooks = Object.values(this.data.outlooks?.days || {})
-      .flatMap(day => (day.instruments || []).map(i => i.shot));
+      .flatMap(day => (day.instruments || []).flatMap(i => outlookShotsOf(i)));
     return [...fromTrades, ...fromOutlooks].filter(Boolean);
   }
 
@@ -408,6 +411,14 @@ class Store {
     if (!d.news || typeof d.news !== 'object') { d.news = { version: 1, fetchedAt: null, events: [] }; note(); }
     if (!Array.isArray(d.news.events)) { d.news.events = []; note(); }
 
+    if (!d.wire || typeof d.wire !== 'object') { d.wire = { version: 1, fetchedAt: null, seenAt: null, items: [] }; note(); }
+    if (!Array.isArray(d.wire.items)) { d.wire.items = []; note(); }
+    /* An item with no time cannot be put in order, which on a page whose
+       whole promise is newest-first is worse than not being there at all. */
+    { const n = d.wire.items.length;
+      d.wire.items = d.wire.items.filter(x => x && x.id && x.title && x.at && !isNaN(new Date(x.at)));
+      if (d.wire.items.length !== n) note(); }
+
     if (!d.outlooks || typeof d.outlooks !== 'object') { d.outlooks = { version: 1, days: {} }; note(); }
     if (!d.outlooks.days || typeof d.outlooks.days !== 'object') { d.outlooks.days = {}; note(); }
     /* A day whose instrument list is missing is a day with nothing written,
@@ -416,6 +427,14 @@ class Store {
       if (!day || typeof day !== 'object') { delete d.outlooks.days[date]; note(); continue; }
       if (!Array.isArray(day.instruments)) { day.instruments = []; note(); }
       day.instruments = day.instruments.filter(x => x && x.id);
+      /* An instrument used to hold one chart, in `shot`. It holds a list now.
+         The old field is read once, turned into a list of one, and dropped —
+         so a morning written last week opens with its chart still on it. */
+      for (const i of day.instruments) {
+        if (!Array.isArray(i.shots)) { i.shots = i.shot ? [i.shot] : []; note(); }
+        if ('shot' in i) { delete i.shot; note(); }
+        i.shots = i.shots.filter(Boolean);
+      }
     }
   }
 
@@ -444,15 +463,28 @@ class Store {
     }
     // v3 — replay comparison settings live beside the sessions they depend on.
     if ((pb.version || 1) < 3) {
-      pb.replay = pb.replay || { windowMins: 15, csvOffsetHours: 0 };
+      pb.replay = pb.replay || { windowMins: 15, csvClock: 'local' };
       pb.version = 3;
+      this.pendingMigration = true;
+    }
+    /* v4 — a CSV is read as being on your clock or on UTC, rather than by a
+       number of hours to add. The old number said what it meant: anything but
+       zero meant "this file is UTC, move it". Weeks already imported have the
+       old shift baked into their times, so they are flagged rather than left
+       to disagree quietly with the file they came from. */
+    if (pb.replay && pb.replay.csvClock == null) {
+      const shifted = Number(pb.replay.csvOffsetHours) || 0;
+      pb.replay.csvClock = shifted ? 'utc' : 'local';
+      delete pb.replay.csvOffsetHours;
+      if (shifted) for (const w of Object.values(this.data.replay?.weeks || {})) w.staleClock = true;
       this.pendingMigration = true;
     }
   }
 
   async save(which) {
     const map = { accounts: FILES.accounts, trades: FILES.trades, playbook: FILES.playbook,
-                  replay: FILES.replay, outlooks: FILES.outlooks, news: FILES.news };
+                  replay: FILES.replay, outlooks: FILES.outlooks, news: FILES.news,
+                  wire: FILES.wire };
     await this.writeJSON(map[which], this.data[which]);
     this.emit();
   }
@@ -485,7 +517,7 @@ class Store {
   /** True when there is anything in this day worth a line in the file. */
   static outlookHasContent(day) {
     return (day.instruments || []).some(i =>
-      (i.notes || '').trim() || i.shot || (i.bias && i.bias !== 'neutral') || (i.pair || '').trim());
+      (i.notes || '').trim() || outlookShotsOf(i).length || (i.bias && i.bias !== 'neutral') || (i.pair || '').trim());
   }
 
   async saveOutlook(day) {
@@ -499,7 +531,7 @@ class Store {
          and take its pictures with it so the folder does not fill up with
          charts nothing points at. */
       const old = this.data.outlooks.days[date];
-      for (const i of (old?.instruments || [])) if (i.shot) await this.dropImage(i.shot);
+      for (const i of (old?.instruments || [])) for (const n of outlookShotsOf(i)) await this.dropImage(n);
       delete this.data.outlooks.days[date];
     }
     await this.save('outlooks');
@@ -511,14 +543,15 @@ class Store {
     return Object.keys(this.data.outlooks.days).sort().reverse();
   }
 
-  /** Where one instrument's chart lives. Named off the day and the block, so
-      the folder reads as a diary and a deleted block orphans nothing. */
-  outlookShotName(date, instrumentId) {
-    return `${SHOTS}/outlook-${date}-${instrumentId}.jpg`;
+  /** Where one of an instrument's charts lives. Named off the day, the block
+      and the chart, so the folder reads as a diary, a second chart never
+      writes over the first, and a deleted block orphans nothing. */
+  outlookShotName(date, instrumentId, shotId) {
+    return `${SHOTS}/outlook-${date}-${instrumentId}${shotId ? '-' + shotId : ''}.jpg`;
   }
 
-  async putOutlookShot(date, instrumentId, blob) {
-    const name = this.outlookShotName(date, instrumentId);
+  async putOutlookShot(date, instrumentId, blob, shotId) {
+    const name = this.outlookShotName(date, instrumentId, shotId);
     await fs.ensureDir(SHOTS);
     await fs.writeImage(name, blob);
     forgetUrl(name);
@@ -568,6 +601,45 @@ class Store {
     this.data.news.lastError = String(reason || 'could not be reached');
     this.data.news.lastTriedAt = new Date().toISOString();
     await this.save('news');
+  }
+
+  /* ============================================================
+     The newswire
+
+     Headlines are merged into what is already held rather than replacing it,
+     because two feeds carry the same item on purpose and because a refresh
+     that emptied the page every time one failed would be worse than no
+     refresh at all. Ordering and the cap are wire.js's; the store's job is
+     only to keep what it is given.
+     ============================================================ */
+  get wire() { return this.data.wire; }
+
+  /** Minutes since the wire was last read, or null if it never has been. */
+  wireAge() {
+    const at = this.data.wire.fetchedAt;
+    if (!at) return null;
+    const mins = Math.round((Date.now() - new Date(at)) / 60000);
+    return isFinite(mins) ? mins : null;
+  }
+
+  async saveWire(items) {
+    const next = { ...this.data.wire, version: 1, fetchedAt: new Date().toISOString(), items };
+    delete next.lastError;
+    this.data.wire = next;
+    await this.save('wire');
+    return this.data.wire;
+  }
+
+  /** Where you had read up to, so the page can mark what arrived since. */
+  async markWireSeen(at) {
+    this.data.wire.seenAt = at || new Date().toISOString();
+    await this.save('wire');
+  }
+
+  async wireFailed(reason) {
+    this.data.wire.lastError = String(reason || 'could not be reached');
+    this.data.wire.lastTriedAt = new Date().toISOString();
+    await this.save('wire');
   }
 
   /* ---------- accessors ---------- */
@@ -627,15 +699,35 @@ class Store {
      already logged moves.
      ============================================================ */
   inScope(t) {
-    return this.includeTests || t.mode !== 'forward';
+    const scope = this.tradeScope;
+    if (scope === 'all') return true;
+    const fwd = t.mode === 'forward';
+    return scope === 'forward' ? fwd : !fwd;
   }
 
-  get includeTests() { return !!this.data.accounts.includeTests; }
+  /* live — what you took for real. forward — the tests on their own, which is
+     how you read a week of testing without a funded account's numbers in the
+     way. all — both, counted together.
 
-  async setIncludeTests(on) {
-    this.data.accounts.includeTests = !!on;
+     Journals written before this was a choice carry a true/false instead, and
+     true meant live and tests together. */
+  get tradeScope() {
+    const a = this.data.accounts;
+    if (a.tradeScope === 'live' || a.tradeScope === 'forward' || a.tradeScope === 'all') return a.tradeScope;
+    return a.includeTests ? 'all' : 'live';
+  }
+
+  async setTradeScope(scope) {
+    this.data.accounts.tradeScope = scope === 'forward' ? 'forward' : scope === 'all' ? 'all' : 'live';
+    /* Kept in step so a vault opened by an older copy of the app still reads
+       the same way rather than silently reverting to live only. */
+    this.data.accounts.includeTests = this.data.accounts.tradeScope === 'all';
     await this.save('accounts');
   }
+
+  get includeTests() { return this.tradeScope === 'all'; }
+
+  async setIncludeTests(on) { await this.setTradeScope(on ? 'all' : 'live'); }
 
   /** How many forward tests are being left out right now. */
   testCountFor(accountId) {
@@ -651,6 +743,18 @@ class Store {
   get userName() { return this.data.accounts.userName || ''; }
   async setUserName(name) {
     this.data.accounts.userName = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 32);
+    await this.save('accounts');
+  }
+
+  /* The colour behind your initials. A display preference like the theme, so
+     it sits with the account list rather than inside any one account — the
+     name at the foot of the sidebar is yours, not the account's. Journals
+     written before this existed have no colour saved and get the one they
+     have always had. */
+  get userColour() { return this.data.accounts.userColour || USER_COLOUR; }
+  get userInk() { return inkOn(this.userColour); }
+  async setUserColour(hex) {
+    this.data.accounts.userColour = /^#[0-9a-f]{6}$/i.test(String(hex)) ? String(hex) : USER_COLOUR;
     await this.save('accounts');
   }
 
@@ -803,6 +907,19 @@ class Store {
   }
 }
 
+/* One instrument's charts, however old the record is. A morning written
+   before an instrument could hold more than one chart says `shot`; every one
+   written since says `shots`. Both are read, so nothing has to be migrated
+   before it can be shown. */
+export function outlookShotsOf(instrument) {
+  if (!instrument) return [];
+  if (Array.isArray(instrument.shots)) return instrument.shots.filter(Boolean);
+  return instrument.shot ? [instrument.shot] : [];
+}
+
+/** The colour the sidebar's initials have always sat on. */
+export const USER_COLOUR = '#F4624A';
+
 function defaultAccounts() {
   return { version: 2, accounts: [], activeAccountId: null, displayUnit: '$' };
 }
@@ -849,7 +966,7 @@ function defaultPlaybook() {
     ],
     sessions: DEFAULT_SESSIONS(),
     rules: { maxTradesPerDay: 3, dailyLossCapPercent: 3 },
-    replay: { windowMins: 15, csvOffsetHours: 0 },
+    replay: { windowMins: 15, csvClock: 'local' },
   };
 }
 
