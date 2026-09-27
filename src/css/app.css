@@ -264,6 +264,8 @@ textarea.field { height:auto; padding:13px 16px; line-height:1.55; resize:none; 
   display:flex; flex-direction:column; gap:2px; box-shadow:0 12px 32px rgba(0,0,0,.45);
 }
 .tag-menu[hidden] { display:none; }
+/* Opened upward when there is no room below it. */
+.tag-menu.is-up { top:auto; bottom:calc(100% + 6px); }
 .tag-opt {
   display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:var(--r-btn);
   width:100%; text-align:left; font:400 11.5px var(--mono); color:var(--ink-3);

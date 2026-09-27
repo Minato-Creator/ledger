@@ -420,6 +420,18 @@ export function addTrade(store, nav, existingId = null) {
     if (openGroup) {
       document.addEventListener('pointerdown', awayFromTags, true);
       document.addEventListener('keydown', awayFromTags, true);
+      /* A group near the bottom of the card would drop its menu into the
+         edge of it, so that one opens upward instead. It is measured rather
+         than assumed: the card scrolls, and which groups are near the bottom
+         depends on where you have scrolled to. */
+      requestAnimationFrame(() => {
+        const menu = tagWrap.querySelector('.tag-menu:not([hidden])');
+        const box = menu && menu.closest('.trade-form');
+        if (!box) return;
+        menu.classList.remove('is-up');
+        const m = menu.getBoundingClientRect(), b = box.getBoundingClientRect();
+        if (m.bottom > b.bottom - 8 && m.top - m.height > b.top + 8) menu.classList.add('is-up');
+      });
     }
   }
 
@@ -695,9 +707,14 @@ export function addTrade(store, nav, existingId = null) {
        starts scrolling when there are more than the card is tall. An empty
        half-column above the charts was the old chart stack's habit, not
        something worth keeping. */
-    el('div', { class: 'band', style: { flex: '0 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' } },
+    /* It sizes to the tags you actually have and nothing scrolls inside it.
+       A box that scrolls also clips, and what it was clipping was the menu
+       of whichever group you had just opened — the tags were being drawn
+       just below the edge of a strip 25 pixels tall. The card is the one
+       thing on this page that scrolls. */
+    el('div', { class: 'band', style: { flex: 'none', display: 'flex', flexDirection: 'column' } },
       el('span', { class: 'lbl' }, 'Tags'),
-      el('div', { style: { minHeight: 0, overflowY: 'auto' } }, tagWrap)),
+      tagWrap),
     band(
       el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
         el('span', { class: 'lbl', style: { margin: 0 } }, 'Charts'),
