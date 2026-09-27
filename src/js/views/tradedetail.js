@@ -1,6 +1,6 @@
 import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
-import { SLOTS } from '../shots.js';
+import { tradeShotsOf } from '../store.js';
 
 export function tradeDetail(store, nav, id) {
   const acct = store.activeAccount;
@@ -48,15 +48,23 @@ export function tradeDetail(store, nav, id) {
   /* ---------- the charts ----------
      Read from the journal after the page is up rather than before it, so a
      slow disk delays a picture and not the whole trade. */
-  const present = SLOTS.filter(slot => t[slot.field]);
+  const present = tradeShotsOf(t);
   const chartsCard = present.length
     ? el('div', { class: 'card', style: { flex: 'none' } },
         el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '9px' } },
           el('div', { class: 'eyebrow', style: { margin: 0 } }, 'Charts'),
+          el('span', { class: 'note' }, present.length === 1 ? '' : `${present.length}`),
           el('div', { style: { marginLeft: 'auto' } })),
+        /* Two across once there are two, however many there are — a row of
+           six thumbnails is not a chart, it is a filmstrip.
+
+           An odd count leaves half a row empty, and that is on purpose: the
+           alternative, letting the last one span both columns, makes it twice
+           the size of the rest and the eye reads that as importance. Charts
+           of the same trade are worth comparing, so they are the same size. */
         el('div', { style: { marginTop: '12px', display: 'grid',
                              gridTemplateColumns: present.length > 1 ? '1fr 1fr' : '1fr', gap: '10px' } },
-          ...present.map(slot => chartTile(store, t, slot, present))))
+          ...present.map((name, at) => chartTile(store, t, name, at, present))))
     : null;
 
   /* Charts first. A trader looks at the picture before reading the note. */
@@ -130,16 +138,14 @@ export function tradeDetail(store, nav, id) {
 
 /* One chart on the trade page. The picture arrives when the journal hands it
    over; until then the tile shimmers rather than jumping the layout. */
-function chartTile(store, trade, slot, present) {
-  const name = trade[slot.field];
+function chartTile(store, trade, name, at, present) {
   const tile = el('button', { class: 'shot-view is-waiting',
-    title: slot.label,
+    title: 'View full size',
     onClick: () => { if (tile.dataset.url) lightbox({
-      items: present.map(s => ({ label: s.label, name: trade[s.field] })),
+      items: present.map(n => ({ label: trade.pair || 'Chart', name: n })),
       urlFor: n => store.shotUrl(n),
-      at: present.findIndex(s => s.key === slot.key) }); } },
-    el('span', { class: 'zoom' }, icon('expand', 12, '#fff', 1.9)),
-    el('span', { class: 'shot-tag' }, slot.label));
+      at }); } },
+    el('span', { class: 'zoom' }, icon('expand', 12, '#fff', 1.9)));
 
   store.shotUrl(name).then(url => {
     tile.classList.remove('is-waiting');

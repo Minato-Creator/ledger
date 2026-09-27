@@ -1,7 +1,7 @@
-import { el, icon, toast, confirmButton } from '../ui.js';
+import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
-import { todayISO } from '../store.js';
-import { SLOTS, prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
+import { todayISO, tradeShotsOf, newShotId } from '../store.js';
+import { prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
 
 const ASSET_CLASSES = ['Forex', 'Futures', 'Commodities', 'Indices'];
 
@@ -196,22 +196,21 @@ export function addTrade(store, nav, existingId = null) {
      its files after. Editing an existing trade follows the same rule: the old
      picture stays on disk until you press save.
      ============================================================ */
-  const shots = {};        // slot -> { blob, from, to, width, height } staged
-  const dropped = {};      // slot -> true when an existing one is to be removed
-  const shotWrap = el('div', { class: 'shots-stack' });
-  let focusedSlot = SLOTS[0].key;
+  /* A chart is staged, never written, until the trade has an id to name its
+     file after. An existing one stays on disk until save, so leaving the form
+     costs you nothing. */
+  const staged = [];                       // { id, out } waiting to be written
+  const dropped = new Set();               // existing names to remove on save
+  const shotWrap = el('div', { class: 'shot-box' });
 
-  const existingShot = key => {
-    const field = SLOTS.find(s => s.key === key).field;
-    return !dropped[key] && editing ? (editing[field] || null) : null;
-  };
+  const keptShots = () => tradeShotsOf(editing).filter(n => !dropped.has(n));
+  const shotCount = () => keptShots().length + staged.length;
 
-  async function take(key, file) {
+  async function take(file) {
     if (!file) return;
     try {
       const out = await prepare(file);
-      shots[key] = out;
-      dropped[key] = true;                 // whatever was there is being replaced
+      staged.push({ id: newShotId(), out });
       paintShots();
       /* Re-encoding a screenshot almost always shrinks it, but a tiny flat
          image can come out bigger, and claiming otherwise would be a lie. */
@@ -220,81 +219,94 @@ export function addTrade(store, nav, existingId = null) {
         : `Chart added — ${readableSize(out.to)}`);
     } catch (e) { toast(e.message, 'bad'); }
   }
+  const takeMany = async (files) => { for (const f of files) await take(f); };
 
-  function clearShot(key) {
-    delete shots[key];
-    dropped[key] = true;
+  function dropKept(name) { dropped.add(name); paintShots(); }
+  function dropStaged(id) {
+    const at = staged.findIndex(x => x.id === id);
+    if (at >= 0) staged.splice(at, 1);
     paintShots();
   }
 
-  /* Which box a paste goes to is a class on an existing box, never a reason to
-     rebuild the row. Redrawing here is what broke the click: focus fires
-     before click, so replacing the boxes on focus destroyed the very button
-     the mouse was pressing, the click never landed, and the file picker never
-     opened. */
-  const zones = new Map();
-  function paintTargets() {
-    for (const [key, node] of zones) node.classList.toggle('is-target', key === focusedSlot);
+  const picker = el('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true,
+    onChange: e => { const files = [...e.target.files]; e.target.value = ''; takeMany(files); } });
+
+  function tile(url, onRemove, badge) {
+    const t = el('button', { type: 'button', class: 'shot-thumb', title: 'View full size',
+      onClick: () => { if (t.dataset.url) lightbox({
+        items: tiles.map(x => ({ label: f.pair || 'Chart', name: x })),
+        urlFor: n => n, at: tiles.indexOf(t.dataset.url) }); } },
+      confirmButton({ label: icon('close', 11, 'currentColor', 2.2), armedLabel: 'delete?',
+        title: 'Remove this chart', className: 'shot-thumb-x', armedClassName: 'shot-thumb-x is-armed-text',
+        onConfirm: onRemove }),
+      badge ? el('span', { class: 'shot-thumb-tag' }, badge) : null);
+    if (url) { t.dataset.url = url; t.style.backgroundImage = `url("${url}")`; }
+    else t.classList.add('is-loading');
+    return t;
   }
+
+  /* Every url on the box right now, so the viewer can walk them. */
+  let tiles = [];
 
   function paintShots() {
-    zones.clear();
-    shotWrap.replaceChildren(...SLOTS.map(slot => {
-      const staged = shots[slot.key];
-      const kept = existingShot(slot.key);
-      const input = el('input', { type: 'file', accept: 'image/*', hidden: true,
-        onChange: e => { const f = e.target.files[0]; e.target.value = ''; take(slot.key, f); } });
+    tiles = [];
+    const kept = keptShots();
+    const nodes = [];
 
-      const head = el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '7px', marginBottom: '7px' } },
-        el('span', { class: 'lbl', style: { margin: 0 } }, slot.label),
-        staged || kept
-          ? confirmButton({ label: 'Remove', armedLabel: 'Confirm remove', className: 'm',
-              style: { marginLeft: 'auto', fontSize: '10px', color: 'var(--grey-4)' },
-              armedStyle: { marginLeft: 'auto', fontSize: '10px', color: 'var(--orange)' },
-              onConfirm: () => clearShot(slot.key) })
-          : null);
+    for (const name of kept) {
+      const t = tile(null, () => dropKept(name));
+      store.shotUrl(name).then(url => {
+        t.classList.remove('is-loading');
+        if (url) { t.dataset.url = url; t.style.backgroundImage = `url("${url}")`; tiles.push(url); }
+        else t.append(el('span', { class: 'm', style: { fontSize: '9.5px', color: 'var(--yellow)' } }, 'missing'));
+      });
+      nodes.push(t);
+    }
+    for (const x of staged) {
+      const url = URL.createObjectURL(x.out.blob);
+      tiles.push(url);
+      nodes.push(tile(url, () => dropStaged(x.id), `${x.out.width}×${x.out.height}`));
+    }
 
-      const zone = el('button', { type: 'button', class: 'shot-zone' + (focusedSlot === slot.key ? ' is-target' : ''),
-        onClick: () => { focusedSlot = slot.key; paintTargets(); input.click(); },
-        onFocus: () => { focusedSlot = slot.key; paintTargets(); },
-        onDragOver: e => { e.preventDefault(); zone.classList.add('is-over'); },
-        onDragLeave: () => zone.classList.remove('is-over'),
-        onDrop: e => { e.preventDefault(); zone.classList.remove('is-over'); take(slot.key, imageOnDrop(e)); } });
-
-      if (staged) {
-        zone.style.backgroundImage = `url("${URL.createObjectURL(staged.blob)}")`;
-        zone.append(el('span', { class: 'shot-tag' }, `${staged.width}×${staged.height} · ${readableSize(staged.to)}`));
-      } else if (kept) {
-        zone.classList.add('is-loading');
-        store.shotUrl(kept).then(url => {
-          if (url) { zone.classList.remove('is-loading'); zone.style.backgroundImage = `url("${url}")`; }
-          else zone.replaceChildren(el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--yellow)' } }, 'picture missing'));
-        });
-      } else {
-        zone.append(
-          icon('image', 19, 'var(--grey-5)', 1.6),
-          el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } }, 'Drop, paste or click'));
-      }
-      zones.set(slot.key, zone);
-      return el('div', { class: 'shot-slot' }, head, zone, input);
-    }));
+    /* With nothing on it the box is the drop area it always was; with charts
+       on it, it is the charts and a small square on the end for the next. */
+    if (out.shotCount) out.shotCount.textContent = nodes.length ? String(nodes.length) : '';
+    /* The charts fill the column rather than sitting in it: one is as big as
+       the space allows, and each one after makes them all a step smaller
+       without leaving any of the width unused. Four go two-by-two rather than
+       three-then-one — four equal squares beat three and an orphan. */
+    const n = nodes.length;
+    const cols = n <= 3 ? Math.max(1, n) : n === 4 ? 2 : n <= 6 ? 3 : 4;
+    shotWrap.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    shotWrap.replaceChildren(
+      ...nodes,
+      /* The button to add the next one is a slim bar under them, not a tile
+         among them — a tile would take a chart's place and make one chart
+         half the size it could be. */
+      el('button', { type: 'button', class: nodes.length ? 'shot-add' : 'shot-zone shot-empty',
+        onClick: () => picker.click(),
+        onDragOver: e => { e.preventDefault(); shotWrap.classList.add('is-over'); },
+        onDragLeave: () => shotWrap.classList.remove('is-over'),
+        onDrop: e => { e.preventDefault(); shotWrap.classList.remove('is-over'); takeMany(imagesOnDrop(e)); } },
+        icon(nodes.length ? 'plus' : 'image', nodes.length ? 14 : 19, 'var(--grey-5)', nodes.length ? 2 : 1.6),
+        nodes.length ? null
+          : el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } }, 'Drop, paste or click')));
   }
+  const imagesOnDrop = (e) => {
+    const one = imageOnDrop(e);
+    const all = [...(e.dataTransfer?.files || [])].filter(x => /^image\//.test(x.type));
+    return all.length ? all : (one ? [one] : []);
+  };
   paintShots();
 
   /* Ctrl+V is how a screenshot actually arrives — nobody saves it to disk
-     first. It goes to whichever slot is highlighted, which starts as the entry
-     and follows whichever you last clicked, so two pastes in a row fill the
-     two charts in the order you would expect. */
+     first. It goes straight onto the end of the list, so three pastes in a
+     row give you three charts in the order you took them. */
   function onPaste(e) {
     const file = imageOnClipboard(e);
     if (!file) return;
     e.preventDefault();
-    const key = focusedSlot;
-    /* Once a paste lands, point at the other one. */
-    const other = SLOTS.find(s => s.key !== key);
-    if (other) focusedSlot = other.key;
-    paintTargets();
-    take(key, file);
+    take(file);
   }
 
   /* ---------- session ----------
@@ -495,27 +507,45 @@ export function addTrade(store, nav, existingId = null) {
     if (editing) { await store.updateTrade(editing.id, payload); saved = editing; }
     else { saved = await store.addTrade(payload); }
 
-    /* Now the trade has an id, so its charts can be named after it. A removal
-       is applied before a replacement, so swapping one chart for another never
+    /* Now the trade has an id, so its charts can be named after it. Removals
+       are applied before additions, so swapping one chart for another never
        leaves the old file behind. */
-    for (const slot of SLOTS) {
-      if (dropped[slot.key]) await store.clearShot(saved, slot.key);
-      const staged = shots[slot.key];
-      if (staged) await store.putShot(saved.id, slot.key, staged.blob);
-    }
+    for (const name of dropped) await store.clearShot(saved, name);
+    for (const x of staged) await store.putShot(saved.id, x.out.blob, x.id);
 
     toast(editing ? 'Trade updated' : 'Trade saved to ' + store.folderName);
     nav.go('#/trades');
   }
+
+  /* Only on a trade that is still running, and only when editing one — a new
+     trade has nothing to close. */
+  out.closeNow = (editing && isOpen())
+    ? el('button', { class: 'btn btn-close-now', title: 'Mark it closed and fill in how it went',
+        onClick: () => {
+          if (!isOpen()) return;
+          f.status = 'closed';
+          paintStatus();
+          recompute();
+          out.closeNow.remove();
+          out.closeNow = null;
+          /* Straight into the first box it just turned on, because that is
+             the next thing you were going to do anyway. */
+          out.exitField?.focus();
+        } },
+        icon('check', 13, 'currentColor', 2.2), 'Close this trade')
+    : null;
 
   const head = el('header', { class: 'head' },
     el('h1', {}, editing ? 'Edit trade' : 'New trade'),
     el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--grey-8)', borderRadius: 'var(--r-btn)', padding: '7px 13px' } },
       el('span', { style: { width: '7px', height: '7px', borderRadius: '2px', background: acct.color } }),
       el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-2)' } }, 'Saving to ', el('span', { style: { color: '#fff' } }, acct.name))),
-    statusWrap,
-    modeWrap,
     el('div', { class: 'spacer' }),
+    /* Opening a running trade, the one thing you came to do is finish it.
+       Rather than make you find the Closed switch further down the form, the
+       page offers it where your eye already is and puts the cursor in the
+       first box it just turned on. */
+    out.closeNow,
     editing ? null : el('button', { class: 'btn btn-ghost', onClick: () => nav.go('#/import') },
       icon('upload', 14, 'var(--grey-3)', 1.8), 'Import CSV'),
     el('button', { class: 'btn btn-ghost', onClick: () => history.back() }, 'Cancel'),
@@ -599,7 +629,8 @@ export function addTrade(store, nav, existingId = null) {
     el('span', {}, '%')));
 
   out.riskRow = grid('minmax(0,200px) minmax(0,1fr)');
-  out.riskBand = el('div', { class: 'band result-band' }, out.riskRow);
+  out.riskBand = out.riskRow;
+  out.riskRow.classList.add('result-band');
   /* One row, three shapes: risk and money for a live trade, R alone for a
      forward test, and risk alone while a live trade is still running. A
      forward test that is still running has nothing to ask for at all, so the
@@ -634,27 +665,45 @@ export function addTrade(store, nav, existingId = null) {
         labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
         labelled('Closed', out.closeField = field({ type: 'time', ...bind('timeClose') })))),
 
-    out.riskBand,
-
-    /* Setup, session and tags are one question asked three ways — what kind of
-       trade was this — so they share a band and one hairline instead of two.
-       It also buys back the room the chosen tags take up underneath. */
+    /* Whether it is finished and whether it was real are two questions about
+       the same trade, and both decide what the row underneath asks for — so
+       they sit with it rather than up in the header away from their effect. */
     band(
-      grid('1fr 1fr',
-        labelled('Setup', setupWrap),
-        labelled('Session', sessionWrap)),
-      labelled('Tags', tagWrap)),
+      grid('minmax(0,1fr) minmax(0,1fr)',
+        labelled('Status', statusWrap),
+        labelled('Trade type', modeWrap)),
+      out.riskRow),
 
-    el('div', { class: 'band', style: { flex: '1', minHeight: '120px', display: 'flex', flexDirection: 'column' } },
+    band(grid('1fr 1fr',
+      labelled('Setup', setupWrap),
+      labelled('Session', sessionWrap))),
+
+    el('div', { class: 'band', style: { flex: '1', minHeight: '110px', display: 'flex', flexDirection: 'column' } },
       el('span', { class: 'lbl' }, 'Notes'),
-      el('textarea', { class: 'field', style: { flex: '1', minHeight: '90px' },
+      el('textarea', { class: 'field', style: { flex: '1', minHeight: '80px' },
         oninput: e => { f.notes = e.target.value; } }, f.notes || '')),
   );
 
-  /* The charts get the whole right-hand side and stack, which is the shape a
-     chart actually is — wide. Two tall thin ones side by side was the worst of
-     both. */
-  const colRight = el('div', { class: 'col' }, band(shotWrap));
+  /* Tags take the right-hand side now. They are the part of a trade you will
+     read back for years — the Tags page is built on them — and they were
+     being typed into a strip at the bottom of a column while two big empty
+     chart boxes had half the card. The charts are thumbnails under them: a
+     screenshot is dropped once and looked at later, and looking at it later
+     happens on the trade's own page, full size. */
+  const colRight = el('div', { class: 'col' },
+    /* Sized to the tags you actually have: it grows down to them and only
+       starts scrolling when there are more than the card is tall. An empty
+       half-column above the charts was the old chart stack's habit, not
+       something worth keeping. */
+    el('div', { class: 'band', style: { flex: '0 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' } },
+      el('span', { class: 'lbl' }, 'Tags'),
+      el('div', { style: { minHeight: 0, overflowY: 'auto' } }, tagWrap)),
+    band(
+      el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
+        el('span', { class: 'lbl', style: { margin: 0 } }, 'Charts'),
+        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '10px', color: 'var(--grey-5)' } },
+          out.shotCount = el('span', {}, ''))),
+      shotWrap, picker));
 
   const form = el('section', { class: 'card roomy trade-form' }, colLeft, colRight);
 

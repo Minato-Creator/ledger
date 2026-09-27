@@ -890,7 +890,11 @@ html[data-glass="on"] .field:focus { box-shadow:inset 0 0 0 1px var(--blue), 0 0
 .shots-stack { display:flex; flex-direction:column; gap:14px; flex:1; min-height:0; }
 .shot-slot { flex:1; min-height:0; display:flex; flex-direction:column; }
 .shot-slot .shot-zone { aspect-ratio:auto; flex:1; min-height:88px; }
-.trade-form > .col:last-child > .band { flex:1; min-height:0; display:flex; }
+/* The right-hand column used to be one band holding two big charts, so its
+   band was told to fill. It holds tags and thumbnails now, and both want to
+   sit at the top. */
+.trade-form > .col:last-child { justify-content:flex-start; }
+.trade-form > .col:last-child > .band:last-child { flex:none; }
 
 .dir { flex:1; height:46px; border-radius:var(--r-field); display:flex; align-items:center; justify-content:center;
   gap:5px; font:400 12px var(--mono); background:var(--grey-7); color:var(--ink-3);
@@ -1312,3 +1316,172 @@ button.break-row:hover { background:var(--grey-7); }
 @media (max-width:1180px) {
   .rf-week { width:248px; }
 }
+
+/* ============================================================
+   Analytics · Tags
+
+   A table, because past a handful of bins a table is the honest form and
+   this page has fifteen groups' worth. The only marks are the split bars,
+   and they are thin on purpose — the numbers beside them carry the reading,
+   the bar carries the shape.
+   ============================================================ */
+.tg-view { gap:var(--s-8); }
+
+/* The best in each group, across the top. Wraps rather than shrinking, so a
+   fifteenth group reads exactly like the first. */
+.tg-tiles { flex:none; display:flex; flex-wrap:wrap; gap:8px; }
+.tg-tile {
+  flex:1 1 158px; min-width:0; background:var(--card); border-radius:var(--r-inset);
+  padding:12px 14px; display:flex; flex-direction:column; gap:7px;
+}
+.tg-tile .lbl { font:400 9.5px var(--mono); letter-spacing:.11em; text-transform:uppercase;
+                color:var(--ink-5); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tg-tile-body { display:flex; align-items:baseline; gap:8px; min-width:0; }
+/* Proportional figures on the tile value — tabular is for columns. */
+.tg-tile .v { font:400 21px var(--sans); letter-spacing:-.02em; line-height:1; color:var(--ink); flex:none; }
+.tg-tile .v.is-none { color:var(--ink-5); }
+.tg-tile .n { font:400 11px var(--mono); color:var(--ink-3); min-width:0;
+              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tg-tile .c { font:400 9.5px var(--mono); color:var(--ink-5); }
+.tg-tile.is-quiet { opacity:.62; }
+
+.tg-controls { flex:none; display:flex; align-items:center; gap:9px;
+               background:var(--card); border-radius:var(--r-inset); padding:9px 14px; }
+.tg-controls .lbl { font-size:10.5px; color:var(--ink-5); }
+.tg-controls .seg { background:var(--grey-9); }
+.tg-key { display:flex; align-items:center; gap:6px; font:400 10px var(--mono); color:var(--ink-5); }
+.tg-key .k { width:9px; height:9px; border-radius:3px; }
+.tg-key .k + .k { margin-left:8px; }
+
+.tg-scroll { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:var(--s-8); }
+
+.tg-group { flex:none; padding:18px 22px 16px; }
+.tg-group-head { display:flex; align-items:baseline; gap:10px; }
+.tg-group-head h2 { margin:0; }
+.tg-group-sum { font-size:10.5px; color:var(--ink-4); }
+.tg-group-sum .sep { margin:0 6px; color:var(--ink-6, var(--grey-6)); }
+/* The grid has no gap of its own, so the columns are spaced here — a number
+   pressed against the bar beside it reads as one thing. */
+.tg-tbl { margin-top:12px; }
+.tg-tbl .tbl-head, .tg-tbl .tbl-row { column-gap:14px; }
+/* Equal-width digits, because these do line up in columns. */
+.tg-tbl .num { font-variant-numeric:tabular-nums; }
+.tg-row { height:34px; cursor:default; }
+.tg-row:hover { background:var(--grey-9); }
+.tg-name { font:400 12px var(--mono); color:var(--ink);
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Too few trades behind it to mean anything. Shown, never promoted. */
+.tg-row.is-thin { opacity:.5; }
+.tg-thin { margin-left:8px; font:400 9px var(--mono); letter-spacing:.08em; text-transform:uppercase;
+           color:var(--yellow); background:rgba(var(--yellow-rgb), .12);
+           border-radius:var(--r-pill); padding:2px 6px; }
+
+/* Won, lost, break-even. Separated by a gap in the surface colour rather than
+   a border — a stroke round a mark is ink that is not data. */
+.tg-split { display:flex; align-items:center; gap:2px; height:7px; width:100%; }
+.tg-seg { height:7px; border-radius:3px; min-width:3px; }
+.tg-seg.is-win  { background:var(--profit); }
+.tg-seg.is-loss { background:var(--loss); }
+.tg-seg.is-flat { background:var(--grey-4); }
+.tg-key .k.is-win  { background:var(--profit); }
+.tg-key .k.is-loss { background:var(--loss); }
+.tg-key .k.is-flat { background:var(--grey-4); }
+
+.tg-none { margin-top:12px; font-size:11.5px; color:var(--ink-5); }
+.tg-unused { margin-top:13px; padding-top:11px; border-top:1px solid var(--grey-9);
+             display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.tg-unused .t { font:400 9.5px var(--mono); letter-spacing:.09em; text-transform:uppercase;
+                color:var(--ink-5); margin-right:3px; }
+.tg-unused-tag { font:400 10.5px var(--mono); color:var(--ink-5);
+                 background:var(--grey-9); border-radius:var(--r-pill); padding:3px 9px; }
+.tg-foot { flex:none; padding:4px 6px 10px; font-size:10.5px; line-height:1.6; color:var(--ink-5); }
+
+@media (max-width:1180px) {
+  .tg-tile { flex:1 1 136px; }
+}
+
+/* ---------- the charts on the trade form ----------
+   Thumbnails, not canvases. A screenshot is dropped once and looked at later,
+   and looking at it later happens on the trade's own page at full size — so
+   here they only have to be recognisable, and the room goes to the tags. */
+/* How many across is decided by how many there are — set on the element, so
+   the tiles are always equal and the row is always full. */
+.shot-box { display:grid; grid-template-columns:minmax(0, 1fr);
+            gap:7px; align-items:start; border-radius:var(--r-inset); }
+.shot-box.is-over { box-shadow:inset 0 0 0 1px var(--blue); }
+.shot-thumb {
+  position:relative; width:100%; aspect-ratio:16/9; border-radius:10px;
+  background:var(--cell, var(--grey-9)) center/cover no-repeat; cursor:zoom-in;
+  display:flex; align-items:center; justify-content:center;
+  transition:box-shadow var(--d-snap) var(--e-standard);
+}
+.shot-thumb:hover { box-shadow:inset 0 0 0 1px var(--grey-5); }
+.shot-thumb.is-loading { background-image:linear-gradient(100deg, var(--grey-9) 30%, var(--grey-7) 50%, var(--grey-9) 70%);
+                         background-size:220% 100%; animation:shot-wait 1.15s linear infinite; }
+.shot-thumb-x {
+  position:absolute; top:4px; right:4px; min-width:18px; height:18px; padding:0 5px;
+  border-radius:7px; background:rgba(0,0,0,.58); color:#fff;
+  display:flex; align-items:center; justify-content:center; opacity:0;
+  transition:opacity var(--d-snap) var(--e-standard);
+}
+.shot-thumb:hover .shot-thumb-x, .shot-thumb-x:focus-visible { opacity:1; }
+.shot-thumb-x.is-armed-text { opacity:1; background:rgba(0,0,0,.74); }
+.shot-thumb-tag {
+  position:absolute; left:4px; bottom:4px; font:400 8.5px var(--mono); color:#fff;
+  background:rgba(0,0,0,.5); border-radius:5px; padding:1px 5px;
+}
+.shot-add {
+  grid-column:1 / -1; height:30px; border:1px dashed var(--grey-6); border-radius:10px;
+  display:flex; align-items:center; justify-content:center; gap:7px; color:var(--grey-5);
+  transition:border-color var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard),
+             transform var(--d-press) var(--e-standard);
+}
+.shot-add:hover { border-color:var(--grey-4); color:var(--ink-3); }
+.shot-add:active { transform:scale(.99); }
+/* Empty, it is still a proper drop target — just a short one. */
+.shot-zone.shot-empty { grid-column:1 / -1; aspect-ratio:auto; width:100%; height:78px; }
+
+/* The way to finish a running trade, offered where your eye already is. */
+.btn-close-now { background:rgba(255,184,0,.16); color:var(--yellow); }
+.btn-close-now:hover { background:rgba(255,184,0,.24); }
+
+/* ---------- a list in your own order ----------
+   The grip is the only thing that starts a drag on a group, and it stays
+   quiet until the row is under the pointer: a page full of handles reads as
+   a page full of machinery. A tag is picked up by the tag itself, so it wears
+   the grab cursor and nothing extra.
+
+   While something is in the air it lifts a little and everything else stays
+   exactly where it is. The list is doing the moving, so the dragged thing
+   does not need to shout. */
+.sort-item { position:relative; }
+/* The handle lives in the card's own margin rather than in the row: the
+   group names stay lined up with the tags underneath them, and a page of
+   these reads as a list of groups rather than a rack of machinery. */
+.grip {
+  position:absolute; left:-20px; top:50%; transform:translateY(-50%);
+  width:18px; height:22px; display:flex; align-items:center; justify-content:center;
+  border-radius:7px; cursor:grab; opacity:0; touch-action:none;
+  transition:opacity var(--d-snap) var(--e-standard), background var(--d-snap) var(--e-standard);
+}
+.sort-item:hover > .sort-head > .grip,
+.sort-item:focus-within > .sort-head > .grip,
+.grip:focus-visible { opacity:1; }
+/* An item in the air keeps its handle visible under the pointer. */
+.is-dragging > .sort-head > .grip { opacity:1; }
+.grip:focus-visible { background:var(--inset-2); outline:none; }
+.grip:active { cursor:grabbing; }
+
+.sort-tag { cursor:grab; touch-action:none; user-select:none; }
+.sort-tag:active { cursor:grabbing; }
+
+.is-dragging {
+  cursor:grabbing; opacity:.92;
+  box-shadow:0 10px 26px rgba(0,0,0,.45);
+  transform:scale(1.015);
+  position:relative; z-index:3;
+}
+.sort-tag.is-dragging { transform:none; box-shadow:0 6px 16px rgba(0,0,0,.4); }
+/* Nothing inside the list answers the pointer mid-drag — a delete button
+   under the cursor must not arm itself because a tag passed over it. */
+.is-sorting * { pointer-events:none; }

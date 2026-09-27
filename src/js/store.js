@@ -8,7 +8,7 @@
 
 import { sessionFor, UNITS, todayISO, readableOn, lift, sink, inkOn } from './calc.js';
 import { findBackground, scrimFor } from './backgrounds.js';
-import { SLOTS, shotName, urlFor, forgetUrl } from './shots.js';
+import { shotName, urlFor, forgetUrl } from './shots.js';
 import { fs, isTauri } from './fs.js';
 import { zip, unzip, bytesOfText, textOfBytes } from './vault.js';
 export { todayISO, isTauri };
@@ -154,7 +154,7 @@ class Store {
   async connect() {
     const carry = this.data
       ? [...Object.values(FILES),
-         ...this.trades.flatMap(t => [t.shotLtf, t.shotHtf]).filter(Boolean)]
+         ...this.trades.flatMap(t => tradeShotsOf(t))]
       : [];
     /* A folder that already holds a vault — this shape or the older one — is
        opened rather than written over. */
@@ -277,7 +277,7 @@ class Store {
      silently loses — which is why the outlooks are read here and not only the
      trades. */
   shotNames() {
-    const fromTrades = this.trades.flatMap(t => [t.shotLtf, t.shotHtf]);
+    const fromTrades = this.trades.flatMap(t => tradeShotsOf(t));
     const fromOutlooks = Object.values(this.data.outlooks?.days || {})
       .flatMap(day => (day.instruments || []).flatMap(i => outlookShotsOf(i)));
     return [...fromTrades, ...fromOutlooks].filter(Boolean);
@@ -410,6 +410,15 @@ class Store {
 
     if (!d.news || typeof d.news !== 'object') { d.news = { version: 1, fetchedAt: null, events: [] }; note(); }
     if (!Array.isArray(d.news.events)) { d.news.events = []; note(); }
+
+    /* Two fixed chart slots became a list. The old fields are read once,
+       turned into a list in the order they were shown, and dropped — so a
+       trade logged last week opens with its charts still on it. */
+    for (const t of d.trades.trades) {
+      if (!Array.isArray(t.shots)) { t.shots = [t.shotLtf, t.shotHtf].filter(Boolean); note(); }
+      else { const n = t.shots.length; t.shots = t.shots.filter(Boolean); if (t.shots.length !== n) note(); }
+      if ('shotLtf' in t || 'shotHtf' in t) { delete t.shotLtf; delete t.shotHtf; note(); }
+    }
 
     if (!d.wire || typeof d.wire !== 'object') { d.wire = { version: 1, fetchedAt: null, seenAt: null, items: [] }; note(); }
     if (!Array.isArray(d.wire.items)) { d.wire.items = []; note(); }
@@ -863,7 +872,7 @@ class Store {
     /* The charts go with the trade. Leaving them behind would quietly grow a
        folder of pictures of trades that no longer exist. */
     const t = this.trades.find(x => x.id === id);
-    if (t) for (const slot of SLOTS) await this.clearShot(t, slot.key);
+    if (t) for (const name of tradeShotsOf(t)) await this.dropImage(name);
     this.data.trades.trades = this.trades.filter(x => x.id !== id);
     await this.save('trades');
   }
@@ -876,24 +885,32 @@ class Store {
      stays browsable. Writing happens after the trade has an id, so the two
      can never disagree about what a file is called.
      ============================================================ */
-  async putShot(tradeId, slot, blob) {
-    const name = shotName(tradeId, slot);
+  /* A trade used to hold exactly two charts, in shotLtf and shotHtf. It holds
+     a list now, so a setup that needs four timeframes can have four. The old
+     names are kept exactly as they are — the file on disk does not move, only
+     the field that points at it. */
+  async putShot(tradeId, blob, shotId) {
+    const name = shotName(tradeId, shotId || newShotId());
     await fs.ensureDir('screenshots');
     await fs.writeImage(name, blob);
     forgetUrl(name);                    // any cached url now points at the old picture
-    const field = SLOTS.find(s => s.key === slot)?.field;
     const t = this.trades.find(x => x.id === tradeId);
-    if (t && field) { t[field] = name; await this.save('trades'); }
+    if (t) {
+      t.shots = tradeShotsOf(t);
+      if (!t.shots.includes(name)) t.shots.push(name);
+      await this.save('trades');
+    }
     return name;
   }
 
-  async clearShot(trade, slot) {
-    const field = SLOTS.find(s => s.key === slot)?.field;
-    if (!trade || !field || !trade[field]) return;
-    const name = trade[field];
+  async clearShot(trade, name) {
+    if (!trade || !name) return;
+    const held = tradeShotsOf(trade);
+    if (!held.includes(name)) return;
     try { await fs.deleteImage(name); } catch { /* the record matters more than the file */ }
     forgetUrl(name);
-    trade[field] = null;
+    trade.shots = held.filter(n => n !== name);
+    delete trade.shotLtf; delete trade.shotHtf;
     await this.save('trades');
   }
 
@@ -906,6 +923,18 @@ class Store {
     } catch { return null; }
   }
 }
+
+/* One trade's charts, however old the record is. A trade logged before this
+   existed says shotLtf and shotHtf; every one since says shots. Both are
+   read, so nothing has to be migrated before it can be shown. */
+export function tradeShotsOf(trade) {
+  if (!trade) return [];
+  if (Array.isArray(trade.shots)) return trade.shots.filter(Boolean);
+  return [trade.shotLtf, trade.shotHtf].filter(Boolean);
+}
+
+/** A short, unrepeatable name for one chart. */
+export const newShotId = () => crypto.randomUUID().slice(0, 8);
 
 /* One instrument's charts, however old the record is. A morning written
    before an instrument could hold more than one chart says `shot`; every one

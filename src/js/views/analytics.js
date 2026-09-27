@@ -238,7 +238,7 @@ export function analytics(store, nav) {
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Analytics'),
     el('div', { class: 'seg', style: { marginLeft: '6px' } },
-      ...[['overview', 'Overview'], ['timing', 'Timing'], ['discipline', 'Discipline'], ['year', 'Year']].map(([k, label]) =>
+      ...[['overview', 'Overview'], ['tags', 'Tags'], ['timing', 'Timing'], ['discipline', 'Discipline'], ['year', 'Year']].map(([k, label]) =>
         el('button', { class: k === tab ? 'is-on' : '', onClick: () => { tab = k; nav.refresh(); } }, label))),
     el('span', { class: 'sub' }, isYear
       ? `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`
@@ -265,6 +265,7 @@ export function analytics(store, nav) {
 
   const ctx = { unit: store.displayUnit, account: acct, cur, nav };
   const body = tab === 'overview' ? overview(store, acct, trades, s, ctx)
+             : tab === 'tags'     ? tagsTab(store, acct, trades, s, ctx)
              : tab === 'timing'   ? timing(store, acct, trades, ctx)
              : tab === 'year'     ? yearly(store, acct, all, ctx)
              :                      discipline(store, acct, trades, ctx);
@@ -339,20 +340,222 @@ function overview(store, acct, trades, s, ctx) {
     el('h2', {}, 'By instrument'),
     barList(pairs, ctx));
 
-  /* Tags sit here with setups and instruments, because they answer the same
-     question those two do — where the money came from — rather than the one
-     Discipline asks, which is whether you kept to your own rules. */
-  const tags = tagRollup(store, acct, trades);
-  const byTag = el('div', { class: 'card', style: { flex: '1', minWidth: 0 } },
-    el('h2', {}, 'By tag'),
-    tags.length ? barList(tags, ctx)
-      : el('div', { class: 'm', style: { marginTop: '16px', fontSize: '11.5px', lineHeight: 1.6, color: 'var(--grey-5)' } },
-          'Nothing tagged in this window.'));
-
+  /* Tags used to sit here beside setups and instruments. They have a page of
+     their own now: one bar each was the shallowest possible reading of them,
+     and the question they answer — which kinds of trade actually pay — needs
+     a win rate, a sample size and an expectancy, not a length. */
   return el('div', { class: 'view' },
     el('section', { class: 'row', style: { height: '380px', flex: 'none' } }, chart, expectancy),
     el('section', { class: 'row', style: { flex: '1', alignItems: 'flex-start', minHeight: 0, overflowY: 'auto' } },
-      bySetup, byPair, byTag));
+      bySetup, byPair));
+}
+
+/* ============================================================
+   Tags — which kinds of trade actually pay
+
+   The page you come to looking for an edge, so it is built to make a false
+   one hard to believe:
+
+   • Win rate alone is not an edge. A tag that wins 70% of the time on a
+     payoff of 0.3 loses money, so every row carries its expectancy in R
+     beside its win rate, and the two are read together.
+
+   • A sample of one is not evidence. Anything under the threshold is dimmed
+     and kept out of the tiles at the top — shown, because hiding your own
+     data is worse, but never allowed to look like a finding.
+
+   • A number needs something to be better than. Each tag is set against your
+     own win rate over the same window, in points, so "62%" becomes "eight
+     points better than you usually do" or "two points worse".
+
+   A trade carries several tags at once, so the groups do not add up to the
+   account and are not meant to. That is said on the page rather than left to
+   be discovered.
+   ============================================================ */
+let tagSort = 'edge';
+/* Five is where a run of trades starts to be worth reading. It is a control
+   rather than a rule — some groups fill up slowly — but the page should not
+   open by calling three wins in a row an edge. */
+let tagMin = 5;
+
+const TAG_SORTS = [
+  ['edge',  'Expectancy'],
+  ['win',   'Win rate'],
+  ['count', 'Trades'],
+  ['total', 'Total R'],
+  ['name',  'Name'],
+];
+
+/** One horizontal bar of wins, losses and break-evens, in that order. */
+function splitBar(st) {
+  const total = st.wins + st.losses + st.breakevens;
+  if (!total) return el('span', { class: 'tg-split' });
+  const seg = (n, cls) => n
+    ? el('span', { class: 'tg-seg ' + cls, style: { flex: String(n) } })
+    : null;
+  return el('span', { class: 'tg-split',
+    title: `${st.wins} won · ${st.losses} lost · ${st.breakevens} break-even` },
+    seg(st.wins, 'is-win'), seg(st.losses, 'is-loss'), seg(st.breakevens, 'is-flat'));
+}
+
+function tagsTab(store, acct, trades, s, ctx) {
+  const { nav } = ctx;
+  const groups = store.playbook.tagGroups || [];
+
+  /* Which trades carry each tag, walked once. */
+  const held = new Map();
+  for (const t of trades) {
+    for (const id of (t.tagIds || [])) {
+      if (!held.has(id)) held.set(id, []);
+      held.get(id).push(t);
+    }
+  }
+  const tagged = trades.filter(t => (t.tagIds || []).length).length;
+  const baseline = s.winRate;
+
+  /* Every tag that has been used, with its own numbers worked out by the same
+     function the whole app reads its figures from. */
+  const rowsFor = (group) => group.tags
+    .map(tag => {
+      const mine = held.get(tag.id) || [];
+      if (!mine.length) return null;
+      const st = c.summarise(acct, mine);
+      return {
+        id: tag.id, name: tag.name, n: mine.length, st,
+        win: st.winRate, edge: st.expectancyR, total: st.netR,
+        thin: mine.length < tagMin,
+        delta: (st.winRate != null && baseline != null) ? (st.winRate - baseline) * 100 : null,
+      };
+    })
+    .filter(Boolean);
+
+  const order = (a, b) => {
+    const nul = v => (v == null ? -Infinity : v);
+    if (tagSort === 'name') return a.name.localeCompare(b.name);
+    if (tagSort === 'count') return b.n - a.n;
+    if (tagSort === 'win') return nul(b.win) - nul(a.win);
+    if (tagSort === 'total') return nul(b.total) - nul(a.total);
+    return nul(b.edge) - nul(a.edge);
+  };
+
+  const sections = groups.map(g => {
+    const rows = rowsFor(g).sort(order);
+    const usedIn = trades.filter(t => (t.tagIds || []).some(id => g.tags.some(x => x.id === id)));
+    const gs = usedIn.length ? c.summarise(acct, usedIn) : null;
+    const unused = g.tags.filter(tag => !held.has(tag.id));
+    /* Best by win rate, of the ones with enough behind them to mean anything. */
+    const best = rows.filter(r => !r.thin && r.win != null)
+      .sort((a, b) => b.win - a.win || b.n - a.n)[0] || null;
+    return { g, rows, gs, unused, best, usedIn };
+  });
+
+  /* ---------- the tiles ----------
+     One per group: the tag that wins most often, of those with enough trades
+     behind them. A group with nothing that qualifies says so rather than
+     promoting its best guess. */
+  const tiles = el('div', { class: 'tg-tiles' },
+    ...sections.map(({ g, best, rows }) =>
+      el('div', { class: 'tg-tile' + (best ? '' : ' is-quiet') },
+        el('span', { class: 'lbl' }, g.name),
+        best
+          ? el('span', { class: 'tg-tile-body' },
+              el('span', { class: 'v' }, c.pct(best.win, 0)),
+              el('span', { class: 'n' }, best.name))
+          : el('span', { class: 'tg-tile-body' },
+              el('span', { class: 'v is-none' }, '—'),
+              el('span', { class: 'n' }, rows.length ? `none with ${tagMin}+ trades` : 'not used yet')),
+        best ? el('span', { class: 'c' }, `${best.n} trade${best.n === 1 ? '' : 's'}`) : null)));
+
+  /* ---------- the controls ---------- */
+  const controls = el('div', { class: 'tg-controls' },
+    el('span', { class: 'm lbl' }, 'Sort'),
+    el('div', { class: 'seg' },
+      ...TAG_SORTS.map(([k, label]) => el('button', { class: k === tagSort ? 'is-on' : '',
+        onClick: () => { if (tagSort === k) return; tagSort = k; nav.refresh(); } }, label))),
+    el('span', { class: 'm lbl', style: { marginLeft: '10px' },
+      title: 'Tags with fewer trades than this are dimmed and left out of the tiles above' }, 'Enough to count'),
+    el('div', { class: 'stepper' },
+      el('button', { onClick: () => { tagMin = Math.max(1, tagMin - 1); nav.refresh(); } },
+        icon('minus', 11, 'var(--grey-2)', 2.6)),
+      el('span', { class: 'val' }, `${tagMin}+`),
+      el('button', { onClick: () => { tagMin = Math.min(50, tagMin + 1); nav.refresh(); } },
+        icon('plus', 11, 'var(--grey-2)', 2.6))),
+    el('div', { class: 'spacer', style: { flex: '1' } }),
+    /* One legend for every split bar on the page, rather than one each. */
+    el('span', { class: 'tg-key' },
+      el('span', { class: 'k is-win' }), 'won',
+      el('span', { class: 'k is-loss' }), 'lost',
+      el('span', { class: 'k is-flat' }), 'break-even'));
+
+  const COLS = 'minmax(0,1fr) 54px 92px 72px 62px 78px 78px';
+
+  const groupCard = ({ g, rows, gs, unused, usedIn }) => el('section', { class: 'card tg-group' },
+    el('div', { class: 'tg-group-head' },
+      el('h2', {}, g.name),
+      el('span', { class: 'note' },
+        `${rows.length} of ${g.tags.length} tag${g.tags.length === 1 ? '' : 's'} used`),
+      el('div', { class: 'spacer', style: { flex: '1' } }),
+      gs ? el('span', { class: 'm tg-group-sum' },
+            `${usedIn.length} trade${usedIn.length === 1 ? '' : 's'}`,
+            gs.winRate != null ? el('span', { class: 'sep' }, '·') : null,
+            gs.winRate != null ? `${c.pct(gs.winRate, 0)} won` : null,
+            gs.expectancyR != null ? el('span', { class: 'sep' }, '·') : null,
+            gs.expectancyR != null ? `${c.rFmt(gs.expectancyR)} a trade` : null)
+        : null),
+
+    rows.length
+      ? el('div', { class: 'tbl tg-tbl' },
+          el('div', { class: 'tbl-head', style: { gridTemplateColumns: COLS } },
+            el('span', {}, 'Tag'),
+            el('span', { style: { textAlign: 'right' } }, 'Trades'),
+            el('span', {}, 'W / L / BE'),
+            el('span', { style: { textAlign: 'right' } }, 'Win rate'),
+            el('span', { style: { textAlign: 'right' }, title: 'Against your own win rate over the same window, in points' }, 'vs you'),
+            el('span', { style: { textAlign: 'right' }, title: 'Average R per trade carrying this tag — the number an edge actually lives in' }, 'Per trade'),
+            el('span', { style: { textAlign: 'right' } }, 'Total R')),
+          el('div', { class: 'tbl-body' },
+            ...rows.map(r => el('div', { class: 'tbl-row tg-row' + (r.thin ? ' is-thin' : ''),
+              style: { gridTemplateColumns: COLS },
+              title: r.thin ? `Only ${r.n} trade${r.n === 1 ? '' : 's'} — too few to read anything into` : '' },
+              el('span', { class: 'tg-name' }, r.name,
+                r.thin ? el('span', { class: 'tg-thin' }, 'thin') : null),
+              el('span', { class: 'num' }, String(r.n)),
+              splitBar(r.st),
+              el('span', { class: 'num' }, r.win == null ? '—' : c.pct(r.win, 0)),
+              el('span', { class: 'num', style: { color: r.delta == null ? 'var(--ink-4)'
+                : r.delta > 0.5 ? 'var(--profit)' : r.delta < -0.5 ? 'var(--loss)' : 'var(--ink-4)' } },
+                r.delta == null ? '—' : `${r.delta > 0 ? '+' : r.delta < 0 ? '−' : ''}${Math.abs(r.delta).toFixed(0)}`),
+              el('span', { class: 'num', style: { color: r.edge == null ? 'var(--ink-4)'
+                : r.edge > 0 ? 'var(--profit)' : r.edge < 0 ? 'var(--loss)' : 'var(--ink-3)' } },
+                r.edge == null ? '—' : c.rFmt(r.edge)),
+              el('span', { class: 'num', style: { color: r.total == null ? 'var(--ink-4)'
+                : r.total > 0 ? 'var(--profit)' : r.total < 0 ? 'var(--loss)' : 'var(--ink-3)' } },
+                r.total == null ? '—' : c.rFmt(r.total))))))
+      : el('div', { class: 'm tg-none' }, 'Nothing in this group was used in this window.'),
+
+    /* Tags you set up and never reach for are worth knowing about too. */
+    unused.length
+      ? el('div', { class: 'tg-unused' },
+          el('span', { class: 'm t' }, 'Not used here'),
+          ...unused.map(tag => el('span', { class: 'tg-unused-tag' }, tag.name)))
+      : null);
+
+  if (!groups.length) {
+    return el('div', { class: 'view' },
+      el('div', { class: 'card', style: { flex: '1' } },
+        el('div', { class: 'empty' },
+          el('h2', { style: { fontSize: '16px' } }, 'No tag groups yet'),
+          el('p', {}, 'Tag groups are set up in the Playbook. Once trades carry tags, this is where they are read.'))));
+  }
+
+  return el('div', { class: 'view tg-view' },
+    tiles,
+    controls,
+    el('div', { class: 'tg-scroll' },
+      ...sections.map(groupCard),
+      el('div', { class: 'm tg-foot' },
+        `${tagged} of ${trades.length} trade${trades.length === 1 ? '' : 's'} in this window carry a tag. `,
+        'A trade can carry several, so the groups overlap and do not add up to the account.')));
 }
 
 /* ============================================================

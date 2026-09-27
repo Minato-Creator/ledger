@@ -72,6 +72,8 @@ const PATHS = {
   close:     '<path d="M6 6l12 12M18 6L6 18"/>',
   user:      '<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6"/>',
   upload:    '<path d="M12 16V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>',
+  /* Six dots. Stroke-linecap is round, so a line of no length draws one. */
+  grip:      '<path d="M9.5 6h.01M14.5 6h.01M9.5 12h.01M14.5 12h.01M9.5 18h.01M14.5 18h.01"/>',
 };
 export function icon(name, size = 17, stroke = 'currentColor', width = 1.6) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -342,4 +344,140 @@ export function lightbox({ items, urlFor, at = 0 }) {
   document.body.append(box);
   show(i);
   return box;
+}
+
+/* ============================================================
+   Putting a list in your own order
+
+   Some orders cannot be worked out. Nothing in the data says that how you
+   read structure comes before how you read timing — only that you think
+   about them in that order, and a list that keeps re-sorting itself will
+   not hold your thinking. So this one drags.
+
+   The element itself moves as the pointer crosses its neighbours' middles.
+   That matters: what you are looking at while you drag is what you get when
+   you let go, so there is no ghost trailing the cursor and no rearranging
+   afterwards to find out what you meant.
+
+   It is built on pointer events rather than HTML5 drag-and-drop, which
+   cannot be styled, has no idea what a handle is, and behaves differently
+   in each of the webviews this app ships inside.
+
+   The same handle takes the arrow keys, because moving a group from
+   fifteenth to first is a long drag across a card that scrolls, and
+   fourteen taps of a key is not a drag at all.
+
+   The container is the items' own parent, and only children carrying a sort
+   id take part — an "add another" button can sit in the same list without
+   ever becoming something you can drag or drop onto.
+   ============================================================ */
+export function sortable(container, { onDrop, item = '[data-sortid]', grip = '[data-grip]' } = {}) {
+  if (!container) return container;
+  const kids = () => [...container.children].filter(n => n.matches(item));
+  const ids = () => kids().map(n => n.dataset.sortid);
+
+  /* Nothing is saved unless the order actually changed: a drag that ends
+     where it started, or a click on a tag, must not write to the journal. */
+  const commit = (before, id) => {
+    const now = ids();
+    if (now.join('\u0000') === before.join('\u0000')) return;
+    onDrop(now, id);
+  };
+
+  /* Which sibling the pointer is over, or the nearest one to it — dragging
+     past the end of the list has to mean the end of the list. */
+  const nearest = (x, y, self) => {
+    let best = null, bestD = Infinity;
+    for (const k of kids()) {
+      if (k === self) continue;
+      const r = k.getBoundingClientRect();
+      const dx = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+      const dy = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = k; }
+    }
+    return best;
+  };
+
+  /* A chip sits beside its neighbours, a group sits above them, and which
+     half of the target you are on depends on which. It is read off the
+     layout rather than configured: if anything else shares that line, the
+     list is flowing across. */
+  const acrossFrom = (over) => {
+    const r = over.getBoundingClientRect();
+    return kids().some(k => {
+      if (k === over) return false;
+      const o = k.getBoundingClientRect();
+      const overlap = Math.min(o.bottom, r.bottom) - Math.max(o.top, r.top);
+      return overlap > Math.min(o.height, r.height) * 0.5;
+    });
+  };
+
+  container.addEventListener('pointerdown', (e) => {
+    if (e.button) return;
+    const handle = e.target.closest(grip);
+    if (!handle || !container.contains(handle)) return;
+    const node = handle.closest(item);
+    if (!node || node.parentElement !== container) return;
+    /* When the thing is its own handle — a tag you pick up by the tag — it
+       still has a delete button and a name field inside it, and those are
+       not for dragging. Anything that can be clicked in its own right, and
+       is not the handle, is left alone. */
+    const hit = e.target.closest('button, input, textarea, select, a');
+    if (hit && hit !== handle) return;
+
+    const before = ids();
+    const x0 = e.clientX, y0 = e.clientY;
+    let moved = false;
+
+    const move = (ev) => {
+      if (!moved) {
+        /* A few pixels of slop, so a click stays a click. */
+        if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 4) return;
+        moved = true;
+        node.classList.add('is-dragging');
+        container.classList.add('is-sorting');
+      }
+      const over = nearest(ev.clientX, ev.clientY, node);
+      if (!over) return;
+      const r = over.getBoundingClientRect();
+      const after = acrossFrom(over)
+        ? ev.clientX > r.left + r.width / 2
+        : ev.clientY > r.top + r.height / 2;
+      if (after) { if (over.nextElementSibling !== node) over.after(node); }
+      else { if (over.previousElementSibling !== node) over.before(node); }
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      node.classList.remove('is-dragging');
+      container.classList.remove('is-sorting');
+      if (moved) commit(before, node.dataset.sortid);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    e.preventDefault();
+    handle.focus?.();
+  });
+
+  container.addEventListener('keydown', (e) => {
+    const back = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
+    const on = back || e.key === 'ArrowDown' || e.key === 'ArrowRight';
+    if (!on || e.metaKey || e.ctrlKey || e.altKey) return;
+    const handle = e.target.closest?.(grip);
+    if (!handle) return;
+    const node = handle.closest(item);
+    if (!node || node.parentElement !== container) return;
+    const list = kids();
+    const to = list.indexOf(node) + (back ? -1 : 1);
+    if (to < 0 || to >= list.length) return;
+    e.preventDefault();
+    const before = ids();
+    if (back) list[to].before(node); else list[to].after(node);
+    commit(before, node.dataset.sortid);
+  });
+
+  return container;
 }
