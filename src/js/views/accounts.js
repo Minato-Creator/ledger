@@ -1,6 +1,7 @@
 import { el, icon, toast, brandMark } from '../ui.js';
 import * as c from '../calc.js';
 import { todayISO } from '../store.js';
+import { accountActions } from './accountActions.js';
 
 const COLORS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
 
@@ -65,10 +66,7 @@ export function accounts(store, nav) {
               + (store.displayUnit === '$'
                   ? ` · ${(pctChange >= 0 ? '+' : '−')}${Math.abs(pctChange * 100).toFixed(2)}%`
                   : ` · ${c.money(s.net, { currency: a.currency, decimals: 0 })}`))),
-        el('button', { title: a.archived ? 'Restore' : 'Archive',
-          style: { width: '28px', height: '28px', borderRadius: '10px', background: 'var(--grey-7)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' },
-          onClick: async e => { e.stopPropagation(); await store.updateAccount(a.id, { archived: !a.archived }); nav.refresh(); } },
-          icon(a.archived ? 'check' : 'trash', 13, 'var(--grey-3)', 1.8)),
+        accountActions(store, nav, a),
       );
     });
 

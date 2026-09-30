@@ -9,6 +9,7 @@ import { el, icon, toast } from '../ui.js';
 import * as c from '../calc.js';
 import { toCSV } from '../csv.js';
 import { BACKGROUNDS } from '../backgrounds.js';
+import { accountActions } from './accountActions.js';
 
 const COLOURS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'JPY'];
@@ -74,11 +75,7 @@ export function settings(store, nav) {
           borderRadius: 'var(--r-pill)', padding: '2px 8px', flex: 'none' } }, 'ACTIVE') : null,
         a.archived ? el('span', { class: 'm', style: { fontSize: '9.5px', color: 'var(--grey-3)', background: 'var(--grey-7)',
           borderRadius: 'var(--r-pill)', padding: '2px 8px', flex: 'none' } }, 'ARCHIVED') : null,
-        el('button', { title: a.archived ? 'Restore' : 'Archive — it stays in the folder, it just leaves the switcher',
-          style: { width: '26px', height: '26px', borderRadius: '9px', background: 'var(--grey-7)',
-                   display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' },
-          onClick: () => save({ archived: !a.archived }) },
-          icon(a.archived ? 'check' : 'trash', 12, 'var(--grey-3)', 1.8))),
+        accountActions(store, nav, a)),
 
       el('div', { style: { display: 'flex', alignItems: 'flex-end', gap: '10px', flexWrap: 'wrap' } },
         numField('Starting balance', a.startingBalance, null,

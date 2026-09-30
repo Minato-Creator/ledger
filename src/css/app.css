@@ -20,6 +20,10 @@
   --inset:var(--grey-7);
   --inset-2:var(--grey-6);
   --ink:#FFFFFF; --ink-2:var(--grey-2); --ink-3:var(--grey-3); --ink-4:var(--grey-5);
+  /* The quietest text: footnotes, counts, empty states. Used across the Tags
+     page and the tag menus long before it was defined, so those fell back to
+     their parent's colour and read a step louder than they were drawn. */
+  --ink-5:#656565;
   --ink-on-light:var(--grey-8); --ink-on-light-2:var(--grey-6);
   --profit:var(--green); --loss:var(--orange); --flat:var(--grey-4);
   /* green and red that survive on a light card */
@@ -208,7 +212,7 @@ a:hover { color:var(--blue-strong); }
 .is-armed-text { color:var(--orange) !important; background:transparent !important; font-size:10.5px !important; width:auto !important; }
 
 .seg { display:flex; background:var(--card); border-radius:var(--r-btn); padding:3px; }
-.seg button { font:400 11.5px var(--mono); color:var(--ink-3); padding:6px 13px; border-radius:13px;
+.seg button { font:400 11.5px var(--mono); color:var(--ink-3); padding:6px 13px; border-radius:13px; white-space:nowrap;
               transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard),
                          transform var(--d-press) var(--e-standard); }
 .seg button:active { transform:scale(.96); }
@@ -549,7 +553,7 @@ select.field:hover {
   --card-light:#181B1A;
   --inset:#1A1D1C;
   --inset-2:#242827;
-  --ink:#F2F4F3; --ink-2:#B4BAB8; --ink-3:#8B918F; --ink-4:#6A706E;
+  --ink:#F2F4F3; --ink-2:#B4BAB8; --ink-3:#8B918F; --ink-4:#6A706E; --ink-5:#5C615F;
   --ink-on-light:#F2F4F3; --ink-on-light-2:#B4BAB8;
   --pos-light:#3ED08B; --neg-light:#FF8A72;
   --blue-surface:#4DA8F5;
@@ -715,6 +719,7 @@ html[data-glass="on"] {
      are lifted a step to keep the footing they had. */
   --ink-3:#B4B4B4;
   --ink-4:#8E8E8E;
+  --ink-5:#7E7E7E;
 }
 html[data-glass="on"][data-theme="dark"] {
   --glass-panel:rgba(10,12,11,.52);
@@ -1487,3 +1492,360 @@ button.break-row:hover { background:var(--grey-7); }
 /* Nothing inside the list answers the pointer mid-drag — a delete button
    under the cursor must not arm itself because a tag passed over it. */
 .is-sorting * { pointer-events:none; }
+
+/* ============================================================
+   Weekly winrate
+
+   Two series on every part of this page, live and forward test, and they
+   keep one colour each wherever they appear: blue for what you took, magenta
+   for what you tested. Neither is green or orange — those mean made and lost
+   money everywhere in the app, and a win rate is neither. The pair was run
+   through the palette validator against both card surfaces; it separates
+   under every kind of colour blindness with room to spare.
+
+   Text never wears either colour. The colour is on the mark — a column, a
+   swatch, a short line — and the words beside it stay in ink.
+   ============================================================ */
+:root { --s-live:var(--blue); --s-live-rgb:9,136,240; --s-fwd:#D55181; --s-fwd-rgb:213,81,129; }
+
+.wk-controls { display:flex; align-items:center; gap:8px; }
+.wk-step .val { min-width:112px; white-space:nowrap; }
+.stepper button[disabled] { opacity:.3; cursor:default; }
+.stepper button[disabled]:active { transform:none; }
+.wk-now { padding:6px 12px; font-size:11px; white-space:nowrap; }
+
+.wk-view { gap:var(--s-8); }
+.wk-scroll { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:var(--s-8); }
+
+.wk-key { display:inline-block; width:9px; height:9px; border-radius:3px; flex:none; }
+.wk-key.is-live { background:var(--s-live); }
+.wk-key.is-forward { background:var(--s-fwd); }
+
+/* ---------- the strip ---------- */
+.wk-strip { flex:none; padding:18px 22px 14px; }
+.wk-strip-head { display:flex; align-items:center; gap:14px; }
+.wk-strip-head h2 { margin:0; }
+.wk-legend { display:flex; align-items:center; gap:6px; font:400 10.5px var(--mono); color:var(--ink-3); }
+.wk-legend .wk-key + * { margin-right:8px; }
+.wk-legend .wk-key:not(:first-child) { margin-left:8px; }
+.wk-hint { margin-left:auto; }
+
+/* Its own stacking context, so the hairlines can sit above the picked-out
+   period's band and below the columns. */
+.wk-plot { position:relative; isolation:isolate; margin-top:12px; padding-left:34px; }
+.wk-guide, .wk-base { position:absolute; left:34px; right:0; height:1px; z-index:1; pointer-events:none; }
+.wk-guide { top:calc(var(--plot) / 2); background:var(--grey-9); }
+.wk-base { top:var(--plot); background:var(--grey-7); }
+.wk-guide-lbl { position:absolute; left:0; top:calc(var(--plot) / 2 - 7px); font:400 9.5px var(--mono);
+                color:var(--ink-5); pointer-events:none; }
+
+.wk-slots { display:flex; }
+.wk-slot { flex:1 1 0; min-width:0; position:relative; display:flex; flex-direction:column; align-items:center;
+           border-radius:12px; padding:0; cursor:pointer;
+           transition:background var(--d-snap) var(--e-standard); }
+.wk-slot:hover:not([disabled]) { background:rgba(255,255,255,.025); }
+.wk-slot.is-on { background:var(--inset); }
+.wk-slot[disabled] { cursor:default; }
+.wk-slot:focus-visible { outline:none; box-shadow:inset 0 0 0 1px var(--grey-5); }
+.wk-bars { height:var(--plot); display:flex; align-items:flex-end; justify-content:center; gap:2px; }
+/* Thin marks, rounded at the data end and square on the baseline. */
+.wk-bar { position:relative; z-index:2; width:14px; border-radius:4px 4px 0 0; }
+.wk-bar.is-live { background:var(--s-live); }
+.wk-bar.is-forward { background:var(--s-fwd); }
+.wk-bar.is-none { height:0; }
+.wk-slot:not(.is-on) .wk-bar { opacity:.72; }
+.wk-slot:hover .wk-bar, .wk-slot:focus-visible .wk-bar { opacity:1; }
+.wk-tick { margin-top:7px; margin-bottom:6px; font:400 10px var(--mono); color:var(--ink-4); }
+.wk-slot.is-empty .wk-tick { color:var(--ink-5); }
+.wk-slot.is-on .wk-tick { color:var(--ink); }
+.wk-slot.is-now .wk-tick::after { content:''; display:inline-block; width:4px; height:4px; border-radius:50%;
+                                  background:var(--ink-3); margin-left:4px; vertical-align:middle; }
+
+/* Values lead, names follow; each series keyed by a short line of its colour. */
+.wk-tip { position:absolute; top:0; z-index:5; pointer-events:none; min-width:210px;
+          background:var(--inset-2); border-radius:12px; padding:9px 11px;
+          box-shadow:0 10px 28px rgba(0,0,0,.4); display:flex; flex-direction:column; gap:5px; }
+.wk-tip[hidden] { display:none; }
+.wk-tip-head { font:400 10px var(--mono); color:var(--ink-3); margin-bottom:2px; white-space:nowrap; }
+.wk-tip-row { display:flex; align-items:baseline; gap:7px; white-space:nowrap; font:400 10.5px var(--mono); }
+.wk-tip-row .v { font:500 13px var(--sans); color:var(--ink); min-width:34px; }
+.wk-tip-row .n { color:var(--ink-2); }
+.wk-tip-row .d { color:var(--ink-4); margin-left:auto; padding-left:8px; }
+.wk-line { width:12px; height:2px; border-radius:1px; align-self:center; flex:none; }
+.wk-line.is-live { background:var(--s-live); }
+.wk-line.is-forward { background:var(--s-fwd); }
+
+/* ---------- the period ---------- */
+
+.wk-pair { flex:none; display:flex; gap:var(--s-8); align-items:stretch; }
+.wk-card { flex:1 1 0; min-width:0; padding:20px 24px 18px; gap:14px; }
+.wk-card-head { display:flex; align-items:center; gap:9px; }
+.wk-card-head h2 { margin:0; }
+.wk-open { font:400 10px var(--mono); color:var(--yellow); background:rgba(var(--yellow-rgb), .12);
+           border-radius:var(--r-pill); padding:2px 8px; margin-left:auto; }
+.wk-none { margin:4px 0 0; font:400 12px var(--mono); color:var(--ink-4); }
+.wk-card.is-empty { justify-content:flex-start; }
+
+/* Proportional figures on the big number — tabular is for columns. */
+.wk-hero { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+.wk-hero .v { font:400 40px var(--sans); letter-spacing:-.03em; line-height:1; color:var(--ink); }
+.wk-hero .u { font:400 12px var(--mono); color:var(--ink-3); }
+.wk-delta { margin-left:auto; font:400 10.5px var(--mono); border-radius:var(--r-pill); padding:3px 9px;
+            background:var(--inset); color:var(--ink-3); }
+.wk-delta.is-up { color:var(--profit); background:rgba(var(--profit-rgb), .12); }
+.wk-delta.is-down { color:var(--loss); background:rgba(var(--loss-rgb), .12); }
+
+.wk-split-row { display:flex; align-items:center; gap:12px; }
+.wk-split-row .wk-split { flex:1; }
+.wk-split-txt { font:400 10.5px var(--mono); color:var(--ink-3); white-space:nowrap; }
+
+.wk-stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px 14px;
+            padding-top:13px; border-top:1px solid var(--grey-9); }
+.wk-stats.is-three { grid-template-columns:repeat(3, minmax(0, 1fr)); border-top:none; padding-top:0; }
+.wk-stat { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.wk-stat .k { font:400 9.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-4);
+              white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wk-stat .v { font:400 14px var(--mono); color:var(--ink); white-space:nowrap; display:flex; align-items:baseline; gap:7px; }
+.wk-stat .v .sub { font-size:10.5px; color:var(--ink-4); }
+.wk-view .is-pos { color:var(--profit); }
+.wk-view .is-neg { color:var(--loss); }
+
+.wk-money { display:flex; align-items:flex-end; gap:22px; padding-top:13px; border-top:1px solid var(--grey-9); }
+.wk-target { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
+.wk-target .k { font:400 9.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-4); }
+.wk-target .t { font:400 10.5px var(--mono); color:var(--ink-3); }
+.wk-meter { display:block; height:6px; border-radius:3px; background:var(--inset); overflow:hidden; }
+.wk-meter .f { display:block; height:100%; border-radius:3px; background:var(--ink-4); }
+.wk-meter .f.is-hit { background:var(--profit); }
+
+.wk-risk { padding-top:13px; border-top:1px solid var(--grey-9); }
+.wk-risk .lbl { margin-bottom:9px; font-size:9.5px; letter-spacing:.07em; color:var(--ink-4); }
+.wk-foot { margin:0; font:400 10.5px var(--mono); line-height:1.55; color:var(--ink-4); }
+.wk-risk .wk-foot { margin-top:9px; }
+
+/* ---------- inside the period, and its trades ---------- */
+.wk-break, .wk-trades { flex:none; padding:18px 22px 12px; }
+.wk-break h2 { margin:0; }
+.wk-tbl { margin-top:12px; }
+.wk-tbl .tbl-head, .wk-tbl .tbl-row { column-gap:12px; }
+.wk-tbl .num { font-variant-numeric:tabular-nums; }
+/* The bars in the table are a glance, not the reading — the numbers beside
+   them are. Capped so a day of one trade is not a slab of colour. */
+.wk-tbl .tg-split { max-width:132px; }
+.wk-tbl .r { text-align:right; }
+.wk-tbl .q { color:var(--ink-5); }
+.wk-groups { border-bottom:none; padding-bottom:4px; }
+.wk-groups .g { display:flex; align-items:center; gap:7px; font:400 10px var(--mono); color:var(--ink-3);
+                text-transform:none; letter-spacing:0; }
+/* The forward-test half starts with a hairline, so the two read as two. */
+.wk-tbl .is-second { padding-left:12px; border-left:1px solid var(--grey-9); }
+.wk-tbl .tbl-head .is-second { border-left-color:transparent; }
+.wk-row { height:36px; cursor:default; }
+.wk-row.is-link { cursor:pointer; }
+.wk-row.is-quiet .wk-part { color:var(--ink-4); }
+.wk-part { font:400 11.5px var(--mono); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wk-setup { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wk-tbl .wk-open-cell { color:var(--yellow); }
+.wk-trades .wk-card-head { gap:10px; }
+
+/* ============================================================
+   The Lab
+
+   The answer fills the screen; the rules live one step away on their own
+   page. Figures are few, labels are short, and the three charts carry the
+   rest — thin marks, hairline grids, mono ticks and a crosshair that reads
+   out the exact number wherever you point.
+
+   Colour means one thing each: the profit colour is an account that passed
+   or was paid, the loss colour one that failed, grey one still going.
+   Text stays in ink; the colour is on the marks.
+   ============================================================ */
+.lab-view { gap:var(--s-8); }
+.lab-firm { width:auto; min-width:180px; height:34px; font-size:12px; border-radius:12px; margin-left:4px; }
+.lab-firmname { font:400 12px var(--mono); color:var(--ink-on-light-2); background:rgba(0,0,0,.06);
+                border-radius:var(--r-pill); padding:5px 12px; }
+html[data-theme="dark"] .lab-firmname, html[data-bg] .lab-firmname { background:var(--inset); color:var(--ink-3); }
+.lab-source { flex:none; }
+.lab-rules-btn { padding:8px 14px; font-size:11.5px; flex:none; }
+
+/* One quiet line of what the answer is built from. */
+.lab-strip { flex:none; display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 18px; padding:0 18px;
+             font:400 11px var(--mono); color:var(--ink-on-light-2); }
+.lab-strip .i { display:inline-flex; align-items:baseline; gap:6px; }
+.lab-strip b { font-weight:400; color:var(--ink-on-light); font-variant-numeric:tabular-nums; }
+.lab-strip .pm { color:var(--ink-on-light-2); }
+.lab-strip .is-warn { color:var(--yellow); }
+.lab-view .is-pos { color:var(--profit); }
+.lab-view .is-neg { color:var(--loss); }
+
+.lab-body { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
+/* The answer fills the window: the charts take whatever height is left and
+   only scroll once the window is too short for them. */
+.lab-answer { flex:1; min-height:0; display:flex; flex-direction:column; gap:var(--s-8); padding-bottom:6px; }
+
+.lab-wait { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;
+            font:400 11px var(--mono); color:var(--ink-on-light-2); min-height:260px; }
+.lab-progress { width:240px; height:2px; border-radius:1px; background:rgba(128,128,128,.25); overflow:hidden; }
+.lab-progress i { display:block; height:100%; width:0; background:var(--ink-on-light); transition:width 120ms linear; }
+
+.lab-prompt { flex:none; align-items:flex-start; gap:10px; padding:28px 30px; }
+.lab-prompt h2 { margin:6px 0 0; }
+.lab-prompt p { margin:0 0 6px; max-width:520px; font:400 12px var(--mono); line-height:1.6; color:var(--ink-3); }
+
+/* ---------- the figures ---------- */
+.lab-tiles { display:grid; grid-template-columns:minmax(0, 1.35fr) repeat(4, minmax(0, 1fr)); gap:var(--s-8); flex:none; }
+.lab-tile { background:var(--card); border-radius:var(--r-inset); padding:15px 18px 14px; display:flex; flex-direction:column; gap:7px; min-width:0; }
+.lab-tile .k { font:400 9.5px var(--mono); letter-spacing:.09em; text-transform:uppercase; color:var(--ink-4); white-space:nowrap; }
+/* Proportional figures, sized to the window so they never outgrow a tile. */
+.lab-tile .v { font:400 clamp(22px, 1.95vw, 28px) var(--sans); letter-spacing:-.03em; line-height:1; color:var(--ink); white-space:nowrap; }
+.lab-tile.is-hero .v { font-size:clamp(26px, 2.5vw, 36px); }
+.lab-tile.is-pos .v { color:var(--profit); }
+.lab-tile.is-neg .v { color:var(--loss); }
+.lab-tile .s { font:400 10.5px var(--mono); color:var(--ink-4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-height:13px; }
+.lab-tile.is-ok .s { color:var(--profit); }
+.lab-tile.is-bad .s { color:var(--loss); }
+
+/* ---------- chart cards ---------- */
+.lab-chart { padding:16px 20px 12px; gap:8px; min-width:0; min-height:0; }
+.lab-chart-head { display:flex; align-items:baseline; gap:14px; }
+.lab-chart-head h2 { margin:0; }
+.lab-sub { font:400 10.5px var(--mono); color:var(--ink-4); }
+.lab-legend { margin-left:auto; display:flex; align-items:center; gap:6px; font:400 10.5px var(--mono); color:var(--ink-3); }
+.lab-legend i { width:12px; height:2px; border-radius:1px; margin-left:10px; }
+.lab-legend i:first-child { margin-left:0; }
+.lab-legend .is-pass { background:var(--profit); }
+.lab-legend .is-fail { background:var(--loss); }
+.lab-legend .is-open { background:var(--grey-4); }
+.lab-empty { margin:10px 0; font:400 11.5px var(--mono); color:var(--ink-4); }
+
+.lab-main { display:flex; gap:var(--s-8); flex:1.3 1 300px; min-height:300px; }
+.lab-paths { flex:1; min-width:0; }
+.lab-outcomes { width:280px; flex:none; gap:14px; }
+.lab-pair { display:flex; gap:var(--s-8); flex:1 1 220px; min-height:220px; }
+.lab-pair > .lab-chart { flex:1 1 0; }
+
+.lab-svgwrap { position:relative; width:100%; height:100%; }
+.lab-svg { display:block; overflow:visible; }
+.lab-svg text { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+.lab-grid { stroke:var(--grey-9); stroke-width:1; }
+.lab-zero { stroke:var(--grey-7); stroke-width:1; }
+.lab-tick { font-size:10px; fill:var(--ink-4); }
+.lab-level { stroke-width:1; }
+.lab-level.is-target { stroke:var(--profit); }
+.lab-level.is-floor { stroke:var(--loss); }
+.lab-level-lbl { font-size:9.5px; fill:var(--ink-4); letter-spacing:.06em; text-transform:uppercase; }
+.lab-level-val { font-size:10.5px; fill:var(--ink-2); }
+
+/* Ninety thin lines laid over each other: where they crowd is where most
+   accounts went. */
+.lab-path { fill:none; stroke-width:1.1; stroke-linejoin:round; stroke-linecap:round; }
+.lab-path.is-pass { stroke:rgba(var(--profit-rgb), .30); }
+.lab-path.is-fail { stroke:rgba(var(--loss-rgb), .30); }
+.lab-path.is-open { stroke:rgba(128,128,128,.28); }
+.lab-end { stroke:var(--card); stroke-width:1.5; }
+.lab-end.is-pass { fill:var(--profit); }
+.lab-end.is-fail { fill:var(--loss); }
+
+.lab-curve { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.lab-curve.is-paid { stroke:var(--profit); }
+.lab-grad-top { stop-color:var(--profit); stop-opacity:.26; }
+.lab-grad-bottom { stop-color:var(--profit); stop-opacity:0; }
+.lab-stop-pos { stop-color:var(--profit); }
+.lab-stop-neg { stop-color:var(--loss); }
+.lab-mark { stroke:var(--grey-6); stroke-width:1; }
+.lab-mark.is-med { stroke:var(--ink-3); }
+.lab-mark-lbl { font-size:9.5px; fill:var(--ink-4); }
+.lab-mark-lbl.is-med { fill:var(--ink-2); }
+.lab-band { fill:rgba(128,128,128,.09); }
+.lab-be { fill:var(--card); stroke:var(--ink-2); stroke-width:1.5; }
+.lab-you { fill:var(--ink); stroke:var(--card); stroke-width:2; }
+
+/* The crosshair. */
+.lab-hit { cursor:crosshair; }
+.lab-cross { stroke:var(--ink-3); stroke-width:1; pointer-events:none; }
+.lab-cross-dot { fill:var(--ink); stroke:var(--card); stroke-width:2; pointer-events:none; }
+.lab-read { position:absolute; top:6px; z-index:5; pointer-events:none; min-width:132px;
+            background:var(--inset-2); border-radius:10px; padding:8px 11px; box-shadow:0 10px 28px rgba(0,0,0,.4);
+            display:flex; flex-direction:column; gap:4px; }
+.lab-read[hidden] { display:none; }
+.lab-read .h { font:400 10px var(--mono); color:var(--ink-3); margin-bottom:1px; white-space:nowrap; }
+.lab-read .r { display:flex; align-items:center; gap:7px; font:400 10.5px var(--mono); color:var(--ink-3); white-space:nowrap; }
+.lab-read .r i { width:10px; height:2px; border-radius:1px; flex:none; }
+.lab-read .r b { font:500 12.5px var(--sans); color:var(--ink); font-variant-numeric:tabular-nums; }
+.lab-read .is-pass, .lab-read .is-paid { background:var(--profit); }
+.lab-read .is-fail { background:var(--loss); }
+.lab-read .is-going { background:var(--grey-4); }
+
+/* ---------- outcomes ---------- */
+.lab-orows { display:flex; flex-direction:column; gap:15px; }
+.lab-orow .top { display:flex; align-items:baseline; gap:8px; }
+.lab-orow .l { font:400 11px var(--mono); color:var(--ink-3); }
+.lab-orow b { margin-left:auto; font:400 17px var(--sans); letter-spacing:-.02em; color:var(--ink); }
+.lab-orow .bar { margin-top:7px; height:5px; border-radius:3px; background:var(--grey-9); overflow:hidden; }
+.lab-orow .bar i { display:block; height:100%; border-radius:3px; }
+.lab-orow .bar .is-fail { background:var(--loss); }
+.lab-orow .bar .is-lost { background:rgba(var(--loss-rgb), .5); }
+.lab-orow .bar .is-alive { background:var(--grey-4); }
+.lab-orow .bar .is-paid { background:var(--profit); }
+.lab-orow .why { margin-top:6px; font:400 10px var(--mono); color:var(--ink-4); }
+.lab-ofoot { margin-top:auto; padding-top:12px; border-top:1px solid var(--grey-9); display:flex; align-items:baseline; gap:7px;
+             font:400 10.5px var(--mono); color:var(--ink-4); }
+.lab-ofoot b { font:400 15px var(--sans); color:var(--ink); }
+
+.lab-note { margin:0; padding:2px 18px 10px; font:400 10px var(--mono); color:var(--ink-on-light-2); }
+
+/* ============================================================
+   Rules — the page inside the page
+   ============================================================ */
+.lab-back { width:32px; height:32px; border-radius:12px; background:var(--grey-8); display:flex; align-items:center; justify-content:center; flex:none; }
+.lab-status { font:400 10.5px var(--mono); border-radius:var(--r-pill); padding:4px 10px; }
+.lab-status.is-ready { color:var(--profit); background:rgba(var(--profit-rgb), .14); }
+.lab-status.is-need { color:var(--yellow); background:rgba(var(--yellow-rgb), .14); cursor:help; }
+.lab-rscroll { flex:1; min-height:0; overflow-y:auto; }
+.lab-rules { display:flex; flex-direction:column; gap:var(--s-8); padding-bottom:10px; }
+.lab-rtop { display:flex; align-items:flex-end; gap:12px; background:var(--card); border-radius:var(--r-inset); padding:14px 18px; }
+.lab-firms { display:flex; align-items:center; gap:7px; flex:none; }
+.lab-firms .lab-select { width:220px; }
+.lab-new, .lab-del { padding:8px 13px; font-size:11px; flex:none; white-space:nowrap; }
+.lab-del.is-armed { color:var(--loss); }
+.lab-namef { flex:1; max-width:360px; }
+.lab-rgrid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:var(--s-8); align-items:start; }
+.lab-rcol { display:flex; flex-direction:column; gap:var(--s-8); min-width:0; }
+.lab-rcard { padding:18px 20px; gap:14px; }
+.lab-rcard h2 { margin:0; }
+.lab-first { max-width:560px; }
+.lab-quiet { margin:0; font:400 12px var(--mono); line-height:1.6; color:var(--ink-4); }
+.lab-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:11px 12px; }
+.lab-f { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.lab-f > .k { font:400 9.5px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--ink-4);
+              white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lab-f.is-req > .k::after { content:' *'; color:var(--ink-5); }
+.lab-f.is-req.is-empty > .k::after { color:var(--yellow); }
+.lab-box { display:flex; align-items:center; gap:6px; background:var(--inset); border-radius:12px; padding:0 11px; height:34px;
+           transition:box-shadow var(--d-snap) var(--e-standard); }
+.lab-box:focus-within { box-shadow:inset 0 0 0 1px var(--blue); }
+.lab-f.is-req.is-empty .lab-box { box-shadow:inset 0 0 0 1px rgba(var(--yellow-rgb), .35); }
+.lab-in { flex:1; min-width:0; width:100%; font:400 12px var(--mono); color:var(--ink); font-variant-numeric:tabular-nums; }
+.lab-in::placeholder { color:var(--ink-5); }
+.lab-box .u { flex:none; font:400 10.5px var(--mono); color:var(--ink-4); }
+.lab-hint:empty { display:none; }
+.lab-hint { font:400 10px var(--mono); color:var(--ink-4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lab-namef .lab-in { flex:none; background:var(--inset); border-radius:12px; padding:0 11px; height:34px; }
+.lab-namef .lab-in:focus { box-shadow:inset 0 0 0 1px var(--blue); }
+.lab-select { height:34px; border-radius:12px; font-size:11.5px; padding-left:11px; }
+.lab-seg { background:var(--inset); align-self:flex-start; }
+.lab-seg button { padding:5px 11px; font-size:11px; }
+.lab-tg { grid-column:1 / -1; }
+.lab-toggle { display:flex; align-items:center; gap:9px; text-align:left; font:400 11.5px var(--mono); color:var(--ink-2); padding:2px 0; }
+.lab-toggle .tick { flex:none; }
+
+/* ---------- archive, or delete an account ----------
+   Two small words rather than an icon: a bin that only archived was a bin
+   that lied, and now that there is a real delete the difference has to be
+   read, not guessed. */
+.acct-actions { display:flex; gap:5px; flex:none; }
+.acct-act { font:400 10.5px var(--mono); color:var(--grey-3); background:var(--grey-7); border-radius:9px; padding:5px 10px;
+            white-space:nowrap; transition:color var(--d-snap) var(--e-standard), background var(--d-snap) var(--e-standard); }
+.acct-act:hover { color:var(--grey-1); }
+.acct-act.is-delete:hover { color:var(--loss); }
+.acct-act.is-armed, .acct-act.is-armed:hover { color:#fff; background:var(--loss); }

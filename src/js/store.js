@@ -11,6 +11,7 @@ import { findBackground, scrimFor } from './backgrounds.js';
 import { shotName, urlFor, forgetUrl } from './shots.js';
 import { fs, isTauri } from './fs.js';
 import { zip, unzip, bytesOfText, textOfBytes } from './vault.js';
+import { blankSheet } from './lab.js';
 export { todayISO, isTauri };
 
 /* ============================================================
@@ -35,6 +36,7 @@ export const FILES = {
   outlooks: 'data/outlooks.json',
   news:     'data/news.json',
   wire:     'data/wire.json',
+  lab:      'data/lab.json',
 };
 const LEGACY = {
   accounts: 'accounts.json',
@@ -205,7 +207,7 @@ class Store {
   async load() {
     await this.tidyVault();
     await this.ensureDir('data');
-    const [accounts, trades, playbook, replay, outlooks, news, wire] = await Promise.all([
+    const [accounts, trades, playbook, replay, outlooks, news, wire, lab] = await Promise.all([
       this.readJSON(FILES.accounts, defaultAccounts()),
       this.readJSON(FILES.trades,   { version: 1, trades: [] }),
       this.readJSON(FILES.playbook, defaultPlaybook()),
@@ -213,8 +215,9 @@ class Store {
       this.readJSON(FILES.outlooks, { version: 1, days: {} }),
       this.readJSON(FILES.news,     { version: 1, fetchedAt: null, events: [] }),
       this.readJSON(FILES.wire,     { version: 1, fetchedAt: null, seenAt: null, items: [] }),
+      this.readJSON(FILES.lab,      defaultLab()),
     ]);
-    this.data = { accounts, trades, playbook, replay, outlooks, news, wire };
+    this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab };
     this.heal();
     this.migrate();
     applyTheme(this.theme, this.colours);
@@ -230,6 +233,7 @@ class Store {
       this.writeJSON(FILES.outlooks, outlooks),
       this.writeJSON(FILES.news, news),
       this.writeJSON(FILES.wire, wire),
+      this.writeJSON(FILES.lab, this.data.lab),
       this.ensureDir(SHOTS),
       this.writeText(MANIFEST, JSON.stringify({
         kind: 'quire-vault', version: 1, app: 'Quire',
@@ -428,6 +432,24 @@ class Store {
       d.wire.items = d.wire.items.filter(x => x && x.id && x.title && x.at && !isNaN(new Date(x.at)));
       if (d.wire.items.length !== n) note(); }
 
+    /* The Lab's rule sheets. A sheet saved by an older copy, or edited by
+       hand, is filled out to the current shape field by field — anything
+       it had is kept, anything it lacks arrives empty rather than guessed. */
+    if (!d.lab || typeof d.lab !== 'object') { d.lab = defaultLab(); note(); }
+    if (!Array.isArray(d.lab.firms)) { d.lab.firms = []; note(); }
+    d.lab.firms = d.lab.firms.filter(f => f && typeof f === 'object' && f.id);
+    for (const f of d.lab.firms) {
+      const blank = blankSheet(f.name || 'Firm');
+      for (const k of Object.keys(blank)) if (!(k in f)) { f[k] = blank[k]; note(); }
+      for (const part of ['eval', 'funded']) {
+        if (!f[part] || typeof f[part] !== 'object') { f[part] = blank[part]; note(); }
+        for (const k of Object.keys(blank[part])) if (!(k in f[part])) { f[part][k] = blank[part][k]; note(); }
+      }
+    }
+    if (!['live', 'forward', 'both'].includes(d.lab.source)) { d.lab.source = 'live'; note(); }
+    if (!d.lab.plan || typeof d.lab.plan !== 'object') { d.lab.plan = defaultLab().plan; note(); }
+    if (d.lab.firmId && !d.lab.firms.some(f => f.id === d.lab.firmId)) { d.lab.firmId = d.lab.firms[0]?.id || null; note(); }
+
     if (!d.outlooks || typeof d.outlooks !== 'object') { d.outlooks = { version: 1, days: {} }; note(); }
     if (!d.outlooks.days || typeof d.outlooks.days !== 'object') { d.outlooks.days = {}; note(); }
     /* A day whose instrument list is missing is a day with nothing written,
@@ -493,7 +515,7 @@ class Store {
   async save(which) {
     const map = { accounts: FILES.accounts, trades: FILES.trades, playbook: FILES.playbook,
                   replay: FILES.replay, outlooks: FILES.outlooks, news: FILES.news,
-                  wire: FILES.wire };
+                  wire: FILES.wire, lab: FILES.lab };
     await this.writeJSON(map[which], this.data[which]);
     this.emit();
   }
@@ -660,6 +682,7 @@ class Store {
   }
   get trades()        { return this.data.trades.trades; }
   get playbook()      { return this.data.playbook; }
+  get lab()           { return this.data.lab; }
   get replayWeeks()   { return this.data.replay.weeks; }
 
   /* ============================================================
@@ -691,6 +714,18 @@ class Store {
     return this.trades
       .filter(t => t.accountId === accountId && this.inScope(t))
       .sort((a, b) => (b.date + (b.timeClose || '')).localeCompare(a.date + (a.timeClose || '')));
+  }
+
+  /* Every trade on the account, live and forward test, open and closed,
+     whatever the Live / Forward test / All switch says.
+
+     One page asks for this: Weekly winrate, which exists to put your live
+     trading and your testing side by side, never added together. Following
+     the switch there would leave one of its two columns empty however it was
+     set — so it reads both and keeps them apart itself. Everything else still
+     goes through `tradesFor`. */
+  everyTradeFor(accountId) {
+    return this.trades.filter(t => t.accountId === accountId);
   }
 
   /* ============================================================
@@ -854,6 +889,22 @@ class Store {
     await this.save('accounts');
   }
 
+  /* An account, for good — with every trade in it and every chart those
+     trades carry. Archiving is how an account is put away; this is for one
+     you want gone. A trade left pointing at an account that no longer exists
+     would be a trade no page could show and no page could delete, so none
+     is left. Returns how many trades went with it. */
+  async deleteAccount(id) {
+    const doomed = this.trades.filter(t => t.accountId === id);
+    for (const t of doomed) for (const name of tradeShotsOf(t)) await this.dropImage(name);
+    this.data.trades.trades = this.trades.filter(t => t.accountId !== id);
+    this.data.accounts.accounts = this.allAccounts.filter(a => a.id !== id);
+    if (this.data.accounts.activeAccountId === id) this.data.accounts.activeAccountId = this.accounts[0]?.id || null;
+    await this.save('trades');
+    await this.save('accounts');
+    return doomed.length;
+  }
+
   async addTrade(t) {
     const trade = { id: 't_' + crypto.randomUUID().slice(0, 8), createdAt: new Date().toISOString(), ...t };
     this.data.trades.trades.push(trade);
@@ -983,6 +1034,13 @@ export function DEFAULT_SESSIONS() {
 }
 
 const PLAYBOOK_VERSION = 3;
+
+/* The Lab starts with no firms at all: the rules are yours to type in, and a
+   guessed firm would be a wrong number that looks right. */
+function defaultLab() {
+  return { version: 1, firms: [], firmId: null, source: 'live',
+           plan: { riskEval: null, riskFunded: null, months: 6 } };
+}
 
 function defaultPlaybook() {
   return {

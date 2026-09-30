@@ -1,7 +1,8 @@
-import { el, svg, icon } from '../ui.js';
+import { el, svg, icon, fitted } from '../ui.js';
 import * as c from '../calc.js';
+import { weeklyTab, weeklyControls } from './weekly.js';
 
-let tab = 'overview';       // overview | timing | discipline | year
+let tab = 'overview';       // overview | weekly | tags | timing | discipline | year
 let year = null;            // resolved on first paint to the latest year traded
 let period = '30D';
 const DAYS = { '7D': 7, '30D': 30, '90D': 90, 'All': null };
@@ -219,9 +220,12 @@ export function analytics(store, nav) {
   const all = store.tradesFor(acct.id);
 
   /* The year reads a whole year by definition, so the rolling window has
-     nothing to say on that tab and its own year control takes the slot. */
+     nothing to say on that tab and its own year control takes the slot. The
+     weekly page is the same: it walks through time a period at a time, so it
+     brings its own control and reads every trade itself. */
   const isYear = tab === 'year';
-  const trades = isYear ? all : withinPeriod(all);
+  const isWeekly = tab === 'weekly';
+  const trades = isYear || isWeekly ? all : withinPeriod(all);
   const s = c.summarise(acct, trades);
 
   const years = [...new Set(all.map(t => String(t.date).slice(0, 4)))].filter(Boolean).sort();
@@ -238,13 +242,17 @@ export function analytics(store, nav) {
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Analytics'),
     el('div', { class: 'seg', style: { marginLeft: '6px' } },
-      ...[['overview', 'Overview'], ['tags', 'Tags'], ['timing', 'Timing'], ['discipline', 'Discipline'], ['year', 'Year']].map(([k, label]) =>
+      ...[['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['discipline', 'Discipline'], ['year', 'Year']].map(([k, label]) =>
         el('button', { class: k === tab ? 'is-on' : '', onClick: () => { tab = k; nav.refresh(); } }, label))),
-    el('span', { class: 'sub' }, isYear
+    /* The weekly page brings a wider control than the others, so it gives up
+       the count here to make room for it. */
+    isWeekly ? null : el('span', { class: 'sub' }, isYear
       ? `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`
       : `${trades.length} closed trade${trades.length === 1 ? '' : 's'}`),
     el('div', { class: 'spacer' }),
-    isYear
+    isWeekly
+      ? weeklyControls(store, nav)
+      : isYear
       ? el('div', { class: 'stepper' },
           el('button', { onClick: () => stepYear(-1) }, icon('chevleft', 12, 'var(--grey-2)', 2.4)),
           el('span', { class: 'val', style: { minWidth: '52px' } }, year),
@@ -253,6 +261,8 @@ export function analytics(store, nav) {
           ...Object.keys(DAYS).map(k => el('button', { class: k === period ? 'is-on' : '',
             onClick: () => { period = k; nav.refresh(); } }, k))),
   );
+
+  if (isWeekly) return el('div', { class: 'view' }, head, weeklyTab(store, nav));
 
   if (!trades.length) {
     return el('div', { class: 'view' }, head,
@@ -912,31 +922,6 @@ function niceStep(peak) {
 }
 
 let yearChartSeq = 0;
-
-/* Draw to the space you actually have.
-
-   An SVG with a fixed viewBox stretched to the card's width is scaled, which
-   shrinks its type along with everything else and leaves whatever height it
-   does not want as dead space. Measuring first and drawing in real pixels
-   means the chart fills the card and 11px stays 11px. */
-function fitted(draw, minHeight = 240) {
-  const box = el('div', { style: { flex: '1', minHeight: minHeight + 'px', minWidth: 0 } });
-  let last = '';
-  const paint = () => {
-    const w = Math.round(box.clientWidth), h = Math.round(box.clientHeight);
-    if (!w || !h) return;
-    const key = w + 'x' + h;
-    if (key === last) return;
-    last = key;
-    box.replaceChildren(draw(w, h));
-  };
-  requestAnimationFrame(paint);
-  if (typeof ResizeObserver === 'function') {
-    const ro = new ResizeObserver(() => { box.isConnected ? paint() : ro.disconnect(); });
-    ro.observe(box);
-  }
-  return box;
-}
 
 /**
  * Twelve columns and, beneath them, the line they add up to.

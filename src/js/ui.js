@@ -72,6 +72,7 @@ const PATHS = {
   close:     '<path d="M6 6l12 12M18 6L6 18"/>',
   user:      '<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6"/>',
   upload:    '<path d="M12 16V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>',
+  lab:       '<path d="M9 3.5h6"/><path d="M10 3.5v5.8L4.6 18.6A1.7 1.7 0 0 0 6.1 21h11.8a1.7 1.7 0 0 0 1.5-2.4L14 9.3V3.5"/><path d="M7.3 15h9.4"/>',
   /* Six dots. Stroke-linecap is round, so a line of no length draws one. */
   grip:      '<path d="M9.5 6h.01M14.5 6h.01M9.5 12h.01M14.5 12h.01M9.5 18h.01M14.5 18h.01"/>',
 };
@@ -480,4 +481,30 @@ export function sortable(container, { onDrop, item = '[data-sortid]', grip = '[d
   });
 
   return container;
+}
+
+/* Draw to the space you actually have. Shared by the Year chart and The
+   Lab's charts.
+
+   An SVG with a fixed viewBox stretched to the card's width is scaled, which
+   shrinks its type along with everything else and leaves whatever height it
+   does not want as dead space. Measuring first and drawing in real pixels
+   means the chart fills the card and 11px stays 11px. */
+export function fitted(draw, minHeight = 240) {
+  const box = el('div', { style: { flex: '1', minHeight: minHeight + 'px', minWidth: 0 } });
+  let last = '';
+  const paint = () => {
+    const w = Math.round(box.clientWidth), h = Math.round(box.clientHeight);
+    if (!w || !h) return;
+    const key = w + 'x' + h;
+    if (key === last) return;
+    last = key;
+    box.replaceChildren(draw(w, h));
+  };
+  requestAnimationFrame(paint);
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(() => { box.isConnected ? paint() : ro.disconnect(); });
+    ro.observe(box);
+  }
+  return box;
 }
