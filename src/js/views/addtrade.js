@@ -730,7 +730,19 @@ export function addTrade(store, nav, existingId = null) {
   paintStatus();
   recompute();
 
-  return el('div', { class: 'view', onPaste }, head, strip, form);
+  /* The paste is listened for on the whole document, not on this view. Adding
+     a chart repaints the box, and the button that had focus goes with it —
+     focus falls back to the page body, which sits above this view, so a
+     paste from there never reached a listener down here. That was the third
+     Ctrl+V that did nothing. The listener retires itself once this view has
+     been replaced, so a paste on another page is never taken here. */
+  const view = el('div', { class: 'view' }, head, strip, form);
+  const onDocPaste = e => {
+    if (!view.isConnected) { document.removeEventListener('paste', onDocPaste); return; }
+    onPaste(e);
+  };
+  document.addEventListener('paste', onDocPaste);
+  return view;
 }
 
 /* Prices, sizes and the dollar result all go through the same forgiving

@@ -12,6 +12,7 @@ import { shotName, urlFor, forgetUrl } from './shots.js';
 import { fs, isTauri } from './fs.js';
 import { zip, unzip, bytesOfText, textOfBytes } from './vault.js';
 import { blankSheet } from './lab.js';
+import { blankRules } from './ghost.js';
 export { todayISO, isTauri };
 
 /* ============================================================
@@ -449,6 +450,19 @@ class Store {
     if (!['live', 'forward', 'both'].includes(d.lab.source)) { d.lab.source = 'live'; note(); }
     if (!d.lab.plan || typeof d.lab.plan !== 'object') { d.lab.plan = defaultLab().plan; note(); }
     if (d.lab.firmId && !d.lab.firms.some(f => f.id === d.lab.firmId)) { d.lab.firmId = d.lab.firms[0]?.id || null; note(); }
+    /* The ghost's rules: whatever is missing starts off, and a list that is
+       not a list becomes an empty one rather than a page that throws. */
+    if (!d.lab.ghost || typeof d.lab.ghost !== 'object') { d.lab.ghost = blankRules(); note(); }
+    /* The Monte Carlo's three settings: risk a trade (null = the account's
+       own), how many trades ahead, and the drawdown you would accept. */
+    if (!d.lab.mc || typeof d.lab.mc !== 'object') { d.lab.mc = defaultLab().mc; note(); }
+    if (d.lab.mc.risk != null && !(Number(d.lab.mc.risk) > 0)) { d.lab.mc.risk = null; note(); }
+    if (![50, 100, 250, 500].includes(d.lab.mc.horizon)) { d.lab.mc.horizon = 100; note(); }
+    if (!(Number(d.lab.mc.ddLimit) > 0 && Number(d.lab.mc.ddLimit) <= 90)) { d.lab.mc.ddLimit = 10; note(); }
+    for (const [k, v] of Object.entries(blankRules())) {
+      if (!(k in d.lab.ghost)) { d.lab.ghost[k] = v; note(); }
+      else if (Array.isArray(v) && !Array.isArray(d.lab.ghost[k])) { d.lab.ghost[k] = []; note(); }
+    }
 
     if (!d.outlooks || typeof d.outlooks !== 'object') { d.outlooks = { version: 1, days: {} }; note(); }
     if (!d.outlooks.days || typeof d.outlooks.days !== 'object') { d.outlooks.days = {}; note(); }
@@ -1039,7 +1053,8 @@ const PLAYBOOK_VERSION = 3;
    guessed firm would be a wrong number that looks right. */
 function defaultLab() {
   return { version: 1, firms: [], firmId: null, source: 'live',
-           plan: { riskEval: null, riskFunded: null, months: 6 } };
+           plan: { riskEval: null, riskFunded: null, months: 6 }, ghost: blankRules(),
+           mc: { risk: null, horizon: 100, ddLimit: 10 } };
 }
 
 function defaultPlaybook() {

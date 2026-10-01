@@ -17,6 +17,9 @@
 import { el, svg, icon, toast, confirmButton, fitted } from '../ui.js';
 import * as c from '../calc.js';
 import * as L from '../lab.js';
+import { ghostPage } from './ghost.js';
+import { mcPage } from './montecarlo.js';
+import { ticks, hoverLayer, readRow } from './chartkit.js';
 
 let cache = null;          // { sig, result } — kept across repaints and pages
 let running = null;        // { sig, cancel }
@@ -52,7 +55,27 @@ export function lab(store, nav, sub) {
          : state.source === 'both' ? all : all.filter(t => !isFwd(t));
   };
   const ctx = { store, nav, acct, state, save, firm, plan, pick };
-  return sub === 'rules' ? rulesPage(ctx) : answerPage(ctx);
+  ctx.head = (which, ...extra) => labHead(ctx, which, extra);
+  return sub === 'rules' ? rulesPage(ctx) : sub === 'ghost' ? ghostPage(ctx)
+       : sub === 'prop' ? answerPage(ctx) : mcPage(ctx);
+}
+
+/* The Lab's header, shared by its two tools: which tool, which trades, and
+   whatever the tool itself needs at the right-hand end. */
+function labHead(ctx, which, extra) {
+  const { state, save, nav } = ctx;
+  return el('header', { class: 'head' },
+    el('h1', {}, 'The Lab'),
+    el('div', { class: 'seg lab-views', role: 'tablist', 'aria-label': 'Tool' },
+      ...[['mc', 'Monte Carlo', '#/lab'], ['prop', 'Prop firm', '#/lab/prop'], ['ghost', 'Ghost', '#/lab/ghost']].map(([k, label, href]) =>
+        el('button', { class: which === k ? 'is-on' : '', role: 'tab', 'aria-selected': String(which === k),
+          onClick: () => { if (which !== k) nav.go(href); } }, label))),
+    ...extra.slice(0, 1),
+    el('div', { class: 'spacer' }),
+    el('div', { class: 'seg lab-source', role: 'group', 'aria-label': 'Which trades' },
+      ...SOURCES.map(([v, label]) => el('button', { class: state.source === v ? 'is-on' : '',
+        onClick: async () => { if (state.source === v) return; state.source = v; await save(); nav.refresh(); } }, label))),
+    ...extra.slice(1));
 }
 
 /* ============================================================
@@ -64,17 +87,12 @@ function answerPage(ctx) {
   const strip = el('div', { class: 'lab-strip' });
 
   const sheet = firm();
-  const head = el('header', { class: 'head' },
-    el('h1', {}, 'The Lab'),
+  const head = ctx.head('prop',
     state.firms.length > 1
       ? el('select', { class: 'field lab-firm', 'aria-label': 'Firm',
           onChange: e => { state.firmId = e.target.value; save(); nav.refresh(); } },
           ...state.firms.map(f => el('option', { value: f.id, selected: f.id === sheet?.id }, f.name || 'Untitled')))
       : sheet ? el('span', { class: 'lab-firmname' }, sheet.name) : null,
-    el('div', { class: 'spacer' }),
-    el('div', { class: 'seg lab-source', role: 'group', 'aria-label': 'Which trades' },
-      ...SOURCES.map(([v, label]) => el('button', { class: state.source === v ? 'is-on' : '',
-        onClick: async () => { if (state.source === v) return; state.source = v; await save(); nav.refresh(); } }, label))),
     el('button', { class: 'btn btn-quiet lab-rules-btn', onClick: () => nav.go('#/lab/rules') },
       icon('pencil', 13, 'var(--ink-2)', 1.8), 'Rules'));
 
@@ -178,47 +196,6 @@ function answer(R, sample, sheet, p) {
 }
 
 /* ---------- shared chart pieces ---------- */
-
-/* Round steps for an axis: 1, 2 or 5 of a power of ten. */
-function ticks(lo, hi, want = 5) {
-  const span = hi - lo || 1;
-  const raw = span / want, mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 5, 10].map(m => m * mag).find(s => span / s <= want + 1) || 10 * mag;
-  const out = [];
-  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
-  return out;
-}
-
-/* A crosshair and a readout, driven by one transparent layer over the plot.
-   The readout is HTML laid over the SVG, so its type is crisp and it can be
-   kept inside the card whatever the width. */
-function hoverLayer(wrap, g, plot, onMove) {
-  const line = svg('line', { class: 'lab-cross', x1: 0, x2: 0, y1: plot.t, y2: plot.b, visibility: 'hidden' });
-  const dot = svg('circle', { class: 'lab-cross-dot', r: 4, visibility: 'hidden' });
-  const hit = svg('rect', { x: plot.l, y: plot.t, width: plot.r - plot.l, height: plot.b - plot.t, fill: 'transparent', class: 'lab-hit' });
-  const read = el('div', { class: 'lab-read', hidden: true });
-  g.append(line, dot, hit);
-  wrap.append(read);
-  const hide = () => { line.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); read.hidden = true; };
-  hit.addEventListener('pointerleave', hide);
-  hit.addEventListener('pointermove', e => {
-    const box = hit.getBoundingClientRect();
-    const x = plot.l + (e.clientX - box.left) * ((plot.r - plot.l) / box.width);
-    const o = onMove(Math.max(plot.l, Math.min(plot.r, x)));
-    if (!o) return hide();
-    line.setAttribute('x1', o.x); line.setAttribute('x2', o.x); line.setAttribute('visibility', 'visible');
-    if (o.y != null) { dot.setAttribute('cx', o.x); dot.setAttribute('cy', o.y); dot.setAttribute('visibility', 'visible'); }
-    else dot.setAttribute('visibility', 'hidden');
-    read.replaceChildren(...o.rows);
-    read.hidden = false;
-    /* Beside the crosshair, flipping to the other side near the edge. One
-       SVG unit is one pixel here, so x needs no scaling. */
-    const w = wrap.clientWidth, rw = read.offsetWidth;
-    const left = o.x + 12 + rw > w - 4 ? o.x - rw - 12 : o.x + 12;
-    read.style.left = Math.max(4, Math.min(w - rw - 4, left)) + 'px';
-  });
-}
-const readRow = (cls, value, label) => el('div', { class: 'r' }, cls ? el('i', { class: cls }) : null, el('b', {}, value), el('span', {}, label));
 
 /* ---------- the evaluation, account by account ----------
    Ninety accounts drawn as they went: each a line from the day you start to
@@ -486,12 +463,12 @@ function rulesPage(ctx) {
   const status = el('span', { class: 'lab-status' });
 
   const head = el('header', { class: 'head' },
-    el('button', { class: 'lab-back', title: 'Back to The Lab', 'aria-label': 'Back to The Lab', onClick: () => nav.go('#/lab') },
+    el('button', { class: 'lab-back', title: 'Back to The Lab', 'aria-label': 'Back to The Lab', onClick: () => nav.go('#/lab/prop') },
       icon('chevleft', 15, 'var(--grey-1)', 2)),
     el('h1', {}, 'Rules'),
     status,
     el('div', { class: 'spacer' }),
-    el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/lab') }, 'Done'));
+    el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/lab/prop') }, 'Done'));
 
   function paintStatus() {
     const f = firm();

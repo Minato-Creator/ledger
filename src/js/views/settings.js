@@ -11,6 +11,9 @@ import { toCSV } from '../csv.js';
 import { BACKGROUNDS } from '../backgrounds.js';
 import { accountActions } from './accountActions.js';
 
+/* Which colour menu is open. Kept out here so a redraw does not shut it. */
+const openColour = { profit: false, loss: false };
+
 const COLOURS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'JPY'];
 
@@ -263,35 +266,100 @@ export function settings(store, nav) {
   /* ============================================================
      Appearance
      ============================================================ */
-  /* Named colours people actually reach for, one row each, ending in a
-     neutral pair for anyone who wants the numbers to carry no colour at all. */
-  const PROFIT_COLOURS = [
-    ['#18AC65', 'Green'], ['#22C55E', 'Bright green'], ['#00C48C', 'Emerald'],
-    ['#0EA5A5', 'Teal'],  ['#0988F0', 'Blue'],        ['#7C5CFF', 'Purple'],
-    ['#FFB800', 'Yellow'], ['#E9E9E9', 'White'],      ['#3D3D3D', 'Black'],
+  /* One palette for both. Any colour can mean profit and any can mean loss —
+     a red profit is your call — so the two menus offer exactly the same
+     choices, grouped by family so the right one is quick to find. White and
+     Black keep the values they always had, so a saved choice still finds its
+     name. */
+  const PALETTE = [
+    ['Greens',  [['#34D399', 'Mint'], ['#22C55E', 'Bright green'], ['#18AC65', 'Green'], ['#00C48C', 'Emerald'],
+                 ['#84CC16', 'Lime'], ['#8FB996', 'Sage'], ['#6B8E23', 'Olive'], ['#15803D', 'Forest']]],
+    ['Blues',   [['#2DD4BF', 'Aqua'], ['#0EA5A5', 'Teal'], ['#0F766E', 'Sea'], ['#06B6D4', 'Cyan'],
+                 ['#38BDF8', 'Sky'], ['#0988F0', 'Blue'], ['#2563EB', 'Royal'], ['#1E3A8A', 'Navy']]],
+    ['Purples', [['#A78BFA', 'Lavender'], ['#7C5CFF', 'Purple'], ['#4F46E5', 'Indigo'], ['#6D28D9', 'Grape'],
+                 ['#A855F7', 'Violet'], ['#7E22CE', 'Plum'], ['#D946EF', 'Orchid'], ['#C084FC', 'Lilac']]],
+    ['Pinks',   [['#F9A8D4', 'Blush'], ['#FB7185', 'Pink'], ['#EC4899', 'Hot pink'], ['#DB2777', 'Magenta'],
+                 ['#F43F5E', 'Rose'], ['#BE185D', 'Berry']]],
+    ['Reds',    [['#FA8072', 'Salmon'], ['#F4624A', 'Coral'], ['#E5342B', 'Red'], ['#DC143C', 'Crimson'],
+                 ['#B3261E', 'Deep red'], ['#7F1D1D', 'Maroon']]],
+    ['Oranges', [['#FDBA74', 'Peach'], ['#FB923C', 'Tangerine'], ['#F97316', 'Orange'], ['#C2410C', 'Rust'],
+                 ['#F59E0B', 'Amber'], ['#FFB800', 'Yellow'], ['#FDE047', 'Lemon'], ['#EAB308', 'Gold'], ['#CA8A04', 'Mustard']]],
+    ['Browns',  [['#D2B48C', 'Tan'], ['#C2B280', 'Sand'], ['#A47148', 'Caramel'], ['#8C5A3C', 'Brown'], ['#5C3A21', 'Chocolate']]],
+    ['Greys',   [['#F5F5F5', 'Snow'], ['#E9E9E9', 'White'], ['#D4D4D4', 'Silver'], ['#B0B0B0', 'Light grey'],
+                 ['#A8A29E', 'Warm grey'], ['#94A3B8', 'Cool grey'], ['#9A9A9A', 'Grey'], ['#7A7A7A', 'Mid grey'],
+                 ['#64748B', 'Slate'], ['#5A5A5A', 'Steel'], ['#4A4A4A', 'Graphite'], ['#3D3D3D', 'Black'], ['#1F1F1F', 'Jet']]],
   ];
-  const LOSS_COLOURS = [
-    ['#F4624A', 'Coral'],  ['#E5342B', 'Red'],        ['#B3261E', 'Deep red'],
-    ['#FB7185', 'Pink'],   ['#F97316', 'Orange'],     ['#8C5A3C', 'Brown'],
-    ['#A855F7', 'Violet'], ['#E9E9E9', 'White'],      ['#3D3D3D', 'Black'],
-  ];
+  const nameOfColour = hex => PALETTE.flatMap(([, xs]) => xs).find(([h]) => h.toLowerCase() === String(hex).toLowerCase())?.[1];
 
-  const swatches = (which, options, current) =>
-    el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '7px' } },
-      ...options.map(([hex, name]) => el('button', {
-        title: name,
-        style: { width: '24px', height: '24px', borderRadius: '8px', background: hex,
-                 boxShadow: current.toLowerCase() === hex.toLowerCase()
-                   ? '0 0 0 2px var(--card), 0 0 0 3.5px var(--ink)'
-                   : 'inset 0 0 0 1px rgba(128,128,128,.35)' },
-        onClick: async () => { await store.setColour(which, hex); nav.refresh(); } })));
+  /* A dropdown each, built the same way as the profile colour's: the button
+     shows the colour, its name and a figure written in it; the menu is the
+     whole palette, and a click anywhere else closes it. */
+  const painters = {};
+  function colourPick(which) {
+    const wrap = el('div', { class: 'drop pnl-drop', 'data-which': which });
+    const away = e => {
+      if (!wrap.isConnected) return stop();
+      if (e.type === 'keydown' && e.key !== 'Escape') return;
+      if (e.type === 'pointerdown' && wrap.contains(e.target)) return;
+      openColour[which] = false; paint();
+    };
+    const stop = () => {
+      document.removeEventListener('pointerdown', away, true);
+      document.removeEventListener('keydown', away, true);
+    };
+    function paint() {
+      const current = store.colours[which];
+      const isOn = hex => hex.toLowerCase() === current.toLowerCase();
+      wrap.replaceChildren(
+        el('button', { type: 'button', class: 'b' + (openColour[which] ? ' is-open' : ''),
+          onClick: () => {
+            const was = openColour[which];
+            for (const k of Object.keys(openColour)) if (openColour[k]) { openColour[k] = false; if (k !== which) painters[k]?.(); }
+            openColour[which] = !was; paint();
+          } },
+          el('span', { class: 'pnl-sw', style: { background: current } }),
+          el('span', { class: 'n' }, nameOfColour(current) || current.toUpperCase()),
+          el('span', { class: 'pnl-ex', style: { color: current } }, which === 'profit' ? '+1.00R' : '−1.00R'),
+          el('span', { class: 'c' }, '▾')),
+        el('div', { class: 'drop-menu pnl-menu', hidden: !openColour[which] },
+          el('div', { class: 'pnl-now' }, el('span', { class: 'pnl-now-sw', style: { background: current } }),
+            el('span', { class: 'pnl-now-n' }, nameOfColour(current) || current.toUpperCase()),
+            el('span', { class: 'pnl-now-ex', style: { color: current } }, which === 'profit' ? '+$1,250' : '\u2212$1,250')),
+          ...PALETTE.map(([family, xs]) => el('div', { class: 'pnl-fam' },
+            el('span', { class: 'pnl-fam-n' }, family),
+            el('div', { class: 'pnl-grid' }, ...xs.map(([hex, name]) => el('button', {
+              type: 'button', title: name, class: 'pnl-opt' + (isOn(hex) ? ' is-on' : ''), style: { background: hex },
+              /* Pointing at one previews it at the top: its name, and a figure in it. */
+              onPointerenter: () => preview(hex, name),
+              onPointerleave: () => preview(current, nameOfColour(current) || current.toUpperCase()),
+              onClick: async () => {
+                openColour[which] = false;
+                if (!isOn(hex)) await store.setColour(which, hex);
+                nav.refresh();
+              } },
+              isOn(hex) ? icon('check', 11, c.inkOn(hex), 2.6) : null)))))));
+      stop();
+      function preview(hex, name) {
+        const now = wrap.querySelector('.pnl-now');
+        if (!now) return;
+        now.querySelector('.pnl-now-sw').style.background = hex;
+        now.querySelector('.pnl-now-n').textContent = name;
+        now.querySelector('.pnl-now-ex').style.color = hex;
+      }
+      if (openColour[which]) {
+        document.addEventListener('pointerdown', away, true);
+        document.addEventListener('keydown', away, true);
+      }
+    }
+    painters[which] = paint;
+    paint();
+    return wrap;
+  }
 
-  const swatchRow = (label, sample, node, example = '+1.00R') =>
-    el('div', {},
-      el('div', { style: { display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '10px' } },
-        el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, label),
-        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: sample } }, example)),
-      node);
+  const colourRow = (label, which) =>
+    el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, label),
+      el('div', { style: { marginLeft: 'auto' } }, colourPick(which)));
 
   /* Whose journal this is. Saved as you leave the field rather than on every
      keystroke, so the sidebar does not redraw itself letter by letter. */
@@ -408,9 +476,9 @@ export function settings(store, nav) {
           el('span', { class: 'name' }, b.name))))),
 
     el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
-    el('div', { style: { display: 'flex', flexDirection: 'column', gap: '18px' } },
-      swatchRow('Profit', 'var(--profit)', swatches('profit', PROFIT_COLOURS, store.colours.profit)),
-      swatchRow('Loss', 'var(--loss)', swatches('loss', LOSS_COLOURS, store.colours.loss), '\u22121.00R')),
+    el('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+      colourRow('Profit colour', 'profit'),
+      colourRow('Loss colour', 'loss')),
   );
 
   return el('div', { class: 'view' }, head,

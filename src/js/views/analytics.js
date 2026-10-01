@@ -1,6 +1,8 @@
 import { el, svg, icon, fitted } from '../ui.js';
 import * as c from '../calc.js';
 import { weeklyTab, weeklyControls } from './weekly.js';
+import { overviewTab } from './an-overview.js';
+import { timingTab } from './an-timing.js';
 
 let tab = 'overview';       // overview | weekly | tags | timing | discipline | year
 let year = null;            // resolved on first paint to the latest year traded
@@ -12,134 +14,6 @@ function withinPeriod(trades) {
   if (!days) return trades;
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
   return trades.filter(t => t.date >= cutoff.toISOString().slice(0, 10));
-}
-
-/* Group trades and total them. Every field here is a sum or a count of
-   something you typed — nothing is inferred. */
-function groupBy(account, trades, keyFn, labelFn) {
-  const map = new Map();
-  for (const t of trades) {
-    const k = keyFn(t);
-    const g = map.get(k) || { key: k, label: labelFn(t, k), net: 0, count: 0, wins: 0, losses: 0, breakevens: 0, r: 0, rKnown: true };
-    g.net += Number(t.netResult) || 0;
-    g.count += 1;
-    const r = c.rMultiple(account, t);
-    if (r != null && isFinite(r)) g.r += r; else g.rKnown = false;
-    g[{ win: 'wins', loss: 'losses', breakeven: 'breakevens' }[c.outcome(t)]] += 1;
-    map.set(k, g);
-  }
-  for (const g of map.values()) if (!g.rKnown) g.r = null;
-  return [...map.values()].sort((a, b) => b.net - a.net);
-}
-
-function barList(groups, ctx, { showRate = false } = {}) {
-  const { unit: u, account: acct } = ctx;
-  const val = g => c.figValue(u, acct, g.net, g.r) ?? 0;
-  const peak = Math.max(1, ...groups.map(g => Math.abs(val(g))));
-  return el('div', { style: { marginTop: '18px', display: 'flex', flexDirection: 'column', gap: '15px' } },
-    ...groups.map(g => {
-      const decided = g.wins + g.losses;
-      return el('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } },
-        el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
-          el('span', { class: 'm', style: { fontSize: '12px', color: 'var(--ink-2)' } }, g.label),
-          el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } },
-            showRate && decided ? `${g.count} · ${Math.round(g.wins / decided * 100)}%` : String(g.count)),
-          el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12px',
-            color: g.net > 0 ? 'var(--green)' : g.net < 0 ? 'var(--orange)' : 'var(--grey-2)' } },
-            c.fig(u, acct, g.net, g.r, { decimals: 0, rDecimals: 1 }))),
-        el('div', { style: { height: '8px', borderRadius: '4px', background: 'var(--grey-9)', overflow: 'hidden' } },
-          el('div', { class: 'bar-fill', style: { width: (Math.abs(val(g)) / peak * 100) + '%', height: '100%', borderRadius: '4px',
-            background: g.net >= 0 ? 'var(--green)' : 'var(--orange)' } })));
-    }),
-    groups.length ? null : el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Nothing to group yet.'),
-  );
-}
-
-/* ---------- a diverging column chart, used for hour of day ----------
-
-   Two things it has to get right that the obvious version gets wrong.
-
-   The baseline is placed by the data, not fixed. A day of small wins and one
-   large loss is a real shape, and pinning the zero line to the middle either
-   crushes the losses into a stub or wastes half the panel. The gains and the
-   losses share the panel in proportion to how big they actually are.
-
-   And a value never lands on a label. A loss reads below its own column, an
-   hour reads below the axis, and the two used to meet in the middle. The rows
-   are now allotted their own space and the value is clamped out of them. */
-/**
- * Net result per time bucket, above and below a shared baseline.
- *
- * Drawn at the size it is displayed at. It used to be drawn on a fixed
- * 1120-unit canvas and stretched to fit the card, which on a wide window
- * scaled everything by about half again — a 13px label came out near 19px and
- * the bars turned into slabs. One SVG unit is one CSS pixel here, so a size
- * written in this function is the size on the glass.
- */
-function divergingColumns(buckets, ctx, { width = 1120, height = 236 } = {}) {
-  const { unit: u, account: acct } = ctx;
-  const val = b => c.figValue(u, acct, b.net, b.r) ?? 0;
-  const g = svg('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height: '100%',
-                         style: 'display:block' });
-
-  const plotTop = 10, plotBottom = height - 52;  // everything below this belongs to the labels
-  const HOUR_Y = height - 28, COUNT_Y = height - 11;
-  const values = buckets.map(val);
-  const maxUp = Math.max(0, ...values);
-  const maxDown = Math.max(0, ...values.map(v => -v));
-  const span = plotBottom - plotTop;
-
-  /* Whichever side exists gets room in proportion to its size, with a floor so
-     one small loss among big wins is still a visible mark rather than a line. */
-  let upRoom;
-  if (!maxDown) upRoom = span;
-  else if (!maxUp) upRoom = 0;
-  else upRoom = Math.min(span - 34, Math.max(34, span * (maxUp / (maxUp + maxDown))));
-  const baseline = plotTop + upRoom;
-
-  const x0 = 18, plotSpan = width - x0 - 12;
-  const gap = plotSpan / buckets.length;
-  /* Thin marks. A column is a quantity, not a panel — capped so a chart with
-     three busy hours in it does not turn them into slabs. */
-  const bw = Math.min(46, gap * .52);
-
-  g.append(svg('line', { x1: x0, y1: plotTop, x2: width - 12, y2: plotTop, stroke: 'var(--grey-9)', 'stroke-width': 1 }));
-  g.append(svg('line', { x1: x0, y1: baseline, x2: width - 12, y2: baseline, stroke: 'var(--grey-7)', 'stroke-width': 1 }));
-
-  /* Every figure is written outside its column, the same rule the year chart
-     follows and for the same reason: a number printed inside a bar has to fit
-     inside a bar, and "−$2,390" does not fit in a 46px mark. The bands are
-     shortened by a line's height so a label always has somewhere to go. */
-  const LABEL = 15;
-  const upBand = Math.max(4, (baseline - plotTop) - LABEL);
-  const downBand = Math.max(4, (plotBottom - baseline) - LABEL);
-
-  buckets.forEach((b, i) => {
-    const v = val(b);
-    const cx = x0 + gap * i + gap / 2;
-    const up = v >= 0;
-    const band = up ? upBand : downBand;
-    const h = v === 0 ? 2 : Math.max(3, Math.abs(v) / (up ? maxUp : maxDown) * band);
-    const top = up ? baseline - h : baseline;
-
-    g.append(svg('rect', { class: 'col-fill-svg', x: cx - bw / 2, y: top, width: bw, height: h, rx: 4,
-                           fill: v === 0 ? 'var(--grey-6)' : up ? 'var(--profit)' : 'var(--loss)' }));
-
-    if (b.count) {
-      const y = up ? top - 6 : top + h + 13;
-      g.append(svg('text', { x: cx, y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
-                             'font-size': 11, fill: v === 0 ? 'var(--grey-4)' : up ? 'var(--profit)' : 'var(--loss)' },
-                   c.fig(u, acct, b.net, b.r, { decimals: 0, rDecimals: 1 })));
-    }
-
-    /* The hour always; the count only where there is one, so an empty stretch
-       of the day reads as empty rather than as a row of zeroes. */
-    g.append(svg('text', { x: cx, y: HOUR_Y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
-                           'font-size': 10.5, fill: b.count ? 'var(--grey-4)' : 'var(--grey-6)' }, b.label));
-    if (b.count) g.append(svg('text', { x: cx, y: COUNT_Y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
-                           'font-size': 9.5, fill: 'var(--grey-6)' }, String(b.count)));
-  });
-  return g;
 }
 
 /* ============================================================
@@ -246,10 +120,11 @@ export function analytics(store, nav) {
         el('button', { class: k === tab ? 'is-on' : '', onClick: () => { tab = k; nav.refresh(); } }, label))),
     /* The weekly page brings a wider control than the others, so it gives up
        the count here to make room for it. */
-    isWeekly ? null : el('span', { class: 'sub' }, isYear
+    isWeekly || tab === 'tags' ? null : el('span', { class: 'sub' }, isYear
       ? `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`
       : `${trades.length} closed trade${trades.length === 1 ? '' : 's'}`),
     el('div', { class: 'spacer' }),
+    tab === 'tags' ? tagMinControl(nav) : null,
     isWeekly
       ? weeklyControls(store, nav)
       : isYear
@@ -274,9 +149,9 @@ export function analytics(store, nav) {
   }
 
   const ctx = { unit: store.displayUnit, account: acct, cur, nav };
-  const body = tab === 'overview' ? overview(store, acct, trades, s, ctx)
+  const body = tab === 'overview' ? overviewTab(store, acct, trades, s, ctx)
              : tab === 'tags'     ? tagsTab(store, acct, trades, s, ctx)
-             : tab === 'timing'   ? timing(store, acct, trades, ctx)
+             : tab === 'timing'   ? timingTab(store, acct, trades, ctx)
              : tab === 'year'     ? yearly(store, acct, all, ctx)
              :                      discipline(store, acct, trades, ctx);
   return el('div', { class: 'view' }, head, body);
@@ -303,63 +178,6 @@ function tagRollup(store, acct, trades) {
     .sort((a, b) => a.net - b.net);
 }
 
-function overview(store, acct, trades, s, ctx) {
-  const { unit: u, cur } = ctx;
-  const f = (d, r, o) => c.fig(u, acct, d, r, o);
-  const dist = c.rDistribution(acct, trades);
-  const peak = Math.max(1, ...dist.map(d => d.count));
-
-  const chart = el('div', { class: 'card', style: { width: '780px', flex: 'none', padding: '24px 28px 18px' } },
-    el('h2', {}, 'R-multiple distribution'),
-    el('div', { style: { flex: '1', minHeight: 0, marginTop: '20px', display: 'flex', alignItems: 'flex-end', gap: '14px' } },
-      ...dist.map(d => el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '9px' } },
-        el('span', { class: 'm', style: { fontSize: '11px', color: d.count ? 'var(--ink)' : 'var(--grey-5)' } }, String(d.count)),
-        el('div', { class: 'col-fill', style: { width: '100%', height: Math.max(3, d.count / peak * 200) + 'px', borderRadius: '5px 5px 2px 2px',
-          background: d.count === 0 ? 'var(--grey-9)' : d.sign === 'win' ? 'var(--green)' : d.sign === 'loss' ? 'var(--orange)' : 'var(--grey-4)' } })))),
-    el('div', { style: { display: 'flex', gap: '14px', paddingTop: '10px', borderTop: '1px solid var(--grey-7)', marginTop: '10px' } },
-      ...dist.map(d => el('span', { class: 'm', style: { flex: '1', textAlign: 'center', fontSize: '11px', color: 'var(--grey-5)' } }, d.key))),
-  );
-
-  const row = (k, v) => el('div', { style: { display: 'flex', alignItems: 'baseline' } },
-    el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-6)' } }, k),
-    el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: 'var(--grey-8)' } }, v));
-
-  const expectancy = el('div', { class: 'card light', style: { flex: '1', minWidth: 0 } },
-    el('div', { class: 'eyebrow' }, 'Expectancy'),
-    el('div', { class: 'kpi-val', style: { marginTop: '14px' } }, f(s.expectancy, s.expectancyR)),
-    el('div', { class: 'm', style: { marginTop: '8px', fontSize: '11.5px', color: 'var(--grey-6)' } }, 'per trade'),
-    el('div', { style: { marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '12px' } },
-      row('Average win', s.avgWin == null ? '—' : `${f(s.avgWin, s.avgWinR)}  ×${s.wins}`),
-      row('Average loss', s.avgLoss == null ? '—' : `${f(-s.avgLoss, s.avgLossR == null ? null : -s.avgLossR)}  ×${s.losses}`),
-      row('Break-even', String(s.breakevens)),
-      row('Payoff ratio', s.payoff == null ? '—' : s.payoff.toFixed(2) + ' : 1'),
-      row('Profit factor', (s.profitFactor == null || !isFinite(s.profitFactor)) ? '—' : s.profitFactor.toFixed(2)),
-      row('Average R', c.rFmt(s.avgR)),
-      row('Break even at', s.breakEvenWinRate == null ? '—' : c.pct(s.breakEvenWinRate) + ' win rate')),
-  );
-
-  const setups = groupBy(acct, trades, t => t.setupId || '_none',
-    t => store.playbook.setups.find(x => x.id === t.setupId)?.name || 'No setup');
-  const pairs = groupBy(acct, trades, t => (t.pair || '—').toUpperCase(), (t, k) => k);
-
-  const bySetup = el('div', { class: 'card', style: { flex: '1', minWidth: 0 } },
-    el('h2', {}, 'By setup'),
-    barList(setups, ctx, { showRate: true }));
-
-  const byPair = el('div', { class: 'card', style: { flex: '1', minWidth: 0 } },
-    el('h2', {}, 'By instrument'),
-    barList(pairs, ctx));
-
-  /* Tags used to sit here beside setups and instruments. They have a page of
-     their own now: one bar each was the shallowest possible reading of them,
-     and the question they answer — which kinds of trade actually pay — needs
-     a win rate, a sample size and an expectancy, not a length. */
-  return el('div', { class: 'view' },
-    el('section', { class: 'row', style: { height: '380px', flex: 'none' } }, chart, expectancy),
-    el('section', { class: 'row', style: { flex: '1', alignItems: 'flex-start', minHeight: 0, overflowY: 'auto' } },
-      bySetup, byPair));
-}
-
 /* ============================================================
    Tags — which kinds of trade actually pay
 
@@ -371,12 +189,12 @@ function overview(store, acct, trades, s, ctx) {
      beside its win rate, and the two are read together.
 
    • A sample of one is not evidence. Anything under the threshold is dimmed
-     and kept out of the tiles at the top — shown, because hiding your own
-     data is worse, but never allowed to look like a finding.
+     — shown, because hiding your own data is worse, but never allowed to
+     look like a finding.
 
-   • A number needs something to be better than. Each tag is set against your
-     own win rate over the same window, in points, so "62%" becomes "eight
-     points better than you usually do" or "two points worse".
+   • A number needs something to be better than. Pointing at a tag sets it
+     against your own win rate over the same window, in points, so "62%"
+     becomes "eight points better than you usually do" or "two points worse".
 
    A trade carries several tags at once, so the groups do not add up to the
    account and are not meant to. That is said on the page rather than left to
@@ -387,30 +205,42 @@ let tagSort = 'edge';
    rather than a rule — some groups fill up slowly — but the page should not
    open by calling three wins in a row an edge. */
 let tagMin = 5;
+/* Groups folded away, by id. Kept while the app is open. */
+const tagShut = new Set();
 
-const TAG_SORTS = [
-  ['edge',  'Expectancy'],
-  ['win',   'Win rate'],
-  ['count', 'Trades'],
-  ['total', 'Total R'],
-  ['name',  'Name'],
+/* The column names are the sort. Clicking the one already on does nothing. */
+const TAG_COLS = [
+  ['name',  'Tag',        ''],
+  ['count', 'Trades',     'r'],
+  ['win',   'Win',        'r'],
+  ['edge',  'Per trade',  'c'],
+  [null,    '',           ''],
+  ['total', 'Total',      'r'],
 ];
 
-/** One horizontal bar of wins, losses and break-evens, in that order. */
-function splitBar(st) {
-  const total = st.wins + st.losses + st.breakevens;
-  if (!total) return el('span', { class: 'tg-split' });
-  const seg = (n, cls) => n
-    ? el('span', { class: 'tg-seg ' + cls, style: { flex: String(n) } })
-    : null;
-  return el('span', { class: 'tg-split',
-    title: `${st.wins} won · ${st.losses} lost · ${st.breakevens} break-even` },
-    seg(st.wins, 'is-win'), seg(st.losses, 'is-loss'), seg(st.breakevens, 'is-flat'));
+/** How few trades still count, as a stepper for the page header. */
+function tagMinControl(nav) {
+  return el('span', { class: 'tg-min', title: 'Tags with fewer trades than this are dimmed' },
+    'Dim under',
+    el('div', { class: 'stepper' },
+      el('button', { onClick: () => { tagMin = Math.max(1, tagMin - 1); nav.refresh(); } },
+        icon('minus', 11, 'var(--grey-2)', 2.6)),
+      el('span', { class: 'val' }, `${tagMin}+`),
+      el('button', { onClick: () => { tagMin = Math.min(50, tagMin + 1); nav.refresh(); } },
+        icon('plus', 11, 'var(--grey-2)', 2.6))));
 }
 
 function tagsTab(store, acct, trades, s, ctx) {
   const { nav } = ctx;
   const groups = store.playbook.tagGroups || [];
+
+  if (!groups.length) {
+    return el('div', { class: 'view' },
+      el('div', { class: 'card', style: { flex: '1' } },
+        el('div', { class: 'empty' },
+          el('h2', { style: { fontSize: '16px' } }, 'No tag groups yet'),
+          el('p', {}, 'Tag groups are set up in the Playbook. Once trades carry tags, this is where they are read.'))));
+  }
 
   /* Which trades carry each tag, walked once. */
   const held = new Map();
@@ -453,213 +283,68 @@ function tagsTab(store, acct, trades, s, ctx) {
     const usedIn = trades.filter(t => (t.tagIds || []).some(id => g.tags.some(x => x.id === id)));
     const gs = usedIn.length ? c.summarise(acct, usedIn) : null;
     const unused = g.tags.filter(tag => !held.has(tag.id));
-    /* Best by win rate, of the ones with enough behind them to mean anything. */
-    const best = rows.filter(r => !r.thin && r.win != null)
-      .sort((a, b) => b.win - a.win || b.n - a.n)[0] || null;
-    return { g, rows, gs, unused, best, usedIn };
+    return { g, rows, gs, unused, usedIn };
   });
 
-  /* ---------- the tiles ----------
-     One per group: the tag that wins most often, of those with enough trades
-     behind them. A group with nothing that qualifies says so rather than
-     promoting its best guess. */
-  const tiles = el('div', { class: 'tg-tiles' },
-    ...sections.map(({ g, best, rows }) =>
-      el('div', { class: 'tg-tile' + (best ? '' : ' is-quiet') },
-        el('span', { class: 'lbl' }, g.name),
-        best
-          ? el('span', { class: 'tg-tile-body' },
-              el('span', { class: 'v' }, c.pct(best.win, 0)),
-              el('span', { class: 'n' }, best.name))
-          : el('span', { class: 'tg-tile-body' },
-              el('span', { class: 'v is-none' }, '—'),
-              el('span', { class: 'n' }, rows.length ? `none with ${tagMin}+ trades` : 'not used yet')),
-        best ? el('span', { class: 'c' }, `${best.n} trade${best.n === 1 ? '' : 's'}`) : null)));
+  /* One scale for the whole page, so a bar means the same thing in every group. */
+  const reach = Math.max(1e-9, ...sections.flatMap(x => x.rows.map(r => Math.abs(r.edge ?? 0))));
+  const tone = v => (v == null || Math.abs(v) < 1e-9 ? '' : v > 0 ? ' is-pos' : ' is-neg');
 
-  /* ---------- the controls ---------- */
-  const controls = el('div', { class: 'tg-controls' },
-    el('span', { class: 'm lbl' }, 'Sort'),
-    el('div', { class: 'seg' },
-      ...TAG_SORTS.map(([k, label]) => el('button', { class: k === tagSort ? 'is-on' : '',
-        onClick: () => { if (tagSort === k) return; tagSort = k; nav.refresh(); } }, label))),
-    el('span', { class: 'm lbl', style: { marginLeft: '10px' },
-      title: 'Tags with fewer trades than this are dimmed and left out of the tiles above' }, 'Enough to count'),
-    el('div', { class: 'stepper' },
-      el('button', { onClick: () => { tagMin = Math.max(1, tagMin - 1); nav.refresh(); } },
-        icon('minus', 11, 'var(--grey-2)', 2.6)),
-      el('span', { class: 'val' }, `${tagMin}+`),
-      el('button', { onClick: () => { tagMin = Math.min(50, tagMin + 1); nav.refresh(); } },
-        icon('plus', 11, 'var(--grey-2)', 2.6))),
-    el('div', { class: 'spacer', style: { flex: '1' } }),
-    /* One legend for every split bar on the page, rather than one each. */
-    el('span', { class: 'tg-key' },
-      el('span', { class: 'k is-win' }), 'won',
-      el('span', { class: 'k is-loss' }), 'lost',
-      el('span', { class: 'k is-flat' }), 'break-even'));
+  const bar = e => {
+    if (e == null) return el('span', { class: 'tg-bar' });
+    const w = Math.abs(e) / reach * 50;
+    return el('span', { class: 'tg-bar' }, el('i', { class: 'z' }),
+      el('i', { class: 'f bar-fill' + tone(e), style: { left: (e >= 0 ? 50 : 50 - w) + '%', width: w + '%',
+        transformOrigin: e >= 0 ? 'left center' : 'right center' } }));
+  };
 
-  const COLS = 'minmax(0,1fr) 54px 92px 72px 62px 78px 78px';
+  const cols = el('div', { class: 'tg-cols tg-grid' },
+    ...TAG_COLS.map(([k, label, al]) => k
+      ? el('button', { class: (al ? al + ' ' : '') + (k === tagSort ? 'is-on' : ''), style: al === 'r' ? { justifySelf: 'end' } : al === 'c' ? { justifySelf: 'center' } : {},
+          onClick: () => { if (tagSort === k) return; tagSort = k; nav.refresh(); } },
+          label + (k === tagSort ? (k === 'name' ? ' ↑' : ' ↓') : ''))
+      : el('span', {})));
 
-  const groupCard = ({ g, rows, gs, unused, usedIn }) => el('section', { class: 'card tg-group' },
-    el('div', { class: 'tg-group-head' },
-      el('h2', {}, g.name),
-      el('span', { class: 'note' },
-        `${rows.length} of ${g.tags.length} tag${g.tags.length === 1 ? '' : 's'} used`),
-      el('div', { class: 'spacer', style: { flex: '1' } }),
-      gs ? el('span', { class: 'm tg-group-sum' },
-            `${usedIn.length} trade${usedIn.length === 1 ? '' : 's'}`,
-            gs.winRate != null ? el('span', { class: 'sep' }, '·') : null,
-            gs.winRate != null ? `${c.pct(gs.winRate, 0)} won` : null,
-            gs.expectancyR != null ? el('span', { class: 'sep' }, '·') : null,
-            gs.expectancyR != null ? `${c.rFmt(gs.expectancyR)} a trade` : null)
-        : null),
+  const row = r => el('div', { class: 'tg-row tg-grid' + (r.thin ? ' is-thin' : ''),
+      title: [`${r.st.wins} won · ${r.st.losses} lost · ${r.st.breakevens} break-even`,
+        r.delta == null ? null : `${r.delta >= 0 ? '+' : '−'}${Math.abs(r.delta).toFixed(0)} points against your own win rate`,
+        r.thin ? `only ${r.n} trade${r.n === 1 ? '' : 's'} — too few to read anything into` : null].filter(Boolean).join('\n') },
+    el('span', { class: 'tg-name' }, r.name),
+    el('span', { class: 'num' }, String(r.n)),
+    el('span', { class: 'num' }, r.win == null ? '—' : c.pct(r.win, 0)),
+    bar(r.edge),
+    el('span', { class: 'num is-edge' + tone(r.edge) }, r.edge == null ? '—' : c.rFmt(r.edge)),
+    el('span', { class: 'num is-tot' }, r.total == null ? '—' : c.rFmt(r.total, 1)));
 
-    rows.length
-      ? el('div', { class: 'tbl tg-tbl' },
-          el('div', { class: 'tbl-head', style: { gridTemplateColumns: COLS } },
-            el('span', {}, 'Tag'),
-            el('span', { style: { textAlign: 'right' } }, 'Trades'),
-            el('span', {}, 'W / L / BE'),
-            el('span', { style: { textAlign: 'right' } }, 'Win rate'),
-            el('span', { style: { textAlign: 'right' }, title: 'Against your own win rate over the same window, in points' }, 'vs you'),
-            el('span', { style: { textAlign: 'right' }, title: 'Average R per trade carrying this tag — the number an edge actually lives in' }, 'Per trade'),
-            el('span', { style: { textAlign: 'right' } }, 'Total R')),
-          el('div', { class: 'tbl-body' },
-            ...rows.map(r => el('div', { class: 'tbl-row tg-row' + (r.thin ? ' is-thin' : ''),
-              style: { gridTemplateColumns: COLS },
-              title: r.thin ? `Only ${r.n} trade${r.n === 1 ? '' : 's'} — too few to read anything into` : '' },
-              el('span', { class: 'tg-name' }, r.name,
-                r.thin ? el('span', { class: 'tg-thin' }, 'thin') : null),
-              el('span', { class: 'num' }, String(r.n)),
-              splitBar(r.st),
-              el('span', { class: 'num' }, r.win == null ? '—' : c.pct(r.win, 0)),
-              el('span', { class: 'num', style: { color: r.delta == null ? 'var(--ink-4)'
-                : r.delta > 0.5 ? 'var(--profit)' : r.delta < -0.5 ? 'var(--loss)' : 'var(--ink-4)' } },
-                r.delta == null ? '—' : `${r.delta > 0 ? '+' : r.delta < 0 ? '−' : ''}${Math.abs(r.delta).toFixed(0)}`),
-              el('span', { class: 'num', style: { color: r.edge == null ? 'var(--ink-4)'
-                : r.edge > 0 ? 'var(--profit)' : r.edge < 0 ? 'var(--loss)' : 'var(--ink-3)' } },
-                r.edge == null ? '—' : c.rFmt(r.edge)),
-              el('span', { class: 'num', style: { color: r.total == null ? 'var(--ink-4)'
-                : r.total > 0 ? 'var(--profit)' : r.total < 0 ? 'var(--loss)' : 'var(--ink-3)' } },
-                r.total == null ? '—' : c.rFmt(r.total))))))
-      : el('div', { class: 'm tg-none' }, 'Nothing in this group was used in this window.'),
-
-    /* Tags you set up and never reach for are worth knowing about too. */
-    unused.length
-      ? el('div', { class: 'tg-unused' },
-          el('span', { class: 'm t' }, 'Not used here'),
-          ...unused.map(tag => el('span', { class: 'tg-unused-tag' }, tag.name)))
-      : null);
-
-  if (!groups.length) {
-    return el('div', { class: 'view' },
-      el('div', { class: 'card', style: { flex: '1' } },
-        el('div', { class: 'empty' },
-          el('h2', { style: { fontSize: '16px' } }, 'No tag groups yet'),
-          el('p', {}, 'Tag groups are set up in the Playbook. Once trades carry tags, this is where they are read.'))));
-  }
+  const groupCard = ({ g, rows, gs, unused, usedIn }) => {
+    const shut = tagShut.has(g.id);
+    return el('section', { class: 'card tg-group' + (shut ? ' is-shut' : '') },
+      el('button', { class: 'tg-group-head', title: shut ? 'Show' : 'Fold away',
+          onClick: () => { shut ? tagShut.delete(g.id) : tagShut.add(g.id); nav.refresh(); } },
+        el('span', { class: 'tg-chev' }, icon('chevdown', 11, 'var(--ink-4)', 2.4)),
+        el('h2', {}, g.name),
+        el('span', { class: 'note' },
+          `${rows.length} of ${g.tags.length} tag${g.tags.length === 1 ? '' : 's'} · ${usedIn.length} trade${usedIn.length === 1 ? '' : 's'}`),
+        gs ? el('span', { class: 'tg-group-tot' + tone(gs.netR),
+              title: `${gs.winRate == null ? '—' : c.pct(gs.winRate, 0)} won · ${c.rFmt(gs.expectancyR)} a trade` },
+              gs.netR == null ? '—' : c.rFmt(gs.netR, 1)) : null),
+      shut ? null : rows.length
+        ? el('div', { class: 'tg-rows' }, ...rows.map(row))
+        : el('div', { class: 'tg-none' }, 'Nothing in this group was used in this window.'),
+      /* Tags you set up and never reach for are worth knowing about too. */
+      !shut && unused.length
+        ? el('div', { class: 'tg-unused' }, el('span', { class: 't' }, 'Not used:'),
+            unused.map(tag => tag.name).join(' · '))
+        : null);
+  };
 
   return el('div', { class: 'view tg-view' },
-    tiles,
-    controls,
     el('div', { class: 'tg-scroll' },
+      cols,
       ...sections.map(groupCard),
-      el('div', { class: 'm tg-foot' },
+      el('div', { class: 'tg-foot' },
         `${tagged} of ${trades.length} trade${trades.length === 1 ? '' : 's'} in this window carry a tag. `,
         'A trade can carry several, so the groups overlap and do not add up to the account.')));
-}
-
-/* ============================================================
-   Timing — when you make it
-   ============================================================ */
-function timing(store, acct, trades, ctx) {
-  const { unit: u, cur } = ctx;
-  const f = (d, r, o) => c.fig(u, acct, d, r, o);
-  // two-hour buckets on the open time
-  const buckets = [];
-  for (let h = 0; h < 24; h += 2) buckets.push({ h, label: `${String(h).padStart(2, '0')}–${String((h + 2) % 24).padStart(2, '0')}`, net: 0, count: 0 });
-  for (const t of trades) {
-    if (!t.timeOpen) continue;
-    const h = Number(t.timeOpen.split(':')[0]);
-    const b = buckets[Math.floor(h / 2)];
-    if (b) { b.net += Number(t.netResult) || 0; b.count += 1; }
-  }
-  const active = buckets.filter(b => b.count);
-  const shown = active.length ? buckets.slice(
-    Math.max(0, Math.floor(buckets.indexOf(active[0]))),
-    Math.min(buckets.length, buckets.indexOf(active[active.length - 1]) + 1)) : buckets.slice(3, 12);
-
-  const untimed = trades.filter(t => !t.timeOpen).length;
-
-  const hourCard = el('section', { class: 'card', style: { flex: 'none', padding: '24px 26px 20px' } },
-    el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '12px' } },
-      el('h2', {}, 'Net P&L by hour opened'),
-      el('span', { class: 'note' }, 'two-hour buckets'),
-      el('span', { class: 'spacer' }),
-      el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
-        el('span', { style: { width: '12px', height: '9px', borderRadius: '2px', background: 'var(--green)' } }),
-        el('span', { class: 'note' }, 'profit')),
-      el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '12px' } },
-        el('span', { style: { width: '12px', height: '9px', borderRadius: '2px', background: 'var(--orange)' } }),
-        el('span', { class: 'note' }, 'loss'))),
-    el('div', { style: { marginTop: '10px', height: '236px', display: 'flex' } },
-      fitted((w, h) => divergingColumns(shown, ctx, { width: w, height: h }), 236)),
-    untimed ? el('div', { class: 'm', style: { marginTop: '6px', fontSize: '10.5px', color: 'var(--grey-5)' } },
-      `${untimed} without an open time`) : null,
-  );
-
-  const sessions = groupBy(acct, trades, t => t.sessionId || '_out',
-    t => c.sessionLabel(store.playbook, t.sessionId));
-
-  const DAYNAMES = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  const byDay = groupBy(acct, trades, t => (new Date(t.date + 'T00:00:00').getDay() + 6) % 7,
-    (t, k) => DAYNAMES[k]).sort((a, b) => a.key - b.key);
-
-  // trades per day, and what each day size is worth
-  const perDay = new Map();
-  for (const t of trades) {
-    const cur2 = perDay.get(t.date) || { net: 0, count: 0, r: 0, rKnown: true };
-    cur2.net += Number(t.netResult) || 0; cur2.count += 1;
-    const r = c.rMultiple(acct, t);
-    if (r != null && isFinite(r)) cur2.r += r; else cur2.rKnown = false;
-    perDay.set(t.date, cur2);
-  }
-  const sizes = new Map();
-  for (const v of perDay.values()) {
-    const g = sizes.get(v.count) || { count: v.count, days: 0, net: 0, r: 0, rKnown: true };
-    g.days += 1; g.net += v.net; g.r += v.r; if (!v.rKnown) g.rKnown = false;
-    sizes.set(v.count, g);
-  }
-  const sizeRows = [...sizes.values()].sort((a, b) => a.count - b.count)
-    .map(g => ({ ...g, avg: g.net / g.days, avgR: g.rKnown ? g.r / g.days : null }));
-  const sizeVal = g => c.figValue(u, acct, g.avg, g.avgR) ?? 0;
-  const sizePeak = Math.max(1, ...sizeRows.map(g => Math.abs(sizeVal(g))));
-
-  const perDayCard = el('div', { class: 'card light', style: { flex: '1', minWidth: 0 } },
-    el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
-      el('h2', {}, 'Trades per day'),
-      el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-6)' } }, `${perDay.size} day${perDay.size === 1 ? '' : 's'}`)),
-    el('div', { style: { marginTop: '18px', display: 'flex', flexDirection: 'column', gap: '12px' } },
-      ...sizeRows.map(g => el('div', {},
-        el('div', { style: { display: 'flex', alignItems: 'baseline', marginBottom: '6px' } },
-          el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-8)' } }, `${g.count} trade${g.count === 1 ? '' : 's'}`),
-          el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-6)', marginLeft: '8px' } }, `${g.days} day${g.days === 1 ? '' : 's'}`),
-          el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12px', color: g.avg >= 0 ? 'var(--grey-8)' : 'var(--neg-light)' } },
-            f(g.avg, g.avgR, { decimals: 0, rDecimals: 1 }) + ' avg')),
-        el('div', { style: { height: '8px', borderRadius: '4px', background: 'var(--grey-1_7)', overflow: 'hidden' } },
-          el('div', { class: 'bar-fill', style: { width: (Math.abs(sizeVal(g)) / sizePeak * 100) + '%', height: '100%', borderRadius: '4px',
-            background: sizeVal(g) >= 0 ? 'var(--green)' : 'var(--orange)' } }))))),
-
-  );
-
-  return el('div', { class: 'view' }, hourCard,
-    el('section', { class: 'row', style: { flex: '1', alignItems: 'flex-start', minHeight: 0, overflowY: 'auto' } },
-      el('div', { class: 'card', style: { flex: '1', minWidth: 0 } },
-        el('h2', {}, 'By session'),
-        barList(sessions, ctx)),
-      el('div', { class: 'card', style: { flex: '1', minWidth: 0 } },
-        el('h2', {}, 'By day of week'),
-        barList(byDay, ctx)),
-      perDayCard));
 }
 
 /* ============================================================

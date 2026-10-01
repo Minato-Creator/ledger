@@ -1327,85 +1327,65 @@ button.break-row:hover { background:var(--grey-7); }
 /* ============================================================
    Analytics · Tags
 
-   A table, because past a handful of bins a table is the honest form and
-   this page has fifteen groups' worth. The only marks are the split bars,
-   and they are thin on purpose — the numbers beside them carry the reading,
-   the bar carries the shape.
+   One quiet list per group, one line per tag, and one mark on each line:
+   what the tag makes per trade, as a bar either side of a shared zero. The
+   zero is the same on every row of the page, so a bar in one group can be
+   read against a bar in the next. Sorting is done from the column names,
+   which stay put while the groups scroll under them.
    ============================================================ */
 .tg-view { gap:var(--s-8); }
+.tg-min { display:inline-flex; align-items:center; gap:8px; font:400 11px var(--mono); color:var(--ink-on-light-2); white-space:nowrap; flex:none; }
 
-/* The best in each group, across the top. Wraps rather than shrinking, so a
-   fifteenth group reads exactly like the first. */
-.tg-tiles { flex:none; display:flex; flex-wrap:wrap; gap:8px; }
-.tg-tile {
-  flex:1 1 158px; min-width:0; background:var(--card); border-radius:var(--r-inset);
-  padding:12px 14px; display:flex; flex-direction:column; gap:7px;
-}
-.tg-tile .lbl { font:400 9.5px var(--mono); letter-spacing:.11em; text-transform:uppercase;
-                color:var(--ink-5); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tg-tile-body { display:flex; align-items:baseline; gap:8px; min-width:0; }
-/* Proportional figures on the tile value — tabular is for columns. */
-.tg-tile .v { font:400 21px var(--sans); letter-spacing:-.02em; line-height:1; color:var(--ink); flex:none; }
-.tg-tile .v.is-none { color:var(--ink-5); }
-.tg-tile .n { font:400 11px var(--mono); color:var(--ink-3); min-width:0;
-              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tg-tile .c { font:400 9.5px var(--mono); color:var(--ink-5); }
-.tg-tile.is-quiet { opacity:.62; }
+.tg-scroll { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-bottom:10px; }
 
-.tg-controls { flex:none; display:flex; align-items:center; gap:9px;
-               background:var(--card); border-radius:var(--r-inset); padding:9px 14px; }
-.tg-controls .lbl { font-size:10.5px; color:var(--ink-5); }
-.tg-controls .seg { background:var(--grey-9); }
-.tg-key { display:flex; align-items:center; gap:6px; font:400 10px var(--mono); color:var(--ink-5); }
-.tg-key .k { width:9px; height:9px; border-radius:3px; }
-.tg-key .k + .k { margin-left:8px; }
+.tg-grid { display:grid; grid-template-columns:minmax(0, 1fr) 64px 56px minmax(120px, 260px) 70px 78px; column-gap:18px; align-items:center; }
+.tg-cols { position:sticky; top:0; z-index:3; padding:6px 30px 8px; background:var(--ground); }
+.tg-cols button { all:unset; cursor:pointer; font:400 9.5px var(--mono); letter-spacing:.09em; text-transform:uppercase;
+                  color:var(--ink-on-light-2); white-space:nowrap; }
+.tg-cols button:hover { color:var(--ink-on-light); }
+.tg-cols button.is-on { color:var(--ink-on-light); }
+.tg-cols .r { text-align:right; } .tg-cols .c { text-align:center; }
+html[data-bg] .tg-cols { background:transparent; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
 
-.tg-scroll { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:var(--s-8); }
-
-.tg-group { flex:none; padding:18px 22px 16px; }
-.tg-group-head { display:flex; align-items:baseline; gap:10px; }
+.tg-group { flex:none; padding:14px 12px 10px; }
+.tg-group-head { all:unset; box-sizing:border-box; width:100%; cursor:pointer; display:flex; align-items:baseline; gap:12px; padding:2px 18px 8px; }
 .tg-group-head h2 { margin:0; }
-.tg-group-sum { font-size:10.5px; color:var(--ink-4); }
-.tg-group-sum .sep { margin:0 6px; color:var(--ink-6, var(--grey-6)); }
-/* The grid has no gap of its own, so the columns are spaced here — a number
-   pressed against the bar beside it reads as one thing. */
-.tg-tbl { margin-top:12px; }
-.tg-tbl .tbl-head, .tg-tbl .tbl-row { column-gap:14px; }
-/* Equal-width digits, because these do line up in columns. */
-.tg-tbl .num { font-variant-numeric:tabular-nums; }
-.tg-row { height:34px; cursor:default; }
-.tg-row:hover { background:var(--grey-9); }
-.tg-name { font:400 12px var(--mono); color:var(--ink);
-           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* Too few trades behind it to mean anything. Shown, never promoted. */
-.tg-row.is-thin { opacity:.5; }
-.tg-thin { margin-left:8px; font:400 9px var(--mono); letter-spacing:.08em; text-transform:uppercase;
-           color:var(--yellow); background:rgba(var(--yellow-rgb), .12);
-           border-radius:var(--r-pill); padding:2px 6px; }
+.tg-chev { flex:none; align-self:center; display:inline-flex; transition:transform var(--d-snap) var(--e-standard); }
+.tg-group.is-shut .tg-chev { transform:rotate(-90deg); }
+.tg-group.is-shut { padding-bottom:12px; }
+.tg-group.is-shut .tg-group-head { padding-bottom:2px; }
+.tg-group-head .note { font:400 10.5px var(--mono); color:var(--ink-4); }
+.tg-group-tot { margin-left:auto; font:500 13px var(--sans); font-variant-numeric:tabular-nums; color:var(--ink-3); }
+.tg-group-tot.is-pos { color:var(--profit); } .tg-group-tot.is-neg { color:var(--loss); }
 
-/* Won, lost, break-even. Separated by a gap in the surface colour rather than
-   a border — a stroke round a mark is ink that is not data. */
+.tg-row { padding:9px 18px; border-radius:10px; cursor:default; }
+.tg-row + .tg-row { box-shadow:inset 0 1px 0 var(--grey-9); }
+.tg-row:hover { background:rgba(128,128,128,.07); }
+.tg-row:hover + .tg-row, .tg-row:hover { box-shadow:none; }
+.tg-name { font:400 12.5px var(--mono); color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tg-row .num { text-align:right; font:400 12px var(--mono); color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.tg-row .num.is-edge { font:500 13px var(--sans); }
+.tg-row .num.is-tot { color:var(--ink-2); }
+.tg-row .is-pos { color:var(--profit); } .tg-row .is-neg { color:var(--loss); }
+/* Too few trades behind it to mean anything. Shown, never promoted. */
+.tg-row.is-thin { opacity:.38; }
+
+.tg-bar { position:relative; height:6px; }
+.tg-bar .z { position:absolute; left:50%; top:-5px; bottom:-5px; width:1px; background:var(--grey-7); }
+.tg-bar .f { position:absolute; top:0; height:100%; border-radius:3px; }
+.tg-bar .f.is-pos { background:var(--profit); } .tg-bar .f.is-neg { background:var(--loss); }
+
+/* Won, lost, break-even — the weekly table still draws these. */
 .tg-split { display:flex; align-items:center; gap:2px; height:7px; width:100%; }
 .tg-seg { height:7px; border-radius:3px; min-width:3px; }
 .tg-seg.is-win  { background:var(--profit); }
 .tg-seg.is-loss { background:var(--loss); }
 .tg-seg.is-flat { background:var(--grey-4); }
-.tg-key .k.is-win  { background:var(--profit); }
-.tg-key .k.is-loss { background:var(--loss); }
-.tg-key .k.is-flat { background:var(--grey-4); }
 
-.tg-none { margin-top:12px; font-size:11.5px; color:var(--ink-5); }
-.tg-unused { margin-top:13px; padding-top:11px; border-top:1px solid var(--grey-9);
-             display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-.tg-unused .t { font:400 9.5px var(--mono); letter-spacing:.09em; text-transform:uppercase;
-                color:var(--ink-5); margin-right:3px; }
-.tg-unused-tag { font:400 10.5px var(--mono); color:var(--ink-5);
-                 background:var(--grey-9); border-radius:var(--r-pill); padding:3px 9px; }
-.tg-foot { flex:none; padding:4px 6px 10px; font-size:10.5px; line-height:1.6; color:var(--ink-5); }
-
-@media (max-width:1180px) {
-  .tg-tile { flex:1 1 136px; }
-}
+.tg-none { padding:4px 18px 6px; font:400 11.5px var(--mono); color:var(--ink-5); }
+.tg-unused { padding:10px 18px 4px; font:400 10.5px var(--mono); color:var(--ink-5); }
+.tg-unused .t { color:var(--ink-4); margin-right:6px; }
+.tg-foot { flex:none; padding:2px 30px 0; font:400 10.5px var(--mono); line-height:1.6; color:var(--ink-on-light-2); }
 
 /* ---------- the charts on the trade form ----------
    Thumbnails, not canvases. A screenshot is dropped once and looked at later,
@@ -1849,3 +1829,372 @@ html[data-theme="dark"] .lab-firmname, html[data-bg] .lab-firmname { background:
 .acct-act:hover { color:var(--grey-1); }
 .acct-act.is-delete:hover { color:var(--loss); }
 .acct-act.is-armed, .acct-act.is-armed:hover { color:#fff; background:var(--loss); }
+
+/* ============================================================
+   The Lab → Ghost
+
+   Rules down the left, the answer on the right. The ghost is blue and you
+   are grey, on every line and key. Between the two lines the profit colour
+   means the rule helped and the loss colour means it cost you.
+   ============================================================ */
+.lab-views { flex:none; margin-left:4px; }
+.gh-cols { flex:1; min-height:0; display:flex; gap:var(--s-8); }
+.gh-rail { width:300px; flex:none; min-height:0; padding:16px 16px 12px 18px; gap:10px; }
+.gh-scroll { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:7px; padding-right:4px; }
+.gh-reset { margin-left:auto; font:400 10.5px var(--mono); color:var(--ink-4); }
+.gh-reset:hover { color:var(--ink-2); }
+.gh-rail .k { font:400 9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
+.gh-sec { margin-top:10px; padding-top:10px; border-top:1px solid var(--grey-9); }
+
+.gh-rule { display:flex; align-items:center; gap:8px; min-height:30px; }
+.gh-toggle { flex:1; min-width:0; display:flex; align-items:center; gap:9px; text-align:left; font:400 11.5px var(--mono); color:var(--ink-3); }
+.gh-rule.is-on .gh-toggle { color:var(--ink); }
+.gh-toggle .tick { flex:none; }
+.gh-toggle .t { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gh-step { flex:none; }
+.gh-step .val { min-width:30px; font-size:11.5px; }
+.gh-step button { width:20px; height:20px; border-radius:7px; }
+
+.gh-chips { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+.gh-chipset { display:flex; flex-wrap:wrap; gap:5px; }
+.gh-chip { font:400 10.5px var(--mono); color:var(--ink-3); background:var(--inset); border-radius:var(--r-pill); padding:4px 10px;
+           transition:background var(--d-snap) var(--e-standard), color var(--d-snap) var(--e-standard); }
+.gh-chip:hover { color:var(--ink); }
+.gh-chip.is-on { background:var(--blue); color:#fff; }
+
+.gh-sugs { display:flex; flex-direction:column; gap:5px; padding-bottom:4px; }
+.gh-sug { display:flex; align-items:center; gap:8px; text-align:left; background:var(--inset); border-radius:11px; padding:8px 10px;
+          transition:background var(--d-snap) var(--e-standard); }
+.gh-sug:hover { background:var(--inset-2); }
+.gh-sug .t { flex:1; min-width:0; font:400 11px var(--mono); color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gh-sug b { font:400 12px var(--mono); color:var(--profit); font-variant-numeric:tabular-nums; }
+.gh-luck { font:400 9.5px var(--mono); color:var(--ink-3); background:var(--grey-9); border-radius:var(--r-pill); padding:2px 7px; }
+.gh-luck.is-strong { color:var(--profit); background:rgba(var(--profit-rgb), .14); }
+.gh-luck.is-weak { color:var(--ink-5); }
+
+.gh-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; gap:var(--s-8); overflow-y:auto; }
+.gh-tiles { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:var(--s-8); flex:none; }
+.gh-tile .v { font-size:clamp(20px, 1.8vw, 26px); }
+.gh-tile { gap:5px; }
+.gh-tile .d { font:400 10.5px var(--mono); color:var(--ink-4); font-variant-numeric:tabular-nums; white-space:nowrap; min-height:13px; }
+.gh-tile .d.is-pos { color:var(--profit); }
+.gh-tile .d.is-neg { color:var(--loss); }
+.gh-luck-tile.is-strong .v { color:var(--profit); }
+.gh-luck-tile.is-weak .v { color:var(--ink-4); }
+.gh-chart { flex:1 1 300px; min-height:300px; }
+.gh-effects { flex:none; }
+
+.gh-fill.is-pos { fill:rgba(var(--profit-rgb), .16); }
+.gh-fill.is-neg { fill:rgba(var(--loss-rgb), .16); }
+.gh-line { fill:none; stroke-linejoin:round; stroke-linecap:round; }
+.gh-line.is-real { stroke:var(--ink-4); stroke-width:1.5; }
+.gh-line.is-ghost { stroke:var(--blue); stroke-width:2; }
+.gh-end.is-real { fill:var(--ink-4); stroke:var(--card); stroke-width:2; }
+.gh-end.is-ghost { fill:var(--blue); stroke:var(--card); stroke-width:2; }
+.lab-legend .is-real { background:var(--ink-4); }
+.lab-legend .is-ghost { background:var(--blue); }
+.lab-read .is-real { background:var(--ink-4); }
+.lab-read .is-ghost { background:var(--blue); }
+
+.gh-fx { display:flex; flex-direction:column; gap:9px; margin-top:4px; }
+.gh-fxrow { display:grid; grid-template-columns:minmax(0, 1.4fr) 90px minmax(0, 1fr) 70px; align-items:center; gap:12px; }
+.gh-fxrow .l { font:400 11.5px var(--mono); color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gh-fxrow .n { font:400 10.5px var(--mono); color:var(--ink-4); text-align:right; }
+.gh-fxrow .bar { position:relative; height:6px; background:var(--grey-9); border-radius:3px; }
+.gh-fxrow .bar::after { content:''; position:absolute; left:50%; top:-3px; bottom:-3px; width:1px; background:var(--grey-6); }
+.gh-fxrow .bar i { position:absolute; top:0; bottom:0; border-radius:3px; }
+.gh-fxrow .bar .is-pos { background:var(--profit); }
+.gh-fxrow .bar .is-neg { background:var(--loss); }
+.gh-fxrow b { font:400 12px var(--mono); text-align:right; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.gh-fxrow b.is-pos { color:var(--profit); }
+.gh-fxrow b.is-neg { color:var(--loss); }
+
+/* ============================================================
+   Analytics · Overview and Timing
+   The Lab's hand: figures up top, charts that fill what is left, text in
+   ink and colour only on the marks.
+   ============================================================ */
+.an-body { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:var(--s-8); padding-bottom:6px; }
+.an-row { display:flex; gap:var(--s-8); min-height:0; }
+.an-row.is-main { flex:1.4 1 320px; min-height:320px; }
+.an-row.is-low { flex:1 1 250px; min-height:250px; }
+.an-row > .card { min-width:0; }
+
+.an-tiles { display:grid; grid-template-columns:minmax(0, 1.25fr) repeat(5, minmax(0, 1fr)); gap:var(--s-8); flex:none; }
+.an-tile { padding:14px 16px 12px; gap:6px; }
+.an-tile .v { font-size:clamp(20px, 1.75vw, 26px); }
+.an-tile.is-hero .v { font-size:clamp(22px, 2.1vw, 31px); }
+.an-tile-sp { height:28px; margin-top:4px; }
+.an-w { color:var(--profit); } .an-l { color:var(--loss); } .an-slash { color:var(--ink-5); }
+
+.an-spark { display:block; overflow:visible; }
+.an-spark-line { fill:none; stroke:var(--ink-3); stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }
+.an-spark-line.is-pos { stroke:var(--profit); }
+.an-spark-line.is-neg { stroke:var(--loss); }
+.an-spark-zero { stroke:var(--grey-7); stroke-width:1; stroke-dasharray:2 3; }
+.an-tape { display:block; }
+.an-tape .is-w { fill:var(--profit); } .an-tape .is-l { fill:var(--loss); } .an-tape .is-be { fill:var(--grey-5); }
+
+.an-head-figs { margin-left:auto; display:flex; gap:16px; font:400 10.5px var(--mono); color:var(--ink-4); }
+.an-head-figs b { font:500 12px var(--sans); color:var(--ink); font-variant-numeric:tabular-nums; }
+.an-head-figs b.is-neg { color:var(--loss); }
+.an-equity { flex:1.75 1 0; }
+.an-dist { flex:1 1 0; }
+.an-stop-pos { stop-color:var(--profit); }
+.an-stop-neg { stop-color:var(--loss); }
+.an-line { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.an-line.is-pos { stroke:var(--profit); }
+.an-line.is-neg { stroke:var(--loss); }
+.an-under { fill:rgba(var(--loss-rgb), .22); stroke:var(--loss); stroke-width:1; stroke-linejoin:round; }
+.an-ddband { fill:rgba(var(--loss-rgb), .06); }
+.an-high { fill:var(--card); stroke:var(--profit); stroke-width:1.75; }
+.an-end { stroke:var(--card); stroke-width:2; }
+.an-end.is-pos { fill:var(--profit); } .an-end.is-neg { fill:var(--loss); }
+
+.an-marks { display:flex; flex-wrap:wrap; gap:4px 16px; font:400 10.5px var(--mono); color:var(--ink-4); margin-top:-2px; }
+.an-marks.is-right { margin:0 0 0 auto; }
+.an-marks > span { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.an-marks b { font:500 12px var(--sans); color:var(--ink); font-variant-numeric:tabular-nums; }
+.an-marks i { width:12px; height:0; border-top:1.5px dashed var(--ink-3); }
+.an-marks i.is-exp { border-top-style:solid; border-color:var(--ink); }
+.an-marks i.is-win { border-color:var(--profit); }
+.an-marks i.is-loss { border-color:var(--loss); }
+.an-bin.is-pos { fill:var(--profit); } .an-bin.is-neg { fill:var(--loss); } .an-bin.is-flat { fill:var(--grey-5); }
+.an-hit { cursor:default; }
+.an-hit:hover { fill:rgba(128,128,128,.07); }
+.an-mark { stroke:var(--ink-3); stroke-width:1.25; stroke-dasharray:3 3; pointer-events:none; }
+.an-mark.is-exp { stroke:var(--ink); stroke-dasharray:none; stroke-width:1.5; }
+
+.an-setups { flex:1.35 1 0; }
+.an-pairs { flex:1 1 0; }
+.an-split { flex:1; min-height:0; display:flex; gap:18px; }
+.an-race { fill:none; stroke-width:1.75; stroke-linejoin:round; }
+.an-race-end { stroke:var(--card); stroke-width:1.5; }
+.an-board { width:190px; flex:none; display:flex; flex-direction:column; gap:12px; overflow-y:auto; padding-top:2px; }
+.an-brow { display:grid; grid-template-columns:12px minmax(0, 1fr) auto; column-gap:9px; row-gap:6px; align-items:center; }
+.an-sw { width:12px; height:3px; border-radius:2px; }
+.an-brow .n, .an-irow .n { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.an-brow .nm, .an-irow .nm { font:400 12px var(--mono); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.an-brow .mt, .an-irow .mt { font:400 10px var(--mono); color:var(--ink-4); }
+.an-brow > b { font:500 13px var(--sans); color:var(--ink); font-variant-numeric:tabular-nums; }
+.an-row .is-pos { color:var(--profit); } .an-row .is-neg { color:var(--loss); }
+.an-wr { grid-column:2 / 4; height:3px; border-radius:2px; background:var(--grey-9); overflow:hidden; }
+.an-wr .bar-fill { height:100%; border-radius:2px; background:var(--ink-4); }
+
+.an-inst { display:flex; flex-direction:column; gap:4px; overflow-y:auto; min-height:0; }
+.an-irow { display:grid; grid-template-columns:minmax(62px, 1fr) minmax(36px, 1.3fr) 44px 60px minmax(64px, auto); column-gap:12px; align-items:center;
+           padding:9px 0; border-top:1px solid var(--grey-9); }
+.an-irow.is-head { border-top:0; padding:2px 0 0; font:400 9.5px var(--mono); letter-spacing:.09em; text-transform:uppercase; color:var(--ink-4); }
+.an-irow.is-head span:nth-child(n+3) { text-align:right; }
+.an-ispark { height:30px; min-width:0; }
+.an-iwin { display:flex; flex-direction:column; gap:5px; align-items:flex-end; font:400 11.5px var(--mono); color:var(--ink-2); }
+.an-iwin .an-wr { width:100%; }
+.an-inum { text-align:right; font:400 11.5px var(--mono); color:var(--ink-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
+b.an-inum { font:500 13px var(--sans); color:var(--ink); }
+
+/* ---------- timing ---------- */
+.an-heat { flex:1.9 1 0; }
+.an-sessions { flex:1 1 0; max-width:360px; }
+.an-hold { flex:1.5 1 0; }
+.an-pos { flex:1 1 0; }
+.an-scale { margin-left:auto; display:flex; align-items:center; gap:8px; font:400 10px var(--mono); color:var(--ink-4); }
+.an-ramp { width:96px; height:6px; border-radius:3px;
+  background:linear-gradient(90deg, rgba(var(--loss-rgb), 1), rgba(var(--loss-rgb), .16) 48%, rgba(var(--profit-rgb), .16) 52%, rgba(var(--profit-rgb), 1)); }
+.an-cell.is-empty { fill:rgba(128,128,128,.07); }
+.an-cell { transition:stroke-width 80ms; stroke:var(--card); stroke-width:0; }
+.an-cell:hover { stroke:var(--ink); stroke-width:1.5; }
+.an-cell.is-best { stroke:var(--profit); stroke-width:1.5; }
+.an-sess { stroke:var(--ink-4); stroke-width:1.5; stroke-linecap:round; }
+.an-sess-lbl { font-size:9.5px; fill:var(--ink-3); letter-spacing:.04em; }
+.an-marg.is-pos { fill:var(--profit); } .an-marg.is-neg { fill:var(--loss); }
+.an-marg-lbl { font-size:10px; fill:var(--ink-3); }
+.an-stiles { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; }
+.an-stile { background:var(--inset); border-radius:var(--r-inset); padding:11px 14px 9px; display:flex; flex-direction:column; gap:5px; }
+.an-stile .top { display:flex; align-items:baseline; gap:10px; }
+.an-stile .nm { font:400 12px var(--mono); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.an-stile .top b { margin-left:auto; font:500 15px var(--sans); letter-spacing:-.01em; color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.an-stile .mt { font:400 10px var(--mono); color:var(--ink-4); }
+.an-med { stroke-width:1.25; stroke-dasharray:4 3; }
+.an-med.is-win { stroke:var(--profit); } .an-med.is-loss { stroke:var(--loss); }
+.an-dot { stroke:var(--card); stroke-width:1.25; }
+.an-dot.is-pos { fill:var(--profit); } .an-dot.is-neg { fill:var(--loss); } .an-dot.is-flat { fill:var(--grey-5); }
+.an-ring { fill:none; stroke:var(--ink); stroke-width:1.5; pointer-events:none; }
+.an-val { font-size:11px; fill:var(--ink-2); }
+.an-pos-lbl { font-size:11.5px; fill:var(--ink); }
+.an-stile { flex:1 1 0; max-height:190px; min-height:84px; }
+.an-stile .sp { flex:1; min-height:26px; display:flex; }
+.an-stile .sp .an-spark { height:100%; }
+
+/* ============================================================
+   Dashboard
+   Four cards that fill the window: the result and its curve, the numbers
+   an edge is made of, where the money came from, the last trades. One mark
+   per figure, text in ink, colour only where it means win or loss.
+   ============================================================ */
+.db-grid { flex:1; min-height:0; display:grid; gap:var(--s-8);
+  grid-template-columns:minmax(0, 1.9fr) minmax(300px, 1fr); grid-template-rows:minmax(300px, 1.3fr) minmax(250px, 1fr); }
+.db-grid > .card { padding:22px 26px; min-width:0; min-height:0; }
+.db-k { font:400 9.5px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink-4); }
+.db-none { flex:1; display:flex; align-items:center; justify-content:center; font:400 11.5px var(--mono); color:var(--ink-4); }
+.db-head { display:flex; align-items:baseline; gap:12px; margin-bottom:12px; }
+.db-head h2 { margin:0; }
+.db-head .s { font:400 10.5px var(--mono); color:var(--ink-4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.is-pos.db-big, .db-grid .v .is-pos, .db-grid .nv.is-pos, .db-grid .v.is-pos { color:var(--profit); }
+.is-neg.db-big, .db-grid .v .is-neg, .db-grid .nv.is-neg, .db-grid .v.is-neg { color:var(--loss); }
+
+/* the result */
+.db-top { display:flex; align-items:flex-end; flex-wrap:wrap; gap:8px 22px; margin-top:12px; }
+.db-big small { font-size:.42em; letter-spacing:-.01em; opacity:.7; }
+.db-big { font:300 clamp(40px, 3.6vw, 56px) var(--sans); letter-spacing:-.045em; line-height:.95; color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.db-meta { display:flex; flex-wrap:wrap; gap:4px 18px; padding-bottom:5px; font:400 11px var(--mono); color:var(--ink-4); }
+.db-meta b { font:500 13px var(--sans); color:var(--ink); margin-right:1px; font-variant-numeric:tabular-nums; }
+.db-meta b.is-neg { color:var(--loss); }
+.db-hero > div:last-child { margin:12px -6px -8px; }
+.db-zero { stroke:var(--grey-7); stroke-width:1; stroke-dasharray:2 4; }
+.db-endlbl { font-size:11px; fill:var(--ink); }
+
+/* the edge */
+.db-edge { justify-content:space-between; }
+.db-stat { padding:clamp(8px, 1.2vh, 13px) 0; display:flex; flex-direction:column; gap:clamp(6px, .9vh, 9px); }
+.db-stat + .db-stat { box-shadow:inset 0 1px 0 var(--grey-9); }
+.db-srow { display:flex; align-items:baseline; gap:10px; }
+.db-srow .k2 { font:400 12px var(--mono); color:var(--ink-2); white-space:nowrap; }
+.db-srow .v { margin-left:auto; font:400 clamp(20px, 1.75vw, 26px) var(--sans); letter-spacing:-.03em; line-height:1; color:var(--ink);
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.db-srow .v small { font-size:.55em; letter-spacing:0; color:var(--ink-4); }
+.db-srow .v.is-run { font-size:clamp(17px, 1.4vw, 20px); }
+.db-note { font:400 10.5px var(--mono); color:var(--ink-4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.db-note b { font-weight:400; color:var(--ink-2); }
+.db-track { position:relative; height:6px; border-radius:3px; background:var(--grey-9); margin-top:14px; }
+.db-track .bar-fill { position:absolute; left:0; top:0; bottom:0; border-radius:3px; background:var(--profit); }
+.db-track .be { position:absolute; top:-5px; bottom:-5px; width:2px; margin-left:-1px; border-radius:1px; background:var(--ink-2); }
+.db-track .be::after { content:attr(data-l); position:absolute; bottom:calc(100% + 3px); left:50%; transform:translateX(-50%);
+  font:400 9.5px var(--mono); color:var(--ink-3); white-space:nowrap; }
+.db-pay { display:flex; gap:2px; height:6px; }
+.db-pay i { border-radius:3px; min-width:3px; }
+.db-pay .w { background:var(--profit); } .db-pay .l { background:var(--loss); }
+.db-tape { display:flex; gap:3px; height:clamp(16px, 2.2vh, 22px); }
+.db-tape i { flex:1; max-width:22px; border-radius:2px; }
+.db-tape .w { background:var(--profit); height:48%; align-self:flex-start; }
+.db-tape .l { background:var(--loss); height:48%; align-self:flex-end; }
+.db-tape .b { background:var(--grey-5); height:2px; align-self:center; }
+
+/* where it comes from */
+.db-cols { flex:1; min-height:0; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:30px; margin-top:4px; }
+.db-col { display:flex; flex-direction:column; gap:12px; min-height:0; min-width:0; }
+.db-colrows { display:flex; flex-direction:column; gap:16px; overflow-y:auto; min-height:0; padding-right:2px; }
+.db-srcrow { display:flex; flex-direction:column; gap:7px; }
+.db-srcrow .top { display:flex; align-items:baseline; gap:10px; min-width:0; }
+.db-srcrow .nm { font:400 12.5px var(--mono); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.db-srcrow .nv { margin-left:auto; flex:none; font:500 14px var(--sans); color:var(--ink); font-variant-numeric:tabular-nums; }
+.db-srcrow .mt { font:400 10px var(--mono); color:var(--ink-4); }
+.db-dbar { position:relative; height:6px; border-radius:3px; background:var(--grey-9); }
+.db-dbar .z { position:absolute; left:50%; top:-4px; bottom:-4px; width:1px; background:var(--grey-6); }
+.db-dbar .f { position:absolute; top:0; bottom:0; border-radius:3px; }
+.db-dbar .f.is-pos { background:var(--profit); } .db-dbar .f.is-neg { background:var(--loss); }
+
+/* recent */
+.db-all { all:unset; cursor:pointer; margin-left:auto; display:inline-flex; align-items:center; gap:4px; font:400 11px var(--mono); color:var(--ink-3); }
+.db-all:hover { color:var(--ink); }
+.db-list { display:flex; flex-direction:column; overflow-y:auto; min-height:0; margin:0 -8px; }
+.db-tr { all:unset; box-sizing:border-box; cursor:pointer; display:grid; grid-template-columns:4px minmax(0, 1fr) auto minmax(64px, auto);
+  column-gap:14px; align-items:center; padding:8px 8px; border-radius:10px; }
+.db-tr + .db-tr { box-shadow:inset 0 1px 0 var(--grey-9); }
+.db-tr:hover { background:rgba(128,128,128,.07); box-shadow:none; }
+.db-tr:hover + .db-tr { box-shadow:none; }
+.db-tr .dot { width:4px; height:22px; border-radius:2px; background:var(--grey-5); }
+.db-tr .dot.is-pos { background:var(--profit); } .db-tr .dot.is-neg { background:var(--loss); }
+.db-tr .p { font:400 12.5px var(--mono); color:var(--ink); min-width:0; }
+.db-tr .p i { font-style:normal; margin-left:6px; font-size:11px; color:var(--ink-4); }
+.db-tr .p small { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.db-tr small { display:block; font:400 10px var(--mono); color:var(--ink-4); margin-top:2px; }
+.db-tr .r { justify-self:end; font:400 11px var(--mono); padding:3px 8px; border-radius:var(--r-pill); color:var(--ink-3);
+  background:rgba(128,128,128,.1); font-variant-numeric:tabular-nums; }
+.db-tr .r.is-pos { color:var(--profit); background:rgba(var(--profit-rgb), .12); }
+.db-tr .r.is-neg { color:var(--loss); background:rgba(var(--loss-rgb), .12); }
+.db-tr .n { text-align:right; font:500 13px var(--sans); color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+/* ---------- profit and loss colours: one palette, a dropdown each ---------- */
+.pnl-sw { width:20px; height:20px; border-radius:7px; flex:none; box-shadow:inset 0 0 0 1px rgba(128,128,128,.3); }
+.pnl-drop > .b .n { min-width:70px; }
+.pnl-ex { font:400 11px var(--mono); font-variant-numeric:tabular-nums; margin-left:2px; }
+/* They sit at the foot of the card, so the palette opens upward. */
+.pnl-menu { top:auto; bottom:calc(100% + 6px); width:314px; max-height:min(560px, 78vh); padding:12px 14px 12px; gap:10px; }
+.pnl-now { display:flex; align-items:center; gap:10px; padding:2px 0 10px; box-shadow:inset 0 -1px 0 var(--inset-2); margin-bottom:2px; }
+.pnl-now-sw { width:22px; height:22px; border-radius:7px; flex:none; box-shadow:inset 0 0 0 1px rgba(128,128,128,.3); }
+.pnl-now-n { font:400 12px var(--mono); color:var(--ink); }
+.pnl-now-ex { margin-left:auto; font:500 15px var(--sans); font-variant-numeric:tabular-nums; }
+.pnl-fam { display:flex; flex-direction:column; gap:6px; }
+.pnl-fam-n { font:400 9px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink-4); }
+.pnl-grid { display:grid; grid-template-columns:repeat(9, 26px); gap:5px; }
+.pnl-opt { width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+  box-shadow:inset 0 0 0 1px rgba(128,128,128,.3); transition:transform var(--d-press) var(--e-standard); }
+.pnl-opt:hover { transform:scale(1.12); }
+.pnl-opt.is-on { box-shadow:0 0 0 2px var(--inset), 0 0 0 3.5px var(--ink); }
+
+/* ============================================================
+   The Lab · Monte Carlo
+   A page that reads top down and scrolls: settings, five figures, then each
+   figure opened up. Every card keeps its own height so the page grows
+   rather than squeezing.
+   ============================================================ */
+.mc-body { gap:var(--s-8); padding-bottom:14px; }
+.mc-body > * { flex:none; }
+.mc-controls { flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:10px 28px; padding:0 18px; }
+.mc-ctl { display:inline-flex; align-items:center; gap:10px; font:400 11px var(--mono); color:var(--ink-on-light-2); white-space:nowrap; }
+.mc-step .val { min-width:58px; }
+.mc-tiles { grid-template-columns:minmax(0, 1.3fr) repeat(4, minmax(0, 1fr)); }
+.mc-fan { height:clamp(320px, 46vh, 440px); }
+.mc-pair { flex:none; height:270px; min-height:0; }
+.mc-streaks { min-height:280px; }
+.mc-risk { min-height:330px; }
+.mc-note { margin:2px 18px 0; }
+
+.mc-path { fill:none; stroke:rgba(128,128,128,.13); stroke-width:1; }
+.mc-band90 { fill:rgba(var(--profit-rgb), .10); }
+.mc-band50 { fill:rgba(var(--profit-rgb), .20); }
+.mc-median { fill:none; stroke:var(--profit); stroke-width:2; stroke-linejoin:round; }
+.mc-end { fill:var(--profit); stroke:var(--card); stroke-width:2; }
+.lab-legend .mc-k-med, .lab-read .mc-k-med { background:var(--profit); }
+.lab-legend .mc-k-50 { height:8px; background:rgba(var(--profit-rgb), .35); }
+.lab-legend .mc-k-90, .lab-read .mc-k-90 { height:8px; background:rgba(var(--profit-rgb), .16); }
+.lab-read .mc-k-90 { height:2px; background:rgba(var(--profit-rgb), .5); }
+.lab-legend .mc-k-limit, .lab-read .mc-k-limit { background:var(--loss); }
+
+.mc-bin.is-pos { fill:var(--profit); } .mc-bin.is-neg { fill:var(--loss); } .mc-bin.is-dim { fill:var(--grey-5); }
+.mc-limit { stroke:var(--loss); stroke-width:1.5; stroke-dasharray:4 3; }
+.mc-val { font-size:10px; fill:var(--ink-3); }
+.mc-k { font-size:11.5px; fill:var(--ink); }
+
+.mc-split { flex:1; min-height:0; display:flex; gap:26px; }
+.mc-split > div:first-child { flex:1; min-width:0; }
+.mc-facts { width:250px; flex:none; display:flex; flex-direction:column; justify-content:center; gap:13px; }
+.mc-facts.is-row { width:auto; flex-direction:row; justify-content:flex-start; gap:30px; margin-bottom:10px; }
+.mc-fact { display:flex; flex-direction:column; gap:4px; }
+.mc-fact b { font:400 22px var(--sans); letter-spacing:-.02em; color:var(--ink); font-variant-numeric:tabular-nums; line-height:1; }
+.mc-fact span { font:400 10.5px var(--mono); color:var(--ink-4); line-height:1.45; }
+
+.mc-say { font:400 12.5px var(--mono); color:var(--ink-2); margin:2px 0 14px; }
+.mc-split.is-wide { gap:30px; }
+.mc-riskl { display:flex; flex-direction:column; min-width:0; }
+.mc-curve { fill:none; stroke:var(--loss); stroke-width:2; stroke-linejoin:round; }
+.mc-five { stroke:var(--ink-4); stroke-width:1; stroke-dasharray:3 4; }
+.mc-dot { stroke:var(--card); stroke-width:2; }
+.mc-dot.is-sug { fill:var(--profit); } .mc-dot.is-safe { fill:var(--ink-3); } .mc-dot.is-you { fill:var(--ink); }
+
+.mc-table { width:min(520px, 48%); flex:none; display:flex; flex-direction:column; }
+.mc-row { all:unset; box-sizing:border-box; display:grid; grid-template-columns:minmax(96px, 1.3fr) repeat(5, minmax(0, 1fr)); column-gap:10px;
+  align-items:center; padding:8px 10px; border-radius:10px; cursor:pointer; }
+.mc-row + .mc-row { box-shadow:inset 0 1px 0 var(--grey-9); }
+.mc-row:hover { background:rgba(128,128,128,.07); }
+.mc-row.is-head { cursor:default; font:400 9px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); padding-top:0; }
+.mc-row.is-head:hover { background:none; }
+.mc-row.is-head span:not(:first-child) { text-align:right; }
+.mc-row .rk { font:400 12.5px var(--mono); color:var(--ink); display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.mc-row .rk i { font:400 9px var(--mono); font-style:normal; letter-spacing:.06em; text-transform:uppercase; padding:2px 6px; border-radius:var(--r-pill);
+  color:var(--profit); background:rgba(var(--profit-rgb), .14); }
+.mc-row .rk i.you { color:var(--ink-2); background:rgba(128,128,128,.16); }
+.mc-row .n { text-align:right; font:400 11.5px var(--mono); color:var(--ink-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.mc-row .n.is-pos { color:var(--profit); } .mc-row .n.is-neg, .mc-row .n.is-bad { color:var(--loss); } .mc-row .n.is-ok { color:var(--ink); }
+.mc-row.is-sug { background:rgba(var(--profit-rgb), .07); }
+.mc-row.is-you .rk { font-weight:500; }
