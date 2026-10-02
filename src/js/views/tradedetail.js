@@ -3,6 +3,7 @@ import * as c from '../calc.js';
 import { tradeShotsOf } from '../store.js';
 import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName } from '../questions.js';
 import { heldAsked, heldOf, heldText } from '../questions.js';
+import { tradeChart } from './tradechart.js';
 
 export function tradeDetail(store, nav, id) {
   const acct = store.activeAccount;
@@ -54,7 +55,7 @@ export function tradeDetail(store, nav, id) {
   const chartsCard = present.length
     ? el('div', { class: 'card', style: { flex: 'none' } },
         el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '9px' } },
-          el('div', { class: 'eyebrow', style: { margin: 0 } }, 'Charts'),
+          el('div', { class: 'eyebrow', style: { margin: 0 } }, 'Screenshots'),
           el('span', { class: 'note' }, present.length === 1 ? '' : `${present.length}`),
           el('div', { style: { marginLeft: 'auto' } })),
         /* Two across once there are two, however many there are — a row of
@@ -69,17 +70,21 @@ export function tradeDetail(store, nav, id) {
           ...present.map((name, at) => chartTile(store, t, name, at, present))))
     : null;
 
-  /* Charts first. A trader looks at the picture before reading the note. */
-  const left = el('div', { style: { width: '780px', flex: 'none', display: 'flex', flexDirection: 'column', gap: '8px' } },
-    chartsCard,
+  /* The day's chart first — a trader looks at the picture before reading
+     the note — and the screenshots you took at the bottom, where the column
+     scrolls to them. */
+  const left = el('div', { class: 'td-left', style: { width: '780px', flex: 'none', display: 'flex', flexDirection: 'column', gap: '8px',
+                                                      minHeight: 0, overflowY: 'auto' } },
+    tradeChart(store, nav, t),
     howItWent(t),
-    el('div', { class: 'card', style: { flex: '1', minHeight: '170px' } },
+    el('div', { class: 'card', style: { flex: 'none', minHeight: '170px' } },
       el('div', { class: 'eyebrow' }, 'Journal'),
       el('div', { style: { marginTop: '13px', fontSize: '13.5px', lineHeight: 1.62, color: 'var(--ink-2)', whiteSpace: 'pre-wrap', flex: '1', overflowY: 'auto' } },
         t.notes || el('span', { style: { color: 'var(--grey-5)' } }, 'No notes on this one.')),
       el('div', { style: { marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--grey-7)', display: 'flex', gap: '6px', flexWrap: 'wrap' } },
         ...(tags.length ? tags.map(tag => el('span', { class: 'tag' }, tag.name))
                         : [el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'No tags')]))),
+    chartsCard,
   );
 
   const right = el('div', { style: { flex: '1', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' } },
@@ -136,7 +141,7 @@ export function tradeDetail(store, nav, id) {
         : null),
   );
 
-  return el('div', { class: 'view' }, head, el('div', { class: 'row', style: { flex: '1' } }, left, right));
+  return el('div', { class: 'view' }, head, el('div', { class: 'row', style: { flex: '1', minHeight: 0 } }, left, right));
 }
 
 /* One chart on the trade page. The picture arrives when the journal hands it

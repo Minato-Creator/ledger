@@ -118,8 +118,33 @@ function tauriBackend() {
     await invoke('write_text', { path: await configPath(), contents: JSON.stringify(cfg, null, 2) });
   }
 
+  /* Before it was Quire the app was Ledger, and made its folder under that
+     name. Once, on opening, a folder called exactly "Ledger" is renamed to
+     "Quire" where it stands — only if nothing called Quire is there already
+     and the rename goes through. Otherwise it is left as it is and opened as
+     before: a folder you named yourself is never touched. */
+  async function fromLedger(cfg) {
+    const path = String(cfg.folder).replace(/[\\/]+$/, '');
+    const name = path.split(/[\\/]/).pop();
+    if (!/^ledger$/i.test(name)) return cfg.folder;
+    const to = path.slice(0, path.length - name.length) + 'Quire';
+    try {
+      if (await invoke('path_exists', { path: to })) return cfg.folder;
+      await invoke('rename_dir', { from: path, to });
+      await writeConfig({ ...cfg, folder: to });
+      return to;
+    } catch {
+      return cfg.folder;
+    }
+  }
+
   return {
     kind: 'native',
+    /* Things that belong to this computer, not to the journal — an API key,
+       say — live in the app's own config beside "which folder", never in
+       the vault you might copy or share. */
+    async getSetting(k) { return (await readConfig())[k] ?? null; },
+    async setSetting(k, v) { const cfg = await readConfig(); if (v == null) delete cfg[k]; else cfg[k] = v; await writeConfig(cfg); },
     isSupported: () => true,
     get folderName() { return root ? root.split(/[\\/]/).filter(Boolean).pop() : null; },
     get folderPath() { return root; },
@@ -131,7 +156,7 @@ function tauriBackend() {
       sep = await invoke('path_sep');
       const cfg = await readConfig();
       if (cfg.folder && await invoke('path_exists', { path: cfg.folder })) {
-        root = cfg.folder;
+        root = await fromLedger(cfg);
         await invoke('make_dir', { path: root });
         return 'connected';
       }
@@ -465,6 +490,7 @@ function chooseBackend() {
 }
 
 let active = chooseBackend();
+const memSettings = new Map();
 
 /* One object the rest of the app talks to. It delegates, so `connect()` can
    trade up to a real folder mid-session without anything above noticing. */
@@ -484,6 +510,18 @@ export const fs = {
   suggest: () => (active.suggest ? active.suggest() : Promise.resolve(null)),
   adopt:   p => (active.adopt ? active.adopt(p) : Promise.resolve(false)),
   reveal:  () => (active.reveal ? active.reveal() : Promise.resolve(false)),
+  /* Per-computer settings kept out of the vault (an API key). The desktop
+     app keeps them in its own config file; a browser keeps them in its own
+     storage, and a preview copy keeps them only until the tab closes. */
+  async getSetting(k) {
+    if (active.getSetting) return active.getSetting(k);
+    try { return localStorage.getItem('quire:setting:' + k); } catch { return memSettings.get(k) ?? null; }
+  },
+  async setSetting(k, v) {
+    if (active.setSetting) return active.setSetting(k, v);
+    try { v == null ? localStorage.removeItem('quire:setting:' + k) : localStorage.setItem('quire:setting:' + k, v); }
+    catch { v == null ? memSettings.delete(k) : memSettings.set(k, v); }
+  },
 
   /* Someone opening this for the first time has no folder to restore and no
      reason to be asked for one before they have seen anything — a folder

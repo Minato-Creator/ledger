@@ -126,6 +126,21 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).exists()
 }
 
+/// Renames a folder where it stands. Used once: a journal folder made while
+/// the app was still called Ledger becomes "Quire". It never overwrites — if
+/// the new name is taken, nothing happens and the old folder is kept.
+#[tauri::command]
+fn rename_dir(from: String, to: String) -> Result<(), String> {
+    let (f, t) = (Path::new(&from), Path::new(&to));
+    if !f.is_dir() {
+        return Err(format!("{from}: not a folder"));
+    }
+    if t.exists() {
+        return Err(format!("{to}: already exists"));
+    }
+    std::fs::rename(f, t).map_err(|e| format!("{from} -> {to}: {e}"))
+}
+
 #[tauri::command]
 fn path_sep() -> String {
     std::path::MAIN_SEPARATOR.to_string()
@@ -178,6 +193,47 @@ fn check_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The path of an OANDA candles request, checked before anything is sent:
+/// one instrument, the candles endpoint, and a plain query string. The host is
+/// never taken from the page — it is one of OANDA's two, chosen here.
+fn check_oanda_path(path: &str) -> Result<(), String> {
+    let rest = path.strip_prefix("/v3/instruments/").ok_or("not a candles request")?;
+    let (inst, query) = rest.split_once("/candles?").ok_or("not a candles request")?;
+    if inst.is_empty() || inst.len() > 20 || !inst.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
+        return Err("that is not an instrument name".into());
+    }
+    if query.is_empty() || !query.chars().all(|c| c.is_ascii_alphanumeric() || "=&:._-%".contains(c)) {
+        return Err("that query has characters it should not".into());
+    }
+    Ok(())
+}
+
+/// Candles from OANDA, with your own key. The key goes in the Authorization
+/// header and nowhere else, and only to OANDA's practice or live API.
+#[tauri::command]
+fn fetch_oanda(path: String, token: String, live: bool) -> Result<String, String> {
+    check_oanda_path(&path)?;
+    let token = token.trim();
+    if token.is_empty() || token.len() > 200 || !token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("that key does not look like an OANDA key".into());
+    }
+    let host = if live { "https://api-fxtrade.oanda.com" } else { "https://api-fxpractice.oanda.com" };
+    let res = ureq::get(&format!("{host}{path}"))
+        .timeout(std::time::Duration::from_secs(20))
+        .set("User-Agent", "Quire")
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("Accept-Datetime-Format", "UNIX")
+        .call();
+    match res {
+        Ok(r) => r.into_string().map_err(|e| e.to_string()),
+        Err(ureq::Error::Status(code, r)) => {
+            let body = r.into_string().unwrap_or_default();
+            Err(format!("OANDA said {code}: {body}"))
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Fetch a URL and hand back the body as text.
 ///
 /// The economic calendar is the one thing in Quire that comes from somewhere
@@ -213,6 +269,8 @@ fn main() {
             delete_path,
             open_path,
             make_dir,
+            rename_dir,
+            fetch_oanda,
             path_exists,
             path_sep,
             config_dir,
@@ -287,5 +345,62 @@ mod tests {
     fn rejects_rubbish_but_tolerates_newlines() {
         assert!(b64_decode("Zm9v\nYmFy").is_some());
         assert!(b64_decode("not base64!").is_none());
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::rename_dir;
+
+    #[test]
+    fn renames_a_folder_and_keeps_what_is_inside() {
+        let base = std::env::temp_dir().join(format!("quire-rename-{}", std::process::id()));
+        let from = base.join("Ledger");
+        let to = base.join("Quire");
+        std::fs::create_dir_all(from.join("data")).unwrap();
+        std::fs::write(from.join("data").join("trades.json"), "{}").unwrap();
+        rename_dir(from.to_string_lossy().into(), to.to_string_lossy().into()).unwrap();
+        assert!(!from.exists());
+        assert_eq!(std::fs::read_to_string(to.join("data").join("trades.json")).unwrap(), "{}");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn never_overwrites_a_folder_already_there() {
+        let base = std::env::temp_dir().join(format!("quire-rename-b-{}", std::process::id()));
+        let from = base.join("Ledger");
+        let to = base.join("Quire");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        assert!(rename_dir(from.to_string_lossy().into(), to.to_string_lossy().into()).is_err());
+        assert!(from.exists() && to.exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn refuses_something_that_is_not_a_folder() {
+        let p = std::env::temp_dir().join(format!("quire-rename-c-{}", std::process::id()));
+        assert!(rename_dir(p.to_string_lossy().into(), p.with_extension("x").to_string_lossy().into()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod oanda_tests {
+    use super::check_oanda_path;
+
+    #[test]
+    fn allows_a_candles_request() {
+        assert!(check_oanda_path("/v3/instruments/XAU_USD/candles?granularity=M1&price=M&from=1757894400&to=1757980800").is_ok());
+        assert!(check_oanda_path("/v3/instruments/NAS100_USD/candles?granularity=M1&from=2026-09-15T00%3A00%3A00Z").is_ok());
+    }
+
+    #[test]
+    fn refuses_anything_else() {
+        assert!(check_oanda_path("/v3/accounts").is_err());
+        assert!(check_oanda_path("/v3/instruments/XAU_USD/orderBook?x=1").is_err());
+        assert!(check_oanda_path("/v3/instruments/../accounts/candles?x=1").is_err());
+        assert!(check_oanda_path("/v3/instruments/XAU_USD/candles?x=1#frag").is_err());
+        assert!(check_oanda_path("/v3/instruments/xau_usd/candles?x=1").is_err());
+        assert!(check_oanda_path("https://evil.example/v3/instruments/X/candles?x=1").is_err());
     }
 }

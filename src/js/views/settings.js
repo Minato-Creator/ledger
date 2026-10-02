@@ -10,6 +10,7 @@ import * as c from '../calc.js';
 import { toCSV } from '../csv.js';
 import { BACKGROUNDS } from '../backgrounds.js';
 import { accountActions } from './accountActions.js';
+import { oandaKeyCard } from './oandakey.js';
 
 /* Which colour menu is open. Kept out here so a redraw does not shut it. */
 const openColour = { profit: false, loss: false };
@@ -486,7 +487,7 @@ export function settings(store, nav) {
       accountsCard,
       el('div', { style: { width: '380px', flex: 'none', display: 'flex', flexDirection: 'column',
                            gap: '8px', alignSelf: 'flex-start', maxHeight: '100%', overflowY: 'auto' } },
-        vaultCard, appearanceCard)));
+        vaultCard, appearanceCard, oandaKeyCard())));
 }
 
 /* Where the journal lives, and — when that is a choice — the way to change it. */

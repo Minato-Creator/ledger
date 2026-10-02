@@ -20,6 +20,7 @@ import { importTrades } from './views/import.js';
 import { outlook } from './views/outlook.js';
 import { lab } from './views/lab.js';
 import { review } from './views/review.js';
+import { firmsPage } from './views/firms.js';
 
 const root = document.getElementById('app');
 const embeddedHere = () => { try { return window.self !== window.top; } catch { return true; } };
@@ -131,6 +132,7 @@ const NAV_ITEMS = [
   ['#/replay', 'replay', 'Replay'],
   ['#/wire', 'wire', 'Newswire'],
   ['#/playbook', 'playbook', 'Playbook'],
+  ['#/firms', 'firms', 'Prop firms'],
 ];
 
 let menuOpen = false;
@@ -270,6 +272,7 @@ function route() {
     case 'wire':      return wire(store, nav);
     case 'lab':       return lab(store, nav, arg);
     case 'review':    return review(store, nav, arg);
+    case 'firms':     return firmsPage(store, nav, arg);
     default:          return dashboard(store, nav);
   }
 }
