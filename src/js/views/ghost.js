@@ -17,7 +17,7 @@ import { el, svg, icon, fitted } from '../ui.js';
 import * as c from '../calc.js';
 import * as G from '../ghost.js';
 import { ticks, hoverLayer, readRow } from './chartkit.js';
-import { EXEC_TFS as TF_ORDER } from '../questions.js';
+import { EXEC_TFS as TF_ORDER, NEWS } from '../questions.js';
 
 const rFmt = (v, d = 1) => c.rFmt(v, d);
 let suggestCache = null;   // { sig, list }
@@ -142,9 +142,12 @@ export function ghostPage(ctx) {
         rated ? stepRule('minConfidence', 4, 1, 5, 1, v => `Only confidence ${v}+`) : null,
         rated ? el('span', { class: 'gh-note' }, `${rated} of ${rows.length} trades rated · the rest are left out`) : null,
         chips('Only timeframes', 'tfs', present('tf', v => v).sort((a, b) => TF_ORDER.indexOf(a[0]) - TF_ORDER.indexOf(b[0]))),
+        chips('Skip news timing', 'skipNews', present('news', v => (NEWS.find(([k]) => k === v) || [])[1] || v)
+          .sort((a, b) => NEWS.findIndex(([k]) => k === a[0]) - NEWS.findIndex(([k]) => k === b[0]))),
+        count(x => x.holiday) ? flag('skipHolidays', `Skip bank holidays · ${count(x => x.holiday)}`) : null,
         heldN ? flag('holdToTarget', 'Leave trades to TP') : null,
         heldN ? el('span', { class: 'gh-note' }, `${heldN} trade${heldN === 1 ? '' : 's'} cut short, counted at what you said ${heldN === 1 ? 'it' : 'they'} would have made if held`) : null,
-        !rated && !heldN && !rows.some(x => x.tf) ? el('span', { class: 'gh-note' }, 'Confidence, timeframe and “if held” come from New trade — answer them on a few trades and they show up here.') : null));
+        !rated && !heldN && !rows.some(x => x.tf || x.news) ? el('span', { class: 'gh-note' }, 'Confidence, timeframe, news and “if held” come from New trade — answer them on a few trades and they show up here.') : null));
     const sc = rail.querySelector('.gh-scroll');
     if (sc) sc.scrollTop = keep;
   }

@@ -1,14 +1,14 @@
 import { el, icon, ft } from '../ui.js';
 import * as c from '../calc.js';
 import { tradeRow } from './dashboard.js';
-import { CONFIDENCE, EXIT_REASONS, EXEC_TFS, MISTAKES } from '../questions.js';
+import { CONFIDENCE, EXIT_REASONS, EXEC_TFS, MISTAKES, NEWS } from '../questions.js';
 
-const filters = { q: '', side: 'all', result: 'all', setupId: 'all', mistake: 'all', exit: 'all', conf: 'all', tf: 'all' };
+const filters = { q: '', side: 'all', result: 'all', setupId: 'all', mistake: 'all', exit: 'all', conf: 'all', tf: 'all', news: 'all' };
 const FRESH = { ...filters };
 
 /* The questions New trade asks, as filters. A mistake filter of 'none' is
    the clean trades — asked, and nothing went wrong; a confidence of '4+' is
-   solid or better. A trade never asked a question never matches it. */
+   solid or better; news 'any' is every trade logged around news. A trade never asked a question never matches it. */
 export function matchesQuestions(t, f) {
   if (f.mistake !== 'all') {
     if (!Array.isArray(t.mistakes)) return false;
@@ -20,6 +20,12 @@ export function matchesQuestions(t, f) {
     if (f.conf === '4+' ? t.confidence < 4 : f.conf === '2-' ? t.confidence > 2 : String(t.confidence) !== f.conf) return false;
   }
   if (f.tf !== 'all' && t.execTf !== f.tf) return false;
+  /* News: a timing, any news at all (not "No news"), or a bank holiday. */
+  if (f.news && f.news !== 'all') {
+    if (f.news === 'holiday') { if (!(Array.isArray(t.holidays) && t.holidays.length)) return false; }
+    else if (f.news === 'any') { if (!t.news || t.news === 'none') return false; }
+    else if (t.news !== f.news) return false;
+  }
   return true;
 }
 
@@ -88,6 +94,8 @@ export function trades(store, nav) {
     chip('Confidence', filters.conf, 'conf', [{ v: 'all', l: 'Confidence · all' }, { v: '4+', l: '4+ · Solid or better' }, { v: '2-', l: '2 or less' },
       ...CONFIDENCE.map(([k, n]) => ({ v: String(k), l: `${k} · ${n}` }))]),
     chip('Timeframe', filters.tf, 'tf', [{ v: 'all', l: 'TF · all' }, ...EXEC_TFS.map(v => ({ v, l: v }))]),
+    chip('News', filters.news, 'news', [{ v: 'all', l: 'News · all' }, { v: 'any', l: 'Around news' }, ...NEWS.map(([k, n]) => ({ v: k, l: n })),
+      { v: 'holiday', l: 'Bank holiday' }]),
     Object.keys(FRESH).some(k => filters[k] !== FRESH[k])
       ? el('button', { class: 'm tr-clear', onClick: () => { Object.assign(filters, FRESH); nav.refresh(); } }, 'Clear')
       : null,

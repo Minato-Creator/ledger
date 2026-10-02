@@ -448,6 +448,9 @@ class Store {
     if (!d.review.weeks || typeof d.review.weeks !== 'object' || Array.isArray(d.review.weeks)) { d.review.weeks = {}; note(); }
     for (const t of d.trades.trades) {
       if (t.review != null && (typeof t.review !== 'object' || Array.isArray(t.review))) { delete t.review; note(); }
+      /* "Trailed" was an exit reason for a while and was taken out; a trade
+         that carries it reads as not answered. */
+      if (t.exitReason === 'trailed') { t.exitReason = null; note(); }
       else if (t.review && t.review.after != null && !Array.isArray(t.review.after)) { t.review.after = []; note(); }
     }
     if (!d.lab || typeof d.lab !== 'object') { d.lab = defaultLab(); note(); }

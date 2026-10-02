@@ -2687,3 +2687,51 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
   .db-stat { padding:6px 0; gap:5px; }
   .db-track { margin-top:15px; }
 }
+
+/* ---------- New trade · news and bank holidays ---------- */
+.news-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.news-row .exit-reasons { flex:0 1 auto; min-width:0; }
+.news-hint { font:400 10px var(--mono); color:var(--ink-4); letter-spacing:.02em; }
+.xr.is-news.is-on { color:var(--ink); background:rgba(255,184,0,.14); box-shadow:inset 0 0 0 1px rgba(255,184,0,.75); }
+.xr.is-news.is-none.is-on { background:rgba(128,128,128,.18); box-shadow:inset 0 0 0 1px var(--grey-4); }
+.xr.is-hol { min-width:40px; text-align:center; padding-left:10px; padding-right:10px; }
+.xr.is-hol.is-on { color:var(--ink); background:rgba(167,139,250,.16); box-shadow:inset 0 0 0 1px rgba(167,139,250,.8); }
+.news-day { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; padding:10px 12px; border-radius:var(--r-btn); box-shadow:inset 0 0 0 1px var(--grey-7); }
+.news-day[hidden] { display:none; }
+.news-day .k { width:100%; font:400 9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
+.news-day .ev { font:400 11px var(--mono); color:var(--ink-3); }
+.news-day .ev b { font-weight:500; color:var(--loss); margin-right:6px; }
+.news-day .ev.is-hol b { color:#A78BFA; }
+.td-cell.is-news b, .rv-pill.is-news { color:var(--yellow); }
+.td-cell.is-hol b, .rv-pill.is-hol { color:#A78BFA; }
+.ex-news { flex:1.3 1 0; }
+.ex-hols { flex:1 1 0; }
+.ex-holrows { display:flex; flex-direction:column; flex:1; min-height:0; overflow-y:auto; justify-content:center; }
+.ex-hol { display:grid; grid-template-columns:minmax(118px, 1.1fr) minmax(40px, 1fr) 62px 84px; align-items:center; column-gap:12px; padding:8px 0; }
+.ex-hol + .ex-hol { border-top:1px solid var(--grey-9); }
+.ex-hol .nm { font:400 12px var(--mono); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ex-hol.is-sum .nm { color:#A78BFA; }
+.ex-hol .tr { height:6px; border-radius:3px; background:var(--grey-9); overflow:hidden; }
+.ex-hol .tr i { display:block; height:100%; border-radius:3px; }
+.ex-hol .tr .is-pos { background:var(--profit); } .ex-hol .tr .is-neg { background:var(--loss); }
+.ex-hol b { font:500 12.5px var(--sans); text-align:right; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.ex-row .ex-hol b.is-pos { color:var(--profit); } .ex-row .ex-hol b.is-neg { color:var(--loss); }
+.ex-hol small { font:400 10px var(--mono); color:var(--ink-4); text-align:right; white-space:nowrap; }
+.ex-hol.is-thin .nm, .ex-hol.is-thin b, .ex-hol.is-thin .tr { opacity:.5; }
+
+/* ---------- Review · pictures in two rows, answers the trade already gave ---------- */
+.rv-shotgroups { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:18px; }
+.rv-shotgroup { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.rv-shotgroup + .rv-shotgroup { padding-left:18px; box-shadow:inset 1px 0 0 var(--grey-9); }
+.rv-shotgroup .rv-shots { grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); }
+.rv-sk { display:flex; align-items:baseline; gap:8px; font:400 9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
+.rv-sk small { font-size:9.5px; color:var(--ink-5); letter-spacing:0; }
+.rv-shotgroup.is-after .rv-sk { color:var(--blue); }
+.rv-shot.is-none { cursor:default; display:flex; align-items:center; justify-content:center; box-shadow:inset 0 0 0 1px var(--grey-8); background:transparent; }
+.rv-shot.is-none small { font:400 10px var(--mono); color:var(--ink-5); }
+.rv-num.is-auto { box-shadow:inset 0 0 0 1px rgba(9,136,240,.35); }
+.rv-seg.is-auto { box-shadow:inset 0 0 0 1px rgba(9,136,240,.35); }
+.rv-autonote { color:var(--blue) !important; }
+.rv-ask { color:var(--yellow) !important; }
+.rv-chips button.is-sug { color:var(--ink-2); box-shadow:inset 0 0 0 1px rgba(9,136,240,.6); background:transparent; border:0; outline:1px dashed rgba(9,136,240,.55); outline-offset:-1px; }
+@media (max-width:1300px) { .rv-shotgroup .rv-shots { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); } }

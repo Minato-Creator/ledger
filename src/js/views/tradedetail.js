@@ -1,7 +1,7 @@
 import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { tradeShotsOf } from '../store.js';
-import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY } from '../questions.js';
+import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName } from '../questions.js';
 import { heldAsked, heldOf, heldText } from '../questions.js';
 
 export function tradeDetail(store, nav, id) {
@@ -172,7 +172,8 @@ export function howItWent(t) {
   const open = t.status === 'open';
   const mistakes = Array.isArray(t.mistakes) ? t.mistakes : null;
   const held = heldOf(t);
-  const has = t.confidence != null || t.emotionAfter != null || t.exitReason != null || t.execTf != null || t.delivery != null || mistakes || held;
+  const hols = Array.isArray(t.holidays) ? t.holidays : [];
+  const has = t.confidence != null || t.emotionAfter != null || t.exitReason != null || t.execTf != null || t.delivery != null || mistakes || held || t.news || hols.length;
   if (!has) return null;
   const name = (list, v) => (list.find(([k]) => k === v) || [])[1];
   const scale = (list, v) => v == null ? el('b', { class: 'is-none' }, '—')
@@ -188,7 +189,9 @@ export function howItWent(t) {
       cell('Exit', plain(open ? 'still in it' : name(EXIT_REASONS, t.exitReason) ?? null), t.exitReason ? ' is-xr-' + t.exitReason : ''),
       heldAsked(t) || held ? cell('If held to target', plain(held ? heldText(held) : null), ' is-held' + heldTone) : null,
       cell('Timeframe', plain(t.execTf ?? null)),
-      cell('Price delivery', plain(name(DELIVERY, t.delivery) ?? null), t.delivery ? ' is-dl-' + t.delivery : '')),
+      cell('Price delivery', plain(name(DELIVERY, t.delivery) ?? null), t.delivery ? ' is-dl-' + t.delivery : ''),
+      cell('News', plain(name(NEWS, t.news) ?? null), t.news && t.news !== 'none' ? ' is-news' : ''),
+      hols.length ? cell('Bank holiday', plain(hols.map(holidayName).join(', ')), ' is-hol') : null),
     el('div', { class: 'td-mist' },
       el('span', { class: 'k' }, 'Mistakes'),
       mistakes == null ? el('span', { class: 'td-none' }, 'not asked')

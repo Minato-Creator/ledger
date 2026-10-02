@@ -22,8 +22,9 @@ import * as P from '../periods.js';
 import { tradeShotsOf, reviewShotsOf } from '../store.js';
 import { prepare, imageOnClipboard, imageOnDrop } from '../shots.js';
 import { tipLayer } from './chartkit.js';
-import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, heldAsked, heldOf, heldText } from '../questions.js';
+import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName, heldOf, heldText } from '../questions.js';
 import { heldEditor } from './held.js';
+import { fromPricesOf } from './addtrade.js';
 
 let week = null;           // '2026-W38'
 let picked = null;         // the trade being reviewed
@@ -43,6 +44,56 @@ const GRADE = [['A', 'A'], ['B', 'B'], ['C', 'C']];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export const isReviewed = t => !!t?.review?.what;
+
+/**
+ * How a trade ended, for the review: the exit reason you logged, or what
+ * the prices say when you did not log one. 'tp' | 'sl' | 'be' | 'manual' | null.
+ */
+export function closedBy(t) {
+  if (['tp', 'sl', 'be', 'manual'].includes(t?.exitReason)) return t.exitReason;
+  return fromPricesOf({ ...t, entryPrice: t?.entryPrice, exitPrice: t?.exitPrice })?.reason || null;
+}
+
+/**
+ * The review's answers as they count: what you gave, and where you gave
+ * nothing, what the trade itself already says.
+ *   • a trade that hit take profit was the right direction, and ran at
+ *     least as far as you took;
+ *   • a trade stopped out on the right idea went at least 1R against you —
+ *     that is what a stop is;
+ *   • "Early entry" ticked on New trade is an early entry.
+ * And some answers stop counting when they no longer apply: heat on a
+ * trade read the wrong way, a better exit on anything but take profit.
+ * `auto` lists the keys that came from the trade rather than from you.
+ */
+export function reviewOf(acct, t) {
+  const v = { ...(t?.review || {}) };
+  const auto = new Set();
+  const kind = closedBy(t);
+  const r = rOf(acct, t);
+  const fill = (k, val) => { if (v[k] == null && val != null) { v[k] = val; auto.add(k); } };
+  if (kind === 'tp') { fill('dir', 'right'); if (r != null && r > 0) fill('avail', +r.toFixed(2)); }
+  if (Array.isArray(t?.mistakes) && t.mistakes.includes('early_entry')) fill('entry', 'early');
+  if (kind === 'sl' && v.dir === 'right') fill('heat', 1);
+  if (v.dir === 'wrong') { v.heat = null; auto.delete('heat'); }
+  if (kind === 'sl' && v.dir !== 'right') { v.heat = null; v.avail = null; }
+  if (kind !== 'tp') v.better = null;
+  if (kind === 'tp' && v.avail != null && r != null && v.avail < r) v.avail = +r.toFixed(2);
+  v.auto = auto;
+  v.kind = kind;
+  return v;
+}
+
+/** The answer to "what happened" the trade points to, before you pick one. */
+export function suggestWhat(acct, t) {
+  const v = reviewOf(acct, t), kind = v.kind;
+  const m = Array.isArray(t?.mistakes) ? t.mistakes : [];
+  if (kind === 'tp') return 'target';
+  if (kind === 'sl') return v.dir === 'right' ? 'stopped' : v.dir === 'wrong' ? 'wrong' : null;
+  if (kind === 'be') return v.dir === 'wrong' ? 'wrong' : 'be';
+  if (kind === 'manual') return m.includes('closed_early') || (t.heldOutcome === 'win') ? 'early' : null;
+  return null;
+}
 const rOf = (acct, t) => { const r = c.rMultiple(acct, t); return r != null && isFinite(r) ? r : null; };
 const rr = (v, d = 1) => (v == null || !isFinite(v) ? '—' : `${v > 0.0005 ? '+' : v < -0.0005 ? '−' : ''}${Math.abs(v).toFixed(d)}R`);
 const dayOf = iso => DAYS[new Date(iso + 'T00:00:00Z').getUTCDay()];
@@ -55,7 +106,7 @@ const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
  *   left       of that, what you did not take
  */
 export function weekStats(acct, trades) {
-  const rows = trades.map(t => ({ t, r: rOf(acct, t), v: t.review || {} }));
+  const rows = trades.map(t => ({ t, r: rOf(acct, t), v: reviewOf(acct, t) }));
   const rev = rows.filter(x => isReviewed(x.t));
   const withAvail = rev.filter(x => x.v.avail != null);
   const winners = rev.filter(x => x.r != null && x.r > 0);
@@ -200,7 +251,8 @@ async function addAfter(store, t, file) {
 
 /* The trade, at the size of a page. */
 function reviewCard(store, acct, t, pb, on) {
-  const v = t.review || {};
+  const v = reviewOf(acct, t);
+  const kind = v.kind;
   const r = rOf(acct, t);
   const set = async (patch, repaint = true) => { await store.setTradeReview(t.id, patch); on.changed(); if (repaint) on.repaint(); else paintRuler(); };
   const setup = pb.setups.find(s => s.id === t.setupId)?.name;
@@ -220,41 +272,51 @@ function reviewCard(store, acct, t, pb, on) {
   };
   const picker = el('input', { type: 'file', accept: 'image/*', hidden: true,
     onChange: async e => { const f = e.target.files[0]; e.target.value = ''; if (f) { await addAfter(store, t, f); on.repaint(); } } });
-  const shots = el('div', { class: 'rv-shots' },
-    ...entry.map((n, i) => shot(n, 'Entry', i)),
-    ...after.map((n, i) => shot(n, 'After', entry.length + i)),
-    el('button', { class: 'rv-shot is-add', onClick: () => picker.click(),
-      onDragOver: e => e.preventDefault(),
-      onDrop: async e => { e.preventDefault(); const f = imageOnDrop(e); if (f) { await addAfter(store, t, f); on.repaint(); } } },
-      icon('image', 18, 'var(--ink-4)', 1.6), el('span', {}, 'Paste or drop'), el('small', {}, 'what price did after')),
-    picker);
+  /* Two rows: the charts you logged the trade with, and what price did
+     after — kept apart so the before and the after read as such. */
+  const shots = el('div', { class: 'rv-shotgroups' },
+    el('div', { class: 'rv-shotgroup' },
+      el('span', { class: 'rv-sk' }, 'When you took it', el('small', {}, entry.length ? String(entry.length) : '')),
+      el('div', { class: 'rv-shots' }, ...(entry.length ? entry.map((n, i) => shot(n, 'Entry', i))
+        : [el('div', { class: 'rv-shot is-none' }, el('small', {}, 'no charts logged with the trade'))]))),
+    el('div', { class: 'rv-shotgroup is-after' },
+      el('span', { class: 'rv-sk' }, 'After', el('small', {}, after.length ? String(after.length) : '')),
+      el('div', { class: 'rv-shots' },
+        ...after.map((n, i) => shot(n, 'After', entry.length + i)),
+        el('button', { class: 'rv-shot is-add', onClick: () => picker.click(),
+          onDragOver: e => e.preventDefault(),
+          onDrop: async e => { e.preventDefault(); const f = imageOnDrop(e); if (f) { await addAfter(store, t, f); on.repaint(); } } },
+          icon('image', 18, 'var(--ink-4)', 1.6), el('span', {}, 'Paste or drop'), el('small', {}, 'what price did after')),
+        picker)));
 
   /* ---------- the ruler: your stop, your result, how far it ran ---------- */
   const ruler = el('div', { class: 'rv-ruler' });
   function paintRuler() {
-    const cur = t.review || {};
-    ruler.replaceChildren(rulerOf(r, cur, true));
+    ruler.replaceChildren(rulerOf(r, reviewOf(acct, t), true));
   }
   paintRuler();
 
   /* ---------- the questions ---------- */
   const num = (key, label, hint, { neg = false } = {}) => {
     const shown = v[key] == null ? '' : (neg ? -v[key] : v[key]).toFixed(1).replace(/\.0$/, '');
-    const input = el('input', { class: 'rv-num' + (neg ? ' is-neg' : ' is-pos'), inputmode: 'decimal', value: shown, placeholder: '—',
+    const input = el('input', { class: 'rv-num' + (neg ? ' is-neg' : ' is-pos') + (v.auto.has(key) ? ' is-auto' : ''), inputmode: 'decimal', value: shown, placeholder: '—',
       'aria-label': label,
       onChange: e => {
         const raw = c.parseNumberOrNull(e.target.value);
         const val = raw == null ? null : neg ? Math.abs(raw) : raw;
         if (raw != null && !isFinite(raw)) { e.target.value = shown; return; }
         e.target.value = val == null ? '' : (neg ? -val : val).toFixed(1).replace(/\.0$/, '');
+        e.target.classList.remove('is-auto');
         set({ [key]: val }, false);
       } });
     return el('label', { class: 'rv-f' }, el('span', { class: 'k' }, label),
       el('span', { class: 'rv-numwrap' }, input, el('i', {}, 'R')), el('span', { class: 'hint' }, hint));
   };
-  const seg = (key, opts, tone = {}) => el('div', { class: 'rv-seg', role: 'group' },
+  const seg = (key, opts, tone = {}, extra = () => ({})) => el('div', { class: 'rv-seg' + (v.auto.has(key) ? ' is-auto' : ''), role: 'group' },
     ...opts.map(([k, label]) => el('button', { class: (v[key] === k ? 'is-on ' + (tone[k] || '') : ''),
-      onClick: () => set({ [key]: v[key] === k ? null : k }) }, label)));
+      onClick: () => set({ [key]: v[key] === k && !v.auto.has(key) ? null : k, ...extra(k) }) }, label)));
+  const autoNote = (key, text) => v.auto.has(key) ? el('span', { class: 'hint rv-autonote' }, text) : null;
+  const sug = suggestWhat(acct, t);
   const lessonBox = el('textarea', { class: 'rv-lesson', rows: 2, placeholder: 'One line you want to remember', 'aria-label': 'Lesson' }, v.lesson || '');
   let timer = null;
   lessonBox.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => store.setTradeReview(t.id, { lesson: lessonBox.value.trim() || null }), 500); });
@@ -268,20 +330,22 @@ function reviewCard(store, acct, t, pb, on) {
       el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2))),
     shots,
     fromTheTrade(t, on),
-    heldBox(store, t, v),
     ruler,
     el('div', { class: 'rv-form' },
       el('div', { class: 'rv-col' },
-        num('avail', 'Available', 'how far it ran your way'),
-        num('heat', 'Heat', 'how far it went against you', { neg: true }),
-        num('better', 'Better exit', 'what a better exit would have made'),
-        el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Direction'), seg('dir', [['right', 'Right'], ['wrong', 'Wrong']], { right: 'is-good', wrong: 'is-bad' }))),
+        el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Direction'),
+          seg('dir', [['right', 'Right'], ['wrong', 'Wrong']], { right: 'is-good', wrong: 'is-bad' }, k => (k === 'wrong' ? { heat: null } : {})),
+          autoNote('dir', 'hit TP'), kind === 'sl' && !v.dir ? el('span', { class: 'hint rv-ask' }, 'answer this first') : null),
+        ...questionsFor(kind, v, num)),
       el('div', { class: 'rv-col' },
-        el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Entry'), seg('entry', ENTRY)),
+        el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Entry'), seg('entry', ENTRY), autoNote('entry', 'from your mistakes')),
         el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Plan followed'), seg('plan', PLAN, { yes: 'is-good' })),
         el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Grade'), seg('grade', GRADE)))),
+    kind === 'manual' ? heldBox(store, t) : null,
     el('div', { class: 'rv-f is-top' }, el('span', { class: 'k' }, 'What happened'),
-      el('div', { class: 'rv-chips' }, ...WHAT.map(([k, label]) => el('button', { class: v.what === k ? 'is-on' : '',
+      el('div', { class: 'rv-chips' }, ...WHAT.map(([k, label]) => el('button', {
+        class: (v.what === k ? 'is-on' : '') + (!v.what && sug === k ? ' is-sug' : ''),
+        title: !v.what && sug === k ? 'Suggested from how the trade closed — click to confirm' : null,
         onClick: () => set({ what: v.what === k ? null : k }) }, label)))),
     el('div', { class: 'rv-f is-top' }, el('span', { class: 'k' }, 'Lesson'), lessonBox),
     el('div', { class: 'rv-actions' },
@@ -289,6 +353,29 @@ function reviewCard(store, acct, t, pb, on) {
       el('div', { class: 'spacer' }),
       el('button', { class: 'btn btn-quiet', onClick: on.prev }, icon('chevleft', 12, 'currentColor', 2.2), 'Previous'),
       el('button', { class: 'btn btn-primary', onClick: on.next }, 'Next to review', icon('chevright', 12, '#fff', 2.2))));
+}
+
+/* The numbers a trade is asked for, by how it ended.
+   • Take profit: how far it ran (at least what you took), how close it came
+     to your stop, and whether a better exit was there.
+   • Stop loss: nothing until you say whether the idea was right. Right —
+     how far it went against you (from 1R, your stop) and how far it ran
+     after. Wrong — nothing more to measure.
+   • Break-even: how far it ran after, and how far against you.
+   • Closed by hand, or not logged: how far it ran and how far against you.
+   Heat is never asked of a trade read the wrong way. */
+function questionsFor(kind, v, num) {
+  const wrong = v.dir === 'wrong';
+  const heat = hint => wrong ? null : num('heat', 'Heat', hint, { neg: true });
+  if (kind === 'tp') return [
+    num('avail', 'Available', v.auto.has('avail') ? 'at least what you took — more if it kept going' : 'how far it ran your way'),
+    heat('how close it came to your stop'),
+    num('better', 'Better exit', 'what a better exit would have made')].filter(Boolean);
+  if (kind === 'sl') return v.dir === 'right' ? [
+    num('heat', 'Heat', 'how far it went against you — 1R is your stop', { neg: true }),
+    num('avail', 'Ran after', 'how far it went your way once it turned')] : [];
+  if (kind === 'be') return [num('avail', 'Ran after BE', 'how far it went after break-even'), heat('how far it went against you')].filter(Boolean);
+  return [num('avail', 'Available', 'how far it ran your way'), heat('how far it went against you')].filter(Boolean);
 }
 
 /* What you said about the trade when you logged it, read back so the review
@@ -303,6 +390,8 @@ function fromTheTrade(t, on) {
     t.exitReason ? ['Exit', name(EXIT_REASONS, t.exitReason), t.exitReason === 'tp' ? 'is-good' : t.exitReason === 'sl' ? 'is-bad' : ''] : null,
     t.execTf ? ['TF', t.execTf, ''] : null,
     t.delivery ? ['Price', name(DELIVERY, t.delivery), t.delivery === 'good' ? 'is-good' : t.delivery === 'poor' ? 'is-bad' : ''] : null,
+    t.news ? ['News', name(NEWS, t.news), t.news === 'none' ? '' : 'is-news'] : null,
+    Array.isArray(t.holidays) && t.holidays.length ? ['Holiday', t.holidays.map(holidayName).join(', '), 'is-hol'] : null,
   ].filter(Boolean);
   if (!bits.length && !m) return null;
   return el('div', { class: 'rv-from' },
@@ -314,13 +403,11 @@ function fromTheTrade(t, on) {
         : el('span', { class: 'rv-pill is-good' }, 'No mistakes')));
 }
 
-/* "If held to target", for a trade that stopped short: closed by hand,
-   closed early, moved to break-even early — or one the review says was
-   closed too early or ran after break-even. The answer is kept on the trade
-   itself, the same field New trade writes. */
-function heldBox(store, t, v) {
+/* "If held to target", for a trade you closed by hand — the only kind
+   where what holding would have made is a real question. The answer is
+   kept on the trade itself, the same field New trade writes. */
+function heldBox(store, t) {
   const held = heldOf(t);
-  if (!(heldAsked(t) || held || v.what === 'early' || v.what === 'be')) return null;
   let timer = null;
   const note = el('span', { class: 'hint' }, held ? `saved · ${heldText(held)}` : 'what it would have made had you left it alone');
   return el('div', { class: 'rv-f rv-held' },
@@ -492,7 +579,7 @@ function tradesCard(acct, trades) {
 function drawTrades(acct, trades, W, H) {
   const wrap = el('div', { class: 'lab-svgwrap' });
   const tip = tipLayer(wrap);
-  const rows = trades.map(t => ({ t, r: rOf(acct, t), v: t.review || {} }));
+  const rows = trades.map(t => ({ t, r: rOf(acct, t), v: reviewOf(acct, t) }));
   let hi = 1, lo = -1;
   for (const x of rows) { hi = Math.max(hi, x.v.avail ?? 0, x.r ?? 0, x.v.better ?? 0); lo = Math.min(lo, -(x.v.heat ?? 0), x.r ?? 0); }
   hi += 0.5; lo -= 0.35;
@@ -537,7 +624,7 @@ function drawTrades(acct, trades, W, H) {
    take line, it ran further than you usually take. The top-right corner is
    the trades your stop cost you. */
 function scatterCard(acct, trades, S) {
-  const pts = trades.filter(t => isReviewed(t) && t.review.heat != null && t.review.avail != null);
+  const pts = trades.filter(t => isReviewed(t) && reviewOf(acct, t).heat != null && reviewOf(acct, t).avail != null);
   const say = S.heatOnWinners == null ? null
     : S.heatOnWinners < 0.5 ? `Winners took only ${rr(-S.heatOnWinners)} of heat — your stop has room`
     : S.heatOnWinners > 0.8 ? `Winners took ${rr(-S.heatOnWinners)} of heat — your stop may be tight`
@@ -552,7 +639,7 @@ function scatterCard(acct, trades, S) {
 function drawScatter(acct, pts, S, W, H) {
   const wrap = el('div', { class: 'lab-svgwrap' });
   const tip = tipLayer(wrap);
-  const rows = pts.map(t => ({ t, r: rOf(acct, t), v: t.review }));
+  const rows = pts.map(t => ({ t, r: rOf(acct, t), v: reviewOf(acct, t) }));
   const xMax = Math.max(1.4, ...rows.map(x => x.v.heat)) * 1.1;
   const yMax = Math.max(2, ...rows.map(x => x.v.avail)) * 1.1;
   const plot = { l: 36, r: W - 12, t: 14, b: H - 26 };
@@ -594,7 +681,7 @@ function mixCard(acct, trades, S) {
   const parts = WHAT.filter(([k]) => S.what[k]).map(([k, label]) => ({ k, label, n: S.what[k] }));
   const total = parts.reduce((a, x) => a + x.n, 0);
   const rev = trades.filter(isReviewed);
-  const entryR = k => { const xs = rev.filter(t => t.review.entry === k).map(t => rOf(acct, t)).filter(v => v != null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; };
+  const entryR = k => { const xs = rev.filter(t => reviewOf(acct, t).entry === k).map(t => rOf(acct, t)).filter(v => v != null); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; };
   const eMax = Math.max(0.5, ...ENTRY.map(([k]) => Math.abs(entryR(k) ?? 0)));
   return el('section', { class: 'card rv-mix' },
     el('div', { class: 'rv-k' }, 'What happened'),
@@ -612,7 +699,7 @@ function mixCard(acct, trades, S) {
     })),
     el('div', { class: 'rv-read' },
       el('span', {}, 'Right direction'), el('b', {}, S.called ? `${S.right} of ${S.called}` : '—'),
-      el('div', { class: 'pips' }, ...rev.filter(t => t.review.dir).map(t => el('i', { class: t.review.dir === 'right' ? 'is-r' : 'is-w' })))),
+      el('div', { class: 'pips' }, ...rev.filter(t => reviewOf(acct, t).dir).map(t => el('i', { class: reviewOf(acct, t).dir === 'right' ? 'is-r' : 'is-w' })))),
     el('div', { class: 'rv-grades' }, ...GRADE.map(([k]) => el('span', {}, el('b', {}, String(S.grade[k])), k))));
 }
 

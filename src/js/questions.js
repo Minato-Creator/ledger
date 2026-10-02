@@ -21,7 +21,19 @@ export const MISTAKES = [['closed_early', 'Closed early'], ['early_entry', 'Earl
 /* How cleanly price moved: smooth and readable, or choppy. */
 export const DELIVERY = [['good', 'Good'], ['neutral', 'Neutral'], ['poor', 'Poor']];
 /* How the trade ended, as opposed to what it made. */
-export const EXIT_REASONS = [['tp', 'Take profit'], ['sl', 'Stop loss'], ['be', 'Break-even'], ['manual', 'Closed manually'], ['trailed', 'Trailed']];
+export const EXIT_REASONS = [['tp', 'Take profit'], ['sl', 'Stop loss'], ['be', 'Break-even'], ['manual', 'Closed manually']];
+
+/* When the trade sat against red-folder news that mattered to it. You say,
+   because which news moves which pair is your call, not the calendar's:
+   before it (the news came after you were out), during it, after it (the
+   news was out before you went in), or in between (news on both sides). */
+export const NEWS = [['none', 'No news'], ['before', 'Before news'], ['during', 'During news'], ['after', 'After news'], ['between', 'In between']];
+/* Whose bank holiday it was, if anyone's. Keyed by the country; the
+   calendar feed names them by currency, so each carries its currency too. */
+export const HOLIDAYS = [['US', 'United States', 'USD'], ['UK', 'United Kingdom', 'GBP'], ['EU', 'Euro area', 'EUR'], ['JP', 'Japan', 'JPY'],
+  ['CA', 'Canada', 'CAD'], ['AU', 'Australia', 'AUD'], ['NZ', 'New Zealand', 'NZD'], ['CH', 'Switzerland', 'CHF'], ['CN', 'China', 'CNY']];
+export const holidayName = k => (HOLIDAYS.find(([c]) => c === k) || [])[1] || k;
+export const holidayFromCurrency = cur => (HOLIDAYS.find(([, , c]) => c === String(cur || '').toUpperCase()) || [])[0] || null;
 
 /* ---------- if held ----------
    What a trade would have made had it been left alone. Asked only of a
@@ -59,7 +71,7 @@ export function heldText(h) {
    The same answers as columns, written in words a person reads (labels, not
    keys) and read back from either. Several mistakes share one cell with ';'
    between them, the way tags do; "None" means none were made. */
-export const QUESTION_COLUMNS = ['confidence', 'emotionAfter', 'exitReason', 'heldOutcome', 'heldR', 'execTf', 'mistakes', 'delivery'];
+export const QUESTION_COLUMNS = ['confidence', 'emotionAfter', 'exitReason', 'heldOutcome', 'heldR', 'execTf', 'mistakes', 'delivery', 'news', 'holidays'];
 
 const labelOf = (list, k) => (list.find(([v]) => v === k) || [])[1] ?? '';
 const keyOf = (list, text) => {
@@ -82,6 +94,8 @@ export function questionCells(t) {
     t.execTf ?? '',
     !Array.isArray(t.mistakes) ? '' : t.mistakes.length ? MISTAKES.filter(([k]) => t.mistakes.includes(k)).map(([, n]) => n).join(';') : 'None',
     labelOf(DELIVERY, t.delivery),
+    labelOf(NEWS, t.news),
+    Array.isArray(t.holidays) ? t.holidays.map(holidayName).join(';') : '',
   ];
 }
 
@@ -112,6 +126,13 @@ export function readQuestions(row) {
   else if (mc) {
     const ks = mc.split(/[;|]/).map(x => keyOf(MISTAKES, x)).filter(Boolean);
     if (ks.length) out.mistakes = MISTAKES.map(([k]) => k).filter(k => ks.includes(k));
+  }
+  const nw = keyOf(NEWS, get('news'));
+  if (nw) out.news = nw;
+  const hc = String(get('holidays') ?? '').trim();
+  if (hc) {
+    const ks = hc.split(/[;|]/).map(x => keyOf(HOLIDAYS.map(([k, n]) => [k, n]), x) || holidayFromCurrency(x)).filter(Boolean);
+    if (ks.length) out.holidays = HOLIDAYS.map(([k]) => k).filter(k => ks.includes(k));
   }
   const ho = keyOf(HELD, get('heldOutcome'));
   if (ho) {

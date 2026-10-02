@@ -2,14 +2,36 @@ import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { todayISO, tradeShotsOf, newShotId } from '../store.js';
 import { prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
-import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, heldAsked, heldOf } from '../questions.js';
+import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS, holidayFromCurrency, heldAsked, heldOf } from '../questions.js';
 import { heldEditor } from './held.js';
 
 const ASSET_CLASSES = ['Forex', 'Futures', 'Commodities', 'Indices'];
 
 /* The questions about a trade beyond its numbers live in questions.js, so
    the CSV and the importer can read them without the form. */
-export { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS };
+export { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS };
+
+const pad2 = n => String(n).padStart(2, '0');
+const localDay = iso => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const localTime = iso => { const d = new Date(iso); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+
+/**
+ * What the prices say about how a trade ended, or null when there is no
+ * entry and exit to read. `sign` is the result switch ('win' | 'loss' |
+ * 'breakeven'); `reason` the exit reason it implies, or null when the exit
+ * was somewhere in between. A stop moved to entry reads as break-even.
+ */
+export function fromPricesOf(f) {
+  const num = v => { const n = c.parseNumberOrNull(v); return n != null && isFinite(n) ? n : null; };
+  const e = num(f.entryPrice), x = num(f.exitPrice), sl = num(f.stopLoss), tp = num(f.takeProfit);
+  if (e == null || x == null) return null;
+  const same = (a, b) => a != null && Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b), 1) * 1e-9;
+  if (same(e, x)) return { sign: 'breakeven', reason: 'be' };
+  if (same(tp, x)) return { sign: 'win', reason: 'tp' };
+  if (same(sl, x)) return { sign: 'loss', reason: 'sl' };
+  const up = (x - e) * (f.side === 'sell' ? -1 : 1) > 0;
+  return { sign: up ? 'win' : 'loss', reason: null };
+}
 
 export function addTrade(store, nav, existingId = null) {
   const acct = store.activeAccount;
@@ -25,7 +47,10 @@ export function addTrade(store, nav, existingId = null) {
      win/loss switch starts on win rather than on break-even — otherwise
      typing 1400 into the box and pressing save would store a zero, because
      break-even means exactly that. */
-  const noResultYet = editing && editing.netResult == null;
+  /* A forward test keeps its result as an R, not money, so "no result yet"
+     means neither. Reading only the money opened every forward-test loss
+     and break-even as a profit. */
+  const noResultYet = editing && editing.netResult == null && (editing.rMultiple == null || !isFinite(Number(editing.rMultiple)));
   const f = editing ? {
     ...editing,
     resultSign: noResultYet ? 'win' : c.outcome(editing),
@@ -49,6 +74,8 @@ export function addTrade(store, nav, existingId = null) {
     mistakes: Array.isArray(editing.mistakes) ? editing.mistakes.filter(k => MISTAKES.some(([m]) => m === k)) : [],
     delivery: DELIVERY.some(([v]) => v === editing.delivery) ? editing.delivery : null,
     held: heldOf(editing),
+    news: NEWS.some(([v]) => v === editing.news) ? editing.news : null,
+    holidays: Array.isArray(editing.holidays) ? editing.holidays.filter(k => HOLIDAYS.some(([h]) => h === k)) : [],
   } : {
     assetClass: 'Forex', pair: '', side: 'buy', setupId: pb.setups[0]?.id || null,
     sessionId: null, sessionAuto: true,
@@ -57,7 +84,7 @@ export function addTrade(store, nav, existingId = null) {
     size: '', sizeUnit: 'lots',
     riskPercent: acct.defaultRiskPercent, netResult: '', resultSign: 'win', rText: '',
     tagIds: [], grade: '', notes: '', status: 'closed', mode: 'live',
-    confidence: null, exitReason: null, emotionAfter: null, execTf: null, mistakes: [], delivery: null, held: null,
+    confidence: null, exitReason: null, emotionAfter: null, execTf: null, mistakes: [], delivery: null, held: null, news: null, holidays: [],
   };
   if (editing) f.sessionAuto = false;
 
@@ -445,6 +472,9 @@ export function addTrade(store, nav, existingId = null) {
         menu.classList.remove('is-up');
         const m = menu.getBoundingClientRect(), b = box.getBoundingClientRect();
         if (m.bottom > b.bottom - 8 && m.top - m.height > b.top + 8) menu.classList.add('is-up');
+        /* And if the group sits below the fold of a short window, the form
+           scrolls just enough to show the menu it opened. */
+        menu.scrollIntoView({ block: 'nearest' });
       });
     }
   }
@@ -514,6 +544,8 @@ export function addTrade(store, nav, existingId = null) {
          stands: change the exit or the mistakes so it no longer applies and
          the answer goes with it. */
       heldOutcome: null, heldR: null,
+      news: f.news ?? null,
+      holidays: HOLIDAYS.map(([k]) => k).filter(k => f.holidays.includes(k)),
     };
     if (!isOpen() && heldAsked({ ...f, status: 'closed' }) && f.held && f.held.r != null) {
       payload.heldOutcome = f.held.outcome;
@@ -648,6 +680,7 @@ export function addTrade(store, nav, existingId = null) {
         onClick: e => {
           f.side = v;
           [...e.currentTarget.parentNode.children].forEach(x => x.classList.toggle('is-on', x === e.currentTarget));
+          fromPrices(); recompute();
         } }, label)));
 
   /* The money row and the R row are the same row wearing different clothes.
@@ -699,10 +732,28 @@ export function addTrade(store, nav, existingId = null) {
   function paintExitReason() {
     out.exitReason.replaceChildren(...EXIT_REASONS.map(([v, label]) =>
       el('button', { type: 'button', class: 'xr' + (f.exitReason === v ? ' is-on' : '') + ' is-' + v,
-        onClick: () => { f.exitReason = f.exitReason === v ? null : v; paintExitReason(); paintHeld(); } }, label)));
+        onClick: () => { f.exitReason = f.exitReason === v ? null : v; xrAuto = false; paintExitReason(); paintHeld(); } }, label)));
   }
   paintExitReason();
   out.exitBlock = labelled('Exit reason', out.exitReason);
+
+  /* ---------- the prices say how it ended ----------
+     Once there is an entry and an exit, the exit decides: at the target it
+     is a win that hit take profit, at the stop a loss that hit the stop, at
+     the entry a break-even. Anywhere else it is a profit or a loss by which
+     way price went for your direction. Only typing a price does this — an
+     edit opens as it was saved — and an exit reason you picked yourself is
+     left alone. */
+  let xrAuto = false;
+  function fromPrices() {
+    const read = fromPricesOf(f);
+    if (!read) return;
+    if (read.sign !== f.resultSign) { f.resultSign = read.sign; paintSign(); }
+    if (f.exitReason == null || xrAuto) {
+      const next = read.reason;
+      if (next !== f.exitReason) { f.exitReason = next; xrAuto = next != null; paintExitReason(); paintHeld(); }
+    }
+  }
 
   /* ---------- if you had held it ----------
      Only for a trade that stopped short: closed by hand, closed early or
@@ -772,13 +823,47 @@ export function addTrade(store, nav, existingId = null) {
   }
   paintMistakes();
   const tfWrap = pick('execTf', EXEC_TFS.map(v => [v, v]), 'xr is-tf');
+
+  /* ---------- news ----------
+     Your call, not the calendar's: which red-folder release mattered to this
+     pair, and whether you were in before it, during it or after it. Bank
+     holidays are ticked by country. When the calendar Quire keeps has that
+     day, it is shown underneath as a reminder — it never answers for you. */
+  const NEWS_HINT = { none: 'no red-folder news that mattered', before: 'the news came after you were out', during: 'the news hit while you were in',
+    after: 'the news was out before you went in', between: 'news before and after your trade' };
+  const newsWrap = el('div', { class: 'exit-reasons', role: 'group', 'aria-label': 'News' });
+  const newsNote = el('span', { class: 'news-hint' });
+  function paintNews() {
+    newsWrap.replaceChildren(...NEWS.map(([v, name]) => el('button', { type: 'button', class: 'xr is-news is-' + v + (f.news === v ? ' is-on' : ''), title: NEWS_HINT[v],
+      onClick: () => { f.news = f.news === v ? null : v; paintNews(); } }, name)));
+    newsNote.textContent = f.news ? NEWS_HINT[f.news] : '';
+  }
+  paintNews();
+  const holWrap = el('div', { class: 'exit-reasons hol', role: 'group', 'aria-label': 'Bank holiday' });
+  function paintHol() {
+    holWrap.replaceChildren(...HOLIDAYS.map(([k, name]) => el('button', { type: 'button', class: 'xr is-hol' + (f.holidays.includes(k) ? ' is-on' : ''), title: name,
+      onClick: () => { f.holidays = f.holidays.includes(k) ? f.holidays.filter(x => x !== k) : [...f.holidays, k]; paintHol(); } }, k)));
+  }
+  paintHol();
+  /* What the kept calendar has for the trade's day, if anything. */
+  const dayNote = el('div', { class: 'news-day' });
+  function paintDay() {
+    const evs = (store.data.news?.events || []).filter(ev => localDay(ev.at) === f.date);
+    dayNote.replaceChildren(...(evs.length ? [el('span', { class: 'k' }, 'On the calendar that day'),
+      ...evs.map(ev => el('span', { class: 'ev' + (ev.impact === 'Holiday' ? ' is-hol' : '') },
+        el('b', {}, ev.impact === 'Holiday' ? 'Holiday' : localTime(ev.at)), ev.country,
+        ev.impact === 'Holiday' ? ` · ${holidayFromCurrency(ev.country) ? HOLIDAYS.find(([k]) => k === holidayFromCurrency(ev.country))[1] : ev.title}` : ` · ${ev.title}`))] : []));
+    dayNote.hidden = !evs.length;
+  }
+  paintDay();
+  out.paintDay = paintDay;
   const deliveryWrap = el('div', { class: 'delivery' }, pick('delivery', DELIVERY, 'xr is-dl'),
     el('span', { class: 'delivery-hint' }, 'smooth ↔ choppy'));
 
-  /* A section: a small numbered heading, then its fields. Nine of them, in
+  /* A section: a small numbered heading, then its fields. Eleven of them, in
      the order a trade is remembered — what it was, where, when, how it
-     ended, why; then what you felt, how you labelled it, what it looked like
-     and what you thought. */
+     ended, why; then what you felt, what went wrong, the news around it, how
+     you labelled it, what it looked like and what you thought. */
   let secN = 0;
   const sec = (title, ...kids) => el('div', { class: 'band sec' },
     el('div', { class: 'sec-h' }, el('i', {}, String(++secN).padStart(2, '0')), el('span', {}, title)), ...kids);
@@ -790,13 +875,13 @@ export function addTrade(store, nav, existingId = null) {
       labelled('Direction', direction))),
 
     sec('Prices', grid('repeat(4,minmax(0,1fr))',
-      labelled('Entry', field({ inputmode: 'decimal', ...bind('entryPrice') })),
-      labelled('Stop', field({ inputmode: 'decimal', class: 'field is-stop', ...bind('stopLoss') })),
-      labelled('Target', field({ inputmode: 'decimal', ...bind('takeProfit') })),
-      labelled('Exit', out.exitField = field({ inputmode: 'decimal', ...bind('exitPrice') })))),
+      labelled('Entry', field({ inputmode: 'decimal', ...bind('entryPrice', { onSet: fromPrices }) })),
+      labelled('Stop', field({ inputmode: 'decimal', class: 'field is-stop', ...bind('stopLoss', { onSet: fromPrices }) })),
+      labelled('Target', field({ inputmode: 'decimal', ...bind('takeProfit', { onSet: fromPrices }) })),
+      labelled('Exit', out.exitField = field({ inputmode: 'decimal', ...bind('exitPrice', { onSet: fromPrices }) })))),
 
     sec('Timing & size', grid('repeat(4,minmax(0,1fr))',
-      labelled('Date', field({ type: 'date', ...bind('date') })),
+      labelled('Date', field({ type: 'date', ...bind('date', { onSet: () => out.paintDay?.() }) })),
       labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
       labelled('Closed', out.closeField = field({ type: 'time', ...bind('timeClose') })),
       labelled('Size', field({ inputmode: 'decimal', ...bind('size') })))),
@@ -822,6 +907,8 @@ export function addTrade(store, nav, existingId = null) {
   const colRight = el('div', { class: 'col' },
     sec('Mindset', confBlock, out.afterBlock),
     sec('Execution', labelled('Mistakes', mistakesWrap), labelled('Price delivery', deliveryWrap)),
+    sec('News', labelled('Timing', el('div', { class: 'news-row' }, newsWrap, newsNote)),
+      labelled('Bank holiday', holWrap), dayNote),
     sec('Tags', tagWrap),
   );
 

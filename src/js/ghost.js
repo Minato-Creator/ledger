@@ -33,13 +33,15 @@ import * as c from './calc.js';
 import { rng } from './lab.js';
 import { heldOf } from './questions.js';
 
+const NEWS_SHORT = { none: 'no-news days', before: 'before news', during: 'during news', after: 'after news', between: 'in between news' };
+
 export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /** A ghost with no rules: identical to you. */
 export const blankRules = () => ({
   lossesPerDay: null, dayLossR: null, dayWinR: null, maxTrades: null, afterLoss: false,
   skipDays: [], sessions: [], setups: [], pairs: [], skipTags: [], onlyTags: [],
-  minConfidence: null, tfs: [], holdToTarget: false,
+  minConfidence: null, tfs: [], holdToTarget: false, skipNews: [], skipHolidays: false,
 });
 
 const dowOf = date => (new Date(date + 'T00:00:00').getDay() + 6) % 7;   // Mon = 0
@@ -55,7 +57,8 @@ export function rowsFrom(account, trades) {
     rows.push({ t, r, date: t.date, dow: dowOf(t.date), outcome: c.outcome(t),
       session: t.sessionId || null, setup: t.setupId || null,
       pair: (t.pair || '').toUpperCase() || null, tags: t.tagIds || [],
-      confidence: t.confidence ?? null, tf: t.execTf || null, held: heldOf(t) });
+      confidence: t.confidence ?? null, tf: t.execTf || null, held: heldOf(t),
+      news: t.news || null, holiday: Array.isArray(t.holidays) && t.holidays.length > 0 });
   }
   rows.sort((a, b) => (a.date + (a.t.timeOpen || '99:99')).localeCompare(b.date + (b.t.timeOpen || '99:99')));
   return { rows, skipped };
@@ -78,7 +81,9 @@ export function apply(rows, R) {
     /* A trade never rated, or never given a timeframe, cannot be shown to
        pass either, so a ghost keeping these rules leaves it out. */
     && (R.minConfidence == null || (x.confidence != null && x.confidence >= R.minConfidence))
-    && (!some(R.tfs) || R.tfs.includes(x.tf)));
+    && (!some(R.tfs) || R.tfs.includes(x.tf))
+    && !has(R.skipNews, x.news)
+    && !(R.skipHolidays && x.holiday));
 
   /* Then each day, in the order it was traded. */
   let day = null, losses = 0, dayR = 0, taken = 0, lastLost = false;
@@ -171,6 +176,8 @@ export function effects(rows, R, real) {
   }
   if (R.minConfidence != null) tryRule('minConfidence', { minConfidence: R.minConfidence }, `Only confidence ${R.minConfidence}+`);
   if (some(R.tfs)) tryRule('tfs', { tfs: R.tfs }, `Only ${R.tfs.join(', ')}`);
+  if (some(R.skipNews)) tryRule('skipNews', { skipNews: R.skipNews }, `Skip ${R.skipNews.map(k => NEWS_SHORT[k] || k).join(', ')}`);
+  if (R.skipHolidays) tryRule('skipHolidays', { skipHolidays: true }, 'Skip bank holidays');
   if (R.lossesPerDay != null) tryRule('lossesPerDay', { lossesPerDay: R.lossesPerDay }, `Stop after ${R.lossesPerDay} loss${R.lossesPerDay === 1 ? '' : 'es'}`);
   if (R.dayLossR != null) tryRule('dayLossR', { dayLossR: R.dayLossR }, `Stop at −${R.dayLossR}R on the day`);
   if (R.dayWinR != null) tryRule('dayWinR', { dayWinR: R.dayWinR }, `Stop at +${R.dayWinR}R on the day`);
@@ -216,6 +223,8 @@ export function suggest(rows, playbook, { top = 4, names = {} } = {}) {
   for (const p of distinct('pair')) if (count(x => x.pair === p) >= 5) cand({ pairs: [p] }, `Only ${p}`);
   for (const n of [3, 4, 5]) if (count(x => x.confidence != null && x.confidence >= n) >= 5) cand({ minConfidence: n }, `Only confidence ${n}+`);
   for (const f of distinct('tf')) if (count(x => x.tf === f) >= 5) cand({ tfs: [f] }, `Only ${f} entries`);
+  for (const k of ['during', 'before', 'after', 'between']) if (count(x => x.news === k) >= 3) cand({ skipNews: [k] }, `Skip trades ${NEWS_SHORT[k]}`);
+  if (count(x => x.holiday) >= 3) cand({ skipHolidays: true }, 'Skip bank holidays');
   const tags = [...new Set(rows.flatMap(x => x.tags))];
   for (const id of tags) if (count(x => x.tags.includes(id)) >= 3) cand({ skipTags: [id] }, `Skip "${names.tags?.[id] || 'tag'}"`);
   out.sort((a, b) => b.delta - a.delta);
