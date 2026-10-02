@@ -5,7 +5,9 @@
    replayed keeping it: the ghost's equity line is drawn against yours, the
    space between them green where the rule would have helped and red where
    it would have cost you. Nothing is simulated — the ghost only ever takes
-   trades you really took, at the result you really got.
+   trades you really took, at the result you really got — except for "leave
+   trades to TP", which counts a trade you cut short at what you said it
+   would have made if held.
 
    Every figure is the ghost's, with yours beside it. The luck test asks
    whether leaving out that many trades at random would have done as well,
@@ -15,6 +17,7 @@ import { el, svg, icon, fitted } from '../ui.js';
 import * as c from '../calc.js';
 import * as G from '../ghost.js';
 import { ticks, hoverLayer, readRow } from './chartkit.js';
+import { EXEC_TFS as TF_ORDER } from '../questions.js';
 
 const rFmt = (v, d = 1) => c.rFmt(v, d);
 let suggestCache = null;   // { sig, list }
@@ -99,6 +102,9 @@ export function ghostPage(ctx) {
     const tags = [...tagCounts.entries()].filter(([id]) => names.tags[id]).sort((a, b) => b[1] - a[1])
       .map(([id, n]) => [id, names.tags[id], n]);
 
+    const rated = count(x => x.confidence != null);
+    const heldN = count(x => x.held);
+
     const sig = JSON.stringify([ctx.state.source, acct.id, rows.length, rows.reduce((a, x) => a + x.r, 0).toFixed(6)]);
     if (!suggestCache || suggestCache.sig !== sig) suggestCache = { sig, list: G.suggest(rows, pb, { names }) };
     const apply = patch => {
@@ -131,7 +137,14 @@ export function ghostPage(ctx) {
         chips('Only setups', 'setups', present('setup', v => names.setups[v] || 'Setup')),
         chips('Only instruments', 'pairs', present('pair', v => v)),
         chips('Skip tags', 'skipTags', tags),
-        chips('Only tags', 'onlyTags', tags)));
+        chips('Only tags', 'onlyTags', tags),
+        el('span', { class: 'k gh-sec' }, 'How you traded'),
+        rated ? stepRule('minConfidence', 4, 1, 5, 1, v => `Only confidence ${v}+`) : null,
+        rated ? el('span', { class: 'gh-note' }, `${rated} of ${rows.length} trades rated · the rest are left out`) : null,
+        chips('Only timeframes', 'tfs', present('tf', v => v).sort((a, b) => TF_ORDER.indexOf(a[0]) - TF_ORDER.indexOf(b[0]))),
+        heldN ? flag('holdToTarget', 'Leave trades to TP') : null,
+        heldN ? el('span', { class: 'gh-note' }, `${heldN} trade${heldN === 1 ? '' : 's'} cut short, counted at what you said ${heldN === 1 ? 'it' : 'they'} would have made if held`) : null,
+        !rated && !heldN && !rows.some(x => x.tf) ? el('span', { class: 'gh-note' }, 'Confidence, timeframe and “if held” come from New trade — answer them on a few trades and they show up here.') : null));
     const sc = rail.querySelector('.gh-scroll');
     if (sc) sc.scrollTop = keep;
   }
@@ -167,7 +180,7 @@ export function ghostPage(ctx) {
         ghost.winRate != null && real.winRate != null ? delta(ghost.winRate, real.winRate, { fmt: pts }) : null),
       tile('Per trade', rFmt(ghost.perTrade, 2), `you ${rFmt(real.perTrade, 2)}`, delta(ghost.perTrade, real.perTrade, { fmt: v => rFmt(v, 2) })),
       tile('Max drawdown', rFmt(-ghost.drawdown), `you ${rFmt(-real.drawdown)}`, delta(ghost.drawdown, real.drawdown, { better: 'down' })),
-      tile('Trades', String(ghost.trades), `of ${real.trades}`, ghost.skipped ? el('span', { class: 'd' }, `${ghost.skipped} skipped`) : null),
+      tile('Trades', String(ghost.trades), `of ${real.trades}${ghost.held ? ` · ${ghost.held} held` : ''}`, ghost.skipped ? el('span', { class: 'd' }, `${ghost.skipped} skipped`) : null),
       el('div', { class: 'lab-tile gh-tile gh-luck-tile' + (L == null ? '' : L >= 0.95 ? ' is-strong' : L < 0.8 ? ' is-weak' : ''),
         title: 'How often leaving out the same number of trades at random would have done worse. Around 50% is what luck alone does.' },
         el('span', { class: 'k' }, 'Luck test'),
@@ -188,7 +201,7 @@ export function ghostPage(ctx) {
             const peak = Math.max(0.01, ...fx.map(f => Math.abs(f.delta)));
             return fx.map(f => el('div', { class: 'gh-fxrow' },
               el('span', { class: 'l' }, f.label),
-              el('span', { class: 'n' }, `${f.skipped} skipped`),
+              el('span', { class: 'n' }, f.note || `${f.skipped} skipped`),
               el('span', { class: 'bar' },
                 el('i', { class: f.delta >= 0 ? 'is-pos' : 'is-neg',
                   style: { width: (Math.abs(f.delta) / peak * 50).toFixed(1) + '%', [f.delta >= 0 ? 'left' : 'right']: '50%' } })),

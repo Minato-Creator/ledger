@@ -1,8 +1,27 @@
 import { el, icon, ft } from '../ui.js';
 import * as c from '../calc.js';
 import { tradeRow } from './dashboard.js';
+import { CONFIDENCE, EXIT_REASONS, EXEC_TFS, MISTAKES } from '../questions.js';
 
-const filters = { q: '', side: 'all', result: 'all', setupId: 'all' };
+const filters = { q: '', side: 'all', result: 'all', setupId: 'all', mistake: 'all', exit: 'all', conf: 'all', tf: 'all' };
+const FRESH = { ...filters };
+
+/* The questions New trade asks, as filters. A mistake filter of 'none' is
+   the clean trades — asked, and nothing went wrong; a confidence of '4+' is
+   solid or better. A trade never asked a question never matches it. */
+export function matchesQuestions(t, f) {
+  if (f.mistake !== 'all') {
+    if (!Array.isArray(t.mistakes)) return false;
+    if (f.mistake === 'none' ? t.mistakes.length : f.mistake === 'any' ? !t.mistakes.length : !t.mistakes.includes(f.mistake)) return false;
+  }
+  if (f.exit !== 'all' && t.exitReason !== f.exit) return false;
+  if (f.conf !== 'all') {
+    if (t.confidence == null) return false;
+    if (f.conf === '4+' ? t.confidence < 4 : f.conf === '2-' ? t.confidence > 2 : String(t.confidence) !== f.conf) return false;
+  }
+  if (f.tf !== 'all' && t.execTf !== f.tf) return false;
+  return true;
+}
 
 export function trades(store, nav) {
   const acct = store.activeAccount;
@@ -11,6 +30,7 @@ export function trades(store, nav) {
   if (filters.side !== 'all')   rows = rows.filter(t => t.side === filters.side);
   if (filters.setupId !== 'all')rows = rows.filter(t => t.setupId === filters.setupId);
   if (filters.result !== 'all') rows = rows.filter(t => c.outcome(t) === filters.result);
+  rows = rows.filter(t => matchesQuestions(t, filters));
   if (filters.q.trim()) {
     const q = filters.q.toLowerCase();
     rows = rows.filter(t => (t.notes || '').toLowerCase().includes(q) || (t.pair || '').toLowerCase().includes(q));
@@ -29,6 +49,10 @@ export function trades(store, nav) {
       },
       onChange: e => { filters[key] = e.target.value; nav.refresh(); },
     }, ...options.map(o => el('option', { value: o.v, selected: o.v === value, style: { background: '#363636' } }, o.l)));
+    /* As wide as what it shows, not as wide as its longest option — seven
+       of these share one row. */
+    const shown = (options.find(o => o.v === value) || options[0]).l;
+    b.style.width = `${Math.ceil(shown.length * 6.95) + 26}px`;
     return b;
   };
 
@@ -49,8 +73,8 @@ export function trades(store, nav) {
     el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, '#fff', 2), 'New trade'),
   );
 
-  const bar = el('section', { class: 'card', style: { height: '64px', flex: 'none', padding: '0 24px', flexDirection: 'row', alignItems: 'center', gap: '8px' } },
-    el('label', { style: { display: 'flex', alignItems: 'center', gap: '9px', background: 'var(--grey-7)', borderRadius: 'var(--r-btn)', padding: '8px 14px', width: '240px' } },
+  const bar = el('section', { class: 'card tr-bar', style: { minHeight: '64px', flex: 'none', padding: '12px 24px', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
+    el('label', { style: { display: 'flex', alignItems: 'center', gap: '9px', background: 'var(--grey-7)', borderRadius: 'var(--r-btn)', padding: '8px 14px', width: '200px' } },
       icon('trades', 14, 'var(--grey-5)', 2),
       el('input', { class: 'm', placeholder: 'Search notes & pairs', value: filters.q,
                     style: { fontSize: '12px', background: 'none', width: '100%', color: 'var(--ink)' },
@@ -58,10 +82,19 @@ export function trades(store, nav) {
     chip('Side', filters.side, 'side', [{ v: 'all', l: 'Side · all' }, { v: 'buy', l: 'Long' }, { v: 'sell', l: 'Short' }]),
     chip('Result', filters.result, 'result', [{ v: 'all', l: 'Result · all' }, { v: 'win', l: 'Wins' }, { v: 'loss', l: 'Losses' }, { v: 'breakeven', l: 'Break-even' }]),
     chip('Setup', filters.setupId, 'setupId', [{ v: 'all', l: 'Setup · all' }, ...store.playbook.setups.map(x => ({ v: x.id, l: x.name }))]),
-    el('span', { class: 'spacer' }),
-    el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-5)' } }, 'Filtered net'),
-    el('span', { class: 'm', style: { fontSize: '15px', color: s.net > 0 ? 'var(--green)' : s.net < 0 ? 'var(--orange)' : 'var(--grey-2)' } },
-      c.fig(u, acct, s.net, s.netR)),
+    chip('Mistake', filters.mistake, 'mistake', [{ v: 'all', l: 'Mistakes · all' }, { v: 'none', l: 'Clean — none' }, { v: 'any', l: 'Any mistake' },
+      ...MISTAKES.map(([k, n]) => ({ v: k, l: n }))]),
+    chip('Exit', filters.exit, 'exit', [{ v: 'all', l: 'Exit · all' }, ...EXIT_REASONS.map(([k, n]) => ({ v: k, l: n }))]),
+    chip('Confidence', filters.conf, 'conf', [{ v: 'all', l: 'Confidence · all' }, { v: '4+', l: '4+ · Solid or better' }, { v: '2-', l: '2 or less' },
+      ...CONFIDENCE.map(([k, n]) => ({ v: String(k), l: `${k} · ${n}` }))]),
+    chip('Timeframe', filters.tf, 'tf', [{ v: 'all', l: 'TF · all' }, ...EXEC_TFS.map(v => ({ v, l: v }))]),
+    Object.keys(FRESH).some(k => filters[k] !== FRESH[k])
+      ? el('button', { class: 'm tr-clear', onClick: () => { Object.assign(filters, FRESH); nav.refresh(); } }, 'Clear')
+      : null,
+    el('span', { style: { marginLeft: 'auto', display: 'inline-flex', alignItems: 'baseline', gap: '8px', whiteSpace: 'nowrap' } },
+      el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-5)' } }, 'Filtered net'),
+      el('span', { class: 'm', style: { fontSize: '15px', color: s.net > 0 ? 'var(--green)' : s.net < 0 ? 'var(--orange)' : 'var(--grey-2)' } },
+        c.fig(u, acct, s.net, s.netR))),
   );
 
   const body = rows.length

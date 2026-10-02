@@ -2,11 +2,14 @@
    csv.js — the whole journal as one flat sheet.
 
    One way out, for a spreadsheet. Bringing a journal back is the vault's
-   job, not this file's: a sheet of text cannot carry the charts. parseCSV
+   job, not this file's: a sheet of text cannot carry the charts. The
+   importer does read the question columns back (questions.js), so trades
+   brought in from a Quire sheet keep their answers. parseCSV
    stays because the broker importer and the replay importer both read
    other people's files with it.
    ============================================================ */
 import * as c from './calc.js';
+import { QUESTION_COLUMNS, questionCells } from './questions.js';
 
 export const COLUMNS = [
   'id','account','accountCurrency','accountStartingBalance','date','timeOpen','timeClose',
@@ -18,6 +21,10 @@ export const COLUMNS = [
   /* Also added later. Blank, or anything but 'forward', reads as a live
      trade — which is what every trade written before this column was. */
   'mode',
+  /* And the questions New trade asks beyond the numbers — confidence, how
+     it felt after, how it ended, what it would have made if held, the
+     timeframe, mistakes and price delivery. Blank where never answered. */
+  ...QUESTION_COLUMNS,
 ];
 
 const q = v => {
@@ -54,6 +61,7 @@ export function toCSV(store, accountIds = null) {
       (t.tagIds || []).map(id => tags.get(id)?.name).filter(Boolean).join(';'),
       t.grade, t.notes, open ? 'open' : 'closed',
       t.mode === 'forward' ? 'forward' : 'live',
+      ...questionCells(t),
     ].map(q).join(','));
   }
   return lines.join('\n') + '\n';

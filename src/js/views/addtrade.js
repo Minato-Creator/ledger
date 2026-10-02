@@ -2,8 +2,14 @@ import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { todayISO, tradeShotsOf, newShotId } from '../store.js';
 import { prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
+import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, heldAsked, heldOf } from '../questions.js';
+import { heldEditor } from './held.js';
 
 const ASSET_CLASSES = ['Forex', 'Futures', 'Commodities', 'Indices'];
+
+/* The questions about a trade beyond its numbers live in questions.js, so
+   the CSV and the importer can read them without the form. */
+export { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS };
 
 export function addTrade(store, nav, existingId = null) {
   const acct = store.activeAccount;
@@ -36,6 +42,13 @@ export function addTrade(store, nav, existingId = null) {
     status: editing.status === 'open' ? 'open' : 'closed',
     mode: editing.mode === 'forward' ? 'forward' : 'live',
     rText: editing.rMultiple == null ? '' : asText(Math.abs(Number(editing.rMultiple))),
+    confidence: CONFIDENCE.some(([v]) => v === editing.confidence) ? editing.confidence : null,
+    exitReason: EXIT_REASONS.some(([v]) => v === editing.exitReason) ? editing.exitReason : null,
+    emotionAfter: EMOTION_AFTER.some(([v]) => v === editing.emotionAfter) ? editing.emotionAfter : null,
+    execTf: EXEC_TFS.includes(editing.execTf) ? editing.execTf : null,
+    mistakes: Array.isArray(editing.mistakes) ? editing.mistakes.filter(k => MISTAKES.some(([m]) => m === k)) : [],
+    delivery: DELIVERY.some(([v]) => v === editing.delivery) ? editing.delivery : null,
+    held: heldOf(editing),
   } : {
     assetClass: 'Forex', pair: '', side: 'buy', setupId: pb.setups[0]?.id || null,
     sessionId: null, sessionAuto: true,
@@ -44,6 +57,7 @@ export function addTrade(store, nav, existingId = null) {
     size: '', sizeUnit: 'lots',
     riskPercent: acct.defaultRiskPercent, netResult: '', resultSign: 'win', rText: '',
     tagIds: [], grade: '', notes: '', status: 'closed', mode: 'live',
+    confidence: null, exitReason: null, emotionAfter: null, execTf: null, mistakes: [], delivery: null, held: null,
   };
   if (editing) f.sessionAuto = false;
 
@@ -490,11 +504,27 @@ export function addTrade(store, nav, existingId = null) {
       tagIds: f.tagIds, grade: f.grade || null, notes: f.notes || '',
       status: isOpen() ? 'open' : 'closed',
       mode: f.mode === 'forward' ? 'forward' : 'live',
+      confidence: f.confidence ?? null,
+      exitReason: f.exitReason ?? null,
+      emotionAfter: f.emotionAfter ?? null,
+      execTf: f.execTf ?? null,
+      mistakes: MISTAKES.map(([k]) => k).filter(k => f.mistakes.includes(k)),
+      delivery: f.delivery ?? null,
+      /* What it would have made if held — only kept while the question
+         stands: change the exit or the mistakes so it no longer applies and
+         the answer goes with it. */
+      heldOutcome: null, heldR: null,
     };
+    if (!isOpen() && heldAsked({ ...f, status: 'closed' }) && f.held && f.held.r != null) {
+      payload.heldOutcome = f.held.outcome;
+      payload.heldR = f.held.r;
+    }
     /* A running trade carries no result, no exit and no closing time — not a
        zero, not an empty string. Anything that reads this trade later has to
        be able to tell "nothing yet" from "nothing gained". */
     if (isOpen()) {
+      payload.exitReason = null;            // it has not ended, so it has no way it ended
+      payload.emotionAfter = null;          // nor any feeling about how it went
       payload.netResult = null;
       payload.rMultiple = null;
       payload.exitPrice = null;
@@ -657,72 +687,157 @@ export function addTrade(store, nav, existingId = null) {
        to keep in step, and they would drift. */
     if (!open) (fwd ? rCell : moneyCell).querySelector('div').append(signWrap, out.resultNote);
     out.riskBand.hidden = fwd && open;
+    if (out.exitBlock) out.exitBlock.hidden = open;
+    if (out.afterBlock) out.afterBlock.hidden = open;
+    paintHeld();
   }
 
+  /* ---------- how the trade ended ----------
+     Only asked once it has: a running trade has no way it ended. Picking the
+     one already chosen clears it. */
+  out.exitReason = el('div', { class: 'exit-reasons', role: 'group', 'aria-label': 'Exit reason' });
+  function paintExitReason() {
+    out.exitReason.replaceChildren(...EXIT_REASONS.map(([v, label]) =>
+      el('button', { type: 'button', class: 'xr' + (f.exitReason === v ? ' is-on' : '') + ' is-' + v,
+        onClick: () => { f.exitReason = f.exitReason === v ? null : v; paintExitReason(); paintHeld(); } }, label)));
+  }
+  paintExitReason();
+  out.exitBlock = labelled('Exit reason', out.exitReason);
+
+  /* ---------- if you had held it ----------
+     Only for a trade that stopped short: closed by hand, closed early or
+     moved to break-even early. It opens beneath the exit reason the moment
+     that is true. */
+  out.heldBlock = el('div', { class: 'held-block' },
+    el('span', { class: 'lbl' }, 'If held to target'),
+    heldEditor(f.held, v => { f.held = v; }),
+    el('span', { class: 'held-hint' }, 'What it would have made had you left it alone'));
+  function paintHeld() {
+    if (!out.heldBlock) return;
+    const show = !isOpen() && heldAsked({ ...f, status: 'closed' });
+    if (show && out.heldBlock.hidden) { out.heldBlock.classList.remove('is-in'); void out.heldBlock.offsetWidth; out.heldBlock.classList.add('is-in'); }
+    out.heldBlock.hidden = !show;
+  }
+
+  /* ---------- how sure you were ----------
+     A slide from 1 to 5. Until it is touched it is not set — a trade you never
+     rated is not a 3 — and the × takes it back to unset. */
+  /* A slide from 1 to 5, for a feeling. Built once and updated in place —
+     redrawing it while it is being dragged would drop the drag. Until it is
+     touched it is not set (a trade you never rated is not a 3), and × takes
+     it back to unset. */
+  function slide(key, scale, label) {
+    const box = el('div', { class: 'conf' });
+    const n = el('b', { class: 'conf-n' });
+    const word = el('span', { class: 'conf-word' });
+    const x = el('button', { type: 'button', class: 'conf-x', title: 'Clear', onClick: () => set(null) }, icon('close', 10, 'currentColor', 2.4));
+    const range = el('input', { type: 'range', min: 1, max: 5, step: 1, value: f[key] ?? 3, class: 'conf-range', 'aria-label': label,
+      onInput: e => set(Number(e.target.value)),
+      /* A click on the thumb where it already sits fires no input, so an
+         unrated slide takes the value it was released on. */
+      onPointerup: e => { if (f[key] == null) set(Number(e.target.value)); } });
+    const ticks = scale.map(([v, name]) => el('button', { type: 'button', onClick: () => set(v) }, el('b', {}, String(v)), el('span', {}, name)));
+    box.append(el('div', { class: 'conf-head' }, n, word, x), el('div', { class: 'conf-track' }, range), el('div', { class: 'conf-ticks' }, ...ticks));
+    function set(v) {
+      f[key] = v;
+      if (v != null && Number(range.value) !== v) range.value = v;
+      box.className = 'conf' + (v == null ? ' is-unset' : ' is-' + v);
+      n.textContent = v == null ? '—' : String(v);
+      word.textContent = v == null ? 'Not rated' : scale[v - 1][1];
+      range.setAttribute('aria-valuetext', v == null ? 'not rated' : scale[v - 1][1]);
+      x.hidden = v == null;
+      ticks.forEach((b, i) => b.classList.toggle('is-on', i + 1 === v));
+    }
+    set(f[key]);
+    return labelled(label, box);
+  }
+  const confBlock = slide('confidence', CONFIDENCE, 'Confidence going in');
+  out.afterBlock = slide('emotionAfter', EMOTION_AFTER, 'Feeling after');
+
+  /* Single choice, as chips; picking the chosen one again clears it. */
+  function pick(key, opts, cls = 'xr') {
+    const wrap = el('div', { class: 'exit-reasons', role: 'group' });
+    const paint = () => wrap.replaceChildren(...opts.map(([v, name]) =>
+      el('button', { type: 'button', class: cls + (f[key] === v ? ' is-on' : '') + ' is-' + v,
+        onClick: () => { f[key] = f[key] === v ? null : v; paint(); } }, name)));
+    paint();
+    return wrap;
+  }
+  /* Several at once, for mistakes. */
+  const mistakesWrap = el('div', { class: 'exit-reasons mistakes', role: 'group', 'aria-label': 'Mistakes' });
+  function paintMistakes() {
+    mistakesWrap.replaceChildren(...MISTAKES.map(([k, name]) =>
+      el('button', { type: 'button', class: 'xr is-mistake' + (f.mistakes.includes(k) ? ' is-on' : ''),
+        onClick: () => { f.mistakes = f.mistakes.includes(k) ? f.mistakes.filter(x => x !== k) : [...f.mistakes, k]; paintMistakes(); paintHeld(); } }, name)));
+  }
+  paintMistakes();
+  const tfWrap = pick('execTf', EXEC_TFS.map(v => [v, v]), 'xr is-tf');
+  const deliveryWrap = el('div', { class: 'delivery' }, pick('delivery', DELIVERY, 'xr is-dl'),
+    el('span', { class: 'delivery-hint' }, 'smooth ↔ choppy'));
+
+  /* A section: a small numbered heading, then its fields. Nine of them, in
+     the order a trade is remembered — what it was, where, when, how it
+     ended, why; then what you felt, how you labelled it, what it looked like
+     and what you thought. */
+  let secN = 0;
+  const sec = (title, ...kids) => el('div', { class: 'band sec' },
+    el('div', { class: 'sec-h' }, el('i', {}, String(++secN).padStart(2, '0')), el('span', {}, title)), ...kids);
+
   const colLeft = el('div', { class: 'col' },
-    band(grid('minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.3fr)',
+    sec('The trade', grid('minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.3fr)',
       labelled('Instrument', field({ placeholder: 'XAUUSD', ...bind('pair') })),
       labelled('Class', classSelect),
       labelled('Direction', direction))),
 
-    band(
-      grid('repeat(4,minmax(0,1fr))',
-        labelled('Entry', field({ inputmode: 'decimal', ...bind('entryPrice') })),
-        labelled('Stop', field({ inputmode: 'decimal', class: 'field is-stop', ...bind('stopLoss') })),
-        labelled('Target', field({ inputmode: 'decimal', ...bind('takeProfit') })),
-        labelled('Exit', out.exitField = field({ inputmode: 'decimal', ...bind('exitPrice') }))),
-      grid('repeat(4,minmax(0,1fr))',
-        labelled('Size', field({ inputmode: 'decimal', ...bind('size') })),
-        labelled('Date', field({ type: 'date', ...bind('date') })),
-        labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
-        labelled('Closed', out.closeField = field({ type: 'time', ...bind('timeClose') })))),
+    sec('Prices', grid('repeat(4,minmax(0,1fr))',
+      labelled('Entry', field({ inputmode: 'decimal', ...bind('entryPrice') })),
+      labelled('Stop', field({ inputmode: 'decimal', class: 'field is-stop', ...bind('stopLoss') })),
+      labelled('Target', field({ inputmode: 'decimal', ...bind('takeProfit') })),
+      labelled('Exit', out.exitField = field({ inputmode: 'decimal', ...bind('exitPrice') })))),
+
+    sec('Timing & size', grid('repeat(4,minmax(0,1fr))',
+      labelled('Date', field({ type: 'date', ...bind('date') })),
+      labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
+      labelled('Closed', out.closeField = field({ type: 'time', ...bind('timeClose') })),
+      labelled('Size', field({ inputmode: 'decimal', ...bind('size') })))),
 
     /* Whether it is finished and whether it was real are two questions about
        the same trade, and both decide what the row underneath asks for — so
-       they sit with it rather than up in the header away from their effect. */
-    band(
+       they sit with it, and with how it ended. */
+    sec('Outcome',
       grid('minmax(0,1fr) minmax(0,1fr)',
         labelled('Status', statusWrap),
         labelled('Trade type', modeWrap)),
-      out.riskRow),
+      out.riskRow,
+      out.exitBlock,
+      out.heldBlock),
 
-    band(grid('1fr 1fr',
-      labelled('Setup', setupWrap),
-      labelled('Session', sessionWrap))),
-
-    el('div', { class: 'band', style: { flex: '1', minHeight: '110px', display: 'flex', flexDirection: 'column' } },
-      el('span', { class: 'lbl' }, 'Notes'),
-      el('textarea', { class: 'field', style: { flex: '1', minHeight: '80px' },
-        oninput: e => { f.notes = e.target.value; } }, f.notes || '')),
+    sec('Context',
+      grid('1fr 1fr', labelled('Setup', setupWrap), labelled('Session', sessionWrap)),
+      labelled('Execution timeframe', tfWrap)),
   );
 
-  /* Tags take the right-hand side now. They are the part of a trade you will
-     read back for years — the Tags page is built on them — and they were
-     being typed into a strip at the bottom of a column while two big empty
-     chart boxes had half the card. The charts are thumbnails under them: a
-     screenshot is dropped once and looked at later, and looking at it later
-     happens on the trade's own page, full size. */
+  /* The right is what it was like: how you felt going in and coming out, what
+     went wrong, how price behaved, and the labels you give it. */
   const colRight = el('div', { class: 'col' },
-    /* Sized to the tags you actually have: it grows down to them and only
-       starts scrolling when there are more than the card is tall. An empty
-       half-column above the charts was the old chart stack's habit, not
-       something worth keeping. */
-    /* It sizes to the tags you actually have and nothing scrolls inside it.
-       A box that scrolls also clips, and what it was clipping was the menu
-       of whichever group you had just opened — the tags were being drawn
-       just below the edge of a strip 25 pixels tall. The card is the one
-       thing on this page that scrolls. */
-    el('div', { class: 'band', style: { flex: 'none', display: 'flex', flexDirection: 'column' } },
-      el('span', { class: 'lbl' }, 'Tags'),
-      tagWrap),
-    band(
-      el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
-        el('span', { class: 'lbl', style: { margin: 0 } }, 'Charts'),
-        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '10px', color: 'var(--grey-5)' } },
-          out.shotCount = el('span', {}, ''))),
-      shotWrap, picker));
+    sec('Mindset', confBlock, out.afterBlock),
+    sec('Execution', labelled('Mistakes', mistakesWrap), labelled('Price delivery', deliveryWrap)),
+    sec('Tags', tagWrap),
+  );
 
-  const form = el('section', { class: 'card roomy trade-form' }, colLeft, colRight);
+  /* Across the foot, at full width: the pictures, and what you wrote. Wide is
+     the shape a chart is, and the notes get room to run. */
+  const chartsSec = sec('Charts', shotWrap, picker);
+  chartsSec.querySelector('.sec-h').append(el('span', { class: 'sec-count' }, out.shotCount = el('span', {}, '')));
+  const wide = el('div', { class: 'tf-wide' },
+    chartsSec,
+    el('div', { class: 'band sec is-notes' },
+      el('div', { class: 'sec-h' }, el('i', {}, String(++secN).padStart(2, '0')), el('span', {}, 'Notes')),
+      el('textarea', { class: 'field', placeholder: 'What you saw, what you felt, what you would do again',
+        oninput: e => { f.notes = e.target.value; } }, f.notes || '')));
+
+  const form = el('section', { class: 'card roomy trade-form' }, colLeft, colRight, wide);
+  paintShots();                     // again, now the count beside the heading exists
 
   /* Settle the open/closed state and fill the strip in before the page is
      handed over, so an edit opens showing what the trade already came to

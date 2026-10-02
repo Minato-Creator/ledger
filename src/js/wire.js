@@ -49,9 +49,10 @@ export const LIVE_FEED = FEEDS.find(f => f.live);
 /** How long a fetched copy is treated as current. */
 export const FRESH_MINS = 3;
 
-/** How much of the wire the vault keeps. Beyond this it is history, and
-    history belongs to investingLive's own site rather than to your journal. */
-export const KEEP_ITEMS = 400;
+/** How much of the wire the vault keeps: the 50 newest. Anything older is
+    deleted — it is history, and history belongs to investingLive's own site
+    rather than to your journal. */
+export const KEEP_ITEMS = 50;
 export const KEEP_DAYS = 10;
 
 /* The category an item carries when the feed it came from is the mixed one.

@@ -72,6 +72,8 @@ const PATHS = {
   close:     '<path d="M6 6l12 12M18 6L6 18"/>',
   user:      '<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6"/>',
   upload:    '<path d="M12 16V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>',
+  /* A clipboard with a tick on it: the week, gone back over. */
+  review:    '<rect x="5" y="4.5" width="14" height="17" rx="2.5"/><path d="M9 4.5V3.5h6v1"/><path d="M8.8 13l2.3 2.3 4.3-4.6"/>',
   lab:       '<path d="M9 3.5h6"/><path d="M10 3.5v5.8L4.6 18.6A1.7 1.7 0 0 0 6.1 21h11.8a1.7 1.7 0 0 0 1.5-2.4L14 9.3V3.5"/><path d="M7.3 15h9.4"/>',
   /* Six dots. Stroke-linecap is round, so a line of no length draws one. */
   grip:      '<path d="M9.5 6h.01M14.5 6h.01M9.5 12h.01M14.5 12h.01M9.5 18h.01M14.5 18h.01"/>',

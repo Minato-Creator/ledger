@@ -19,12 +19,19 @@
      trades were taken, so the trade that triggers a stop is still taken —
      it is what stops you.
 
+   • One what-if changes results rather than leaving trades out: "leave
+     trades to TP". A trade you cut short — closed by hand, early, or moved
+     to break-even early — and said what it would have made if held, is
+     counted at that instead. It is still your own answer, not a guess the
+     app makes, and a trade with no answer keeps its real result.
+
    And one question keeps it honest: would leaving out that many trades at
    random have done as well? A rule that only beats a coin toss is not a
    rule, it is a coincidence with a name.
    ============================================================ */
 import * as c from './calc.js';
 import { rng } from './lab.js';
+import { heldOf } from './questions.js';
 
 export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -32,6 +39,7 @@ export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const blankRules = () => ({
   lossesPerDay: null, dayLossR: null, dayWinR: null, maxTrades: null, afterLoss: false,
   skipDays: [], sessions: [], setups: [], pairs: [], skipTags: [], onlyTags: [],
+  minConfidence: null, tfs: [], holdToTarget: false,
 });
 
 const dowOf = date => (new Date(date + 'T00:00:00').getDay() + 6) % 7;   // Mon = 0
@@ -46,7 +54,8 @@ export function rowsFrom(account, trades) {
     if (r == null || !isFinite(r)) { skipped++; continue; }
     rows.push({ t, r, date: t.date, dow: dowOf(t.date), outcome: c.outcome(t),
       session: t.sessionId || null, setup: t.setupId || null,
-      pair: (t.pair || '').toUpperCase() || null, tags: t.tagIds || [] });
+      pair: (t.pair || '').toUpperCase() || null, tags: t.tagIds || [],
+      confidence: t.confidence ?? null, tf: t.execTf || null, held: heldOf(t) });
   }
   rows.sort((a, b) => (a.date + (a.t.timeOpen || '99:99')).localeCompare(b.date + (b.t.timeOpen || '99:99')));
   return { rows, skipped };
@@ -65,7 +74,11 @@ export function apply(rows, R) {
     && (!some(R.setups) || R.setups.includes(x.setup))
     && (!some(R.pairs) || R.pairs.includes(x.pair))
     && !(some(R.skipTags) && x.tags.some(id => R.skipTags.includes(id)))
-    && (!some(R.onlyTags) || R.onlyTags.every(id => x.tags.includes(id))));
+    && (!some(R.onlyTags) || R.onlyTags.every(id => x.tags.includes(id)))
+    /* A trade never rated, or never given a timeframe, cannot be shown to
+       pass either, so a ghost keeping these rules leaves it out. */
+    && (R.minConfidence == null || (x.confidence != null && x.confidence >= R.minConfidence))
+    && (!some(R.tfs) || R.tfs.includes(x.tf)));
 
   /* Then each day, in the order it was traded. */
   let day = null, losses = 0, dayR = 0, taken = 0, lastLost = false;
@@ -83,6 +96,15 @@ export function apply(rows, R) {
     if (x.outcome === 'loss') { losses++; lastLost = true; } else lastLost = false;
   }
   return take;
+}
+
+/**
+ * Your trades with every one you cut short counted at what you said it
+ * would have made if held. Those with no answer are as they were.
+ */
+export function heldRows(rows) {
+  return rows.map(x => !x.held ? x : { ...x, r: x.held.r, real: x.r, changed: true,
+    outcome: x.held.outcome === 'win' ? 'win' : x.held.outcome === 'loss' ? 'loss' : 'breakeven' });
 }
 
 /** Totals for the trades a set of flags keeps. */
@@ -137,11 +159,18 @@ export function luck(rows, ghostNet, skipped, { iters = 2000, seed = 7 } = {}) {
 /** What each rule does on its own, measured against your real result. */
 export function effects(rows, R, real) {
   const one = [];
-  const tryRule = (key, patch, label) => {
-    const take = apply(rows, { ...blankRules(), ...patch });
-    const s = summary(rows, take);
+  const tryRule = (key, patch, label, on = rows) => {
+    const take = apply(on, { ...blankRules(), ...patch });
+    const s = summary(on, take);
     one.push({ key, label, delta: s.net - real.net, skipped: s.skipped });
   };
+  if (R.holdToTarget) {
+    tryRule('holdToTarget', {}, 'Leave trades to TP', heldRows(rows));
+    const n = rows.filter(x => x.held).length;
+    one[one.length - 1].note = `${n} held`;
+  }
+  if (R.minConfidence != null) tryRule('minConfidence', { minConfidence: R.minConfidence }, `Only confidence ${R.minConfidence}+`);
+  if (some(R.tfs)) tryRule('tfs', { tfs: R.tfs }, `Only ${R.tfs.join(', ')}`);
   if (R.lossesPerDay != null) tryRule('lossesPerDay', { lossesPerDay: R.lossesPerDay }, `Stop after ${R.lossesPerDay} loss${R.lossesPerDay === 1 ? '' : 'es'}`);
   if (R.dayLossR != null) tryRule('dayLossR', { dayLossR: R.dayLossR }, `Stop at −${R.dayLossR}R on the day`);
   if (R.dayWinR != null) tryRule('dayWinR', { dayWinR: R.dayWinR }, `Stop at +${R.dayWinR}R on the day`);
@@ -185,6 +214,8 @@ export function suggest(rows, playbook, { top = 4, names = {} } = {}) {
   for (const s of distinct('session')) if (count(x => x.session === s) >= 5) cand({ sessions: [s] }, `Only ${names.sessions?.[s] || 'this session'}`);
   for (const s of distinct('setup')) if (count(x => x.setup === s) >= 5) cand({ setups: [s] }, `Only ${names.setups?.[s] || 'this setup'}`);
   for (const p of distinct('pair')) if (count(x => x.pair === p) >= 5) cand({ pairs: [p] }, `Only ${p}`);
+  for (const n of [3, 4, 5]) if (count(x => x.confidence != null && x.confidence >= n) >= 5) cand({ minConfidence: n }, `Only confidence ${n}+`);
+  for (const f of distinct('tf')) if (count(x => x.tf === f) >= 5) cand({ tfs: [f] }, `Only ${f} entries`);
   const tags = [...new Set(rows.flatMap(x => x.tags))];
   for (const id of tags) if (count(x => x.tags.includes(id)) >= 3) cand({ skipTags: [id] }, `Skip "${names.tags?.[id] || 'tag'}"`);
   out.sort((a, b) => b.delta - a.delta);
@@ -195,11 +226,15 @@ export function suggest(rows, playbook, { top = 4, names = {} } = {}) {
 export function run(rows, R) {
   const all = rows.map(() => true);
   const real = summary(rows, all);
-  const take = apply(rows, R);
-  const ghost = summary(rows, take);
+  /* Holding changes what the trades made, so the ghost plays the held
+     version; leaving trades out is then measured against that. */
+  const mine = R.holdToTarget ? heldRows(rows) : rows;
+  const take = apply(mine, R);
+  const ghost = summary(mine, take);
+  ghost.held = R.holdToTarget ? mine.filter((x, i) => x.changed && take[i]).length : 0;
   return {
     real, ghost, take,
-    luck: luck(rows, ghost.net, ghost.skipped),
+    luck: luck(mine, ghost.net, ghost.skipped),
     effects: effects(rows, R, real),
   };
 }

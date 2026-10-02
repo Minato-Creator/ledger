@@ -3,8 +3,9 @@ import * as c from '../calc.js';
 import { weeklyTab, weeklyControls } from './weekly.js';
 import { overviewTab } from './an-overview.js';
 import { timingTab } from './an-timing.js';
+import { executionTab } from './an-execution.js';
 
-let tab = 'overview';       // overview | weekly | tags | timing | discipline | year
+let tab = 'overview';       // overview | weekly | tags | timing | execution | discipline | year
 let year = null;            // resolved on first paint to the latest year traded
 let period = '30D';
 const DAYS = { '7D': 7, '30D': 30, '90D': 90, 'All': null };
@@ -113,10 +114,10 @@ export function analytics(store, nav) {
     year = n; nav.refresh();
   };
 
-  const head = el('header', { class: 'head' },
+  const head = el('header', { class: 'head an-head' },
     el('h1', {}, 'Analytics'),
     el('div', { class: 'seg', style: { marginLeft: '6px' } },
-      ...[['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['discipline', 'Discipline'], ['year', 'Year']].map(([k, label]) =>
+      ...[['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['execution', 'Execution'], ['discipline', 'Discipline'], ['year', 'Year']].map(([k, label]) =>
         el('button', { class: k === tab ? 'is-on' : '', onClick: () => { tab = k; nav.refresh(); } }, label))),
     /* The weekly page brings a wider control than the others, so it gives up
        the count here to make room for it. */
@@ -152,6 +153,7 @@ export function analytics(store, nav) {
   const body = tab === 'overview' ? overviewTab(store, acct, trades, s, ctx)
              : tab === 'tags'     ? tagsTab(store, acct, trades, s, ctx)
              : tab === 'timing'   ? timingTab(store, acct, trades, ctx)
+             : tab === 'execution' ? executionTab(store, acct, trades, ctx)
              : tab === 'year'     ? yearly(store, acct, all, ctx)
              :                      discipline(store, acct, trades, ctx);
   return el('div', { class: 'view' }, head, body);

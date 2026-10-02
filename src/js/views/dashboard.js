@@ -189,10 +189,27 @@ function edgeCard(rows, s, K, f) {
       el('div', { class: 'db-note' },
         pf != null && !isFinite(pf) ? 'no losing trade yet — needs one to mean anything'
           : [el('b', {}, f(s.grossWin, s.grossWinR, { decimals: 0 })), ' won · ', el('b', {}, f(-s.grossLoss, s.grossLossR == null ? null : -s.grossLossR, { decimals: 0 })), ' lost'])),
+    cleanWins(rows, stat, f),
     stat(`Last ${tail.length} trade${tail.length === 1 ? '' : 's'}`,
       st.nowKind ? [el('span', { class: st.nowKind === 'win' ? 'is-pos' : 'is-neg' }, `${st.now}${st.nowKind === 'win' ? 'W' : 'L'}`), el('small', {}, ' in a row')] : '—', 'is-run',
       el('div', { class: 'db-tape', title: 'Oldest on the left, latest on the right' },
         ...tail.map(x => el('i', { class: x.o === 'win' ? 'w' : x.o === 'loss' ? 'l' : 'b' })))));
+}
+
+/* Winners with nothing wrong in them: no mistake ticked on New trade. Only
+   wins that were asked count — a win logged before the question is not
+   called clean or otherwise. */
+export function cleanWinsOf(rows) {
+  const wins = rows.filter(x => x.o === 'win' && Array.isArray(x.t.mistakes));
+  const clean = wins.filter(x => !x.t.mistakes.length);
+  return { asked: wins.length, n: clean.length, v: clean.reduce((a, x) => a + x.v, 0), r: clean.reduce((a, x) => a + (x.r ?? 0), 0),
+    allV: wins.reduce((a, x) => a + x.v, 0) };
+}
+function cleanWins(rows, stat, f) {
+  const W = cleanWinsOf(rows);
+  if (!W.asked) return stat('Clean wins', '—', '', el('div', { class: 'db-note' }, 'tick mistakes on New trade to see these'));
+  return stat('Clean wins', [String(W.n), el('small', {}, ` of ${W.asked} wins`)], W.n ? 'is-pos' : '',
+    el('div', { class: 'db-note' }, el('b', {}, f(W.v, W.r, { decimals: 0 })), ' from wins with no mistake'));
 }
 
 /* ---------- where it comes from ---------- */

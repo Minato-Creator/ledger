@@ -19,6 +19,7 @@ import { wire } from './views/wire.js';
 import { importTrades } from './views/import.js';
 import { outlook } from './views/outlook.js';
 import { lab } from './views/lab.js';
+import { review } from './views/review.js';
 
 const root = document.getElementById('app');
 const embeddedHere = () => { try { return window.self !== window.top; } catch { return true; } };
@@ -124,6 +125,7 @@ const NAV_ITEMS = [
   ['#/outlook', 'outlook', 'Outlook'],
   ['#/trades', 'trades', 'Trades'],
   ['#/calendar', 'calendar', 'Calendar'],
+  ['#/review', 'review', 'Review'],
   ['#/analytics', 'analytics', 'Analytics'],
   ['#/lab', 'lab', 'The Lab'],
   ['#/replay', 'replay', 'Replay'],
@@ -267,6 +269,7 @@ function route() {
     case 'replay':    return replay(store, nav);
     case 'wire':      return wire(store, nav);
     case 'lab':       return lab(store, nav, arg);
+    case 'review':    return review(store, nav, arg);
     default:          return dashboard(store, nav);
   }
 }

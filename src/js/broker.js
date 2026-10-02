@@ -15,6 +15,7 @@
      say what a point is worth, and that stays your answer to give.
    ============================================================ */
 import { parseCSV } from './csv.js';
+import { readQuestions } from './questions.js';
 import { parseNumber, cleanSymbol } from './calc.js';
 export { cleanSymbol };
 
@@ -171,6 +172,8 @@ export function parseBrokerCSV(text, { offsetHours = 0 } = {}) {
         size: parseNumber(get(r, 'qty')),
         commission: parseNumber(get(r, 'commission')) ?? 0,
         pnl: col.pnl ? parseNumber(get(r, 'pnl')) : null,
+        /* A Quire sheet also carries the answers to New trade's questions. */
+        ...withQuestions(readQuestions(r)),
       });
     });
     return finish(trades, { ok: true, shape, headers, mapped: col, skipped, ambiguousDates });
@@ -239,6 +242,8 @@ export function pairFills(fills) {
   trades.sort((a, b) => (a.date + a.timeOpen).localeCompare(b.date + b.timeOpen));
   return { trades, stillOpen: open };
 }
+
+const withQuestions = q => (Object.keys(q).length ? { questions: q } : {});
 
 function finish(result, meta) {
   const { trades, stillOpen } = Array.isArray(result) ? { trades: result, stillOpen: [] } : result;

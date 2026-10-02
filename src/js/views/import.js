@@ -254,6 +254,7 @@ export function importTrades(store, nav) {
         grade: null,
         notes: '',
         source: fileName || 'broker CSV',
+        ...(t.questions || {}),
       });
       saved++;
     }

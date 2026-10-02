@@ -1,6 +1,8 @@
 import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { tradeShotsOf } from '../store.js';
+import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY } from '../questions.js';
+import { heldAsked, heldOf, heldText } from '../questions.js';
 
 export function tradeDetail(store, nav, id) {
   const acct = store.activeAccount;
@@ -70,6 +72,7 @@ export function tradeDetail(store, nav, id) {
   /* Charts first. A trader looks at the picture before reading the note. */
   const left = el('div', { style: { width: '780px', flex: 'none', display: 'flex', flexDirection: 'column', gap: '8px' } },
     chartsCard,
+    howItWent(t),
     el('div', { class: 'card', style: { flex: '1', minHeight: '170px' } },
       el('div', { class: 'eyebrow' }, 'Journal'),
       el('div', { style: { marginTop: '13px', fontSize: '13.5px', lineHeight: 1.62, color: 'var(--ink-2)', whiteSpace: 'pre-wrap', flex: '1', overflowY: 'auto' } },
@@ -159,3 +162,36 @@ function chartTile(store, trade, name, at, present) {
   return tile;
 }
 
+
+/* ---------- how it went ----------
+   The questions New trade asks, read back: how sure you were, how it felt,
+   how it ended and what it would have made if held, the timeframe, how
+   price moved, and what went wrong. Left off entirely for a trade logged
+   before they were asked. */
+export function howItWent(t) {
+  const open = t.status === 'open';
+  const mistakes = Array.isArray(t.mistakes) ? t.mistakes : null;
+  const held = heldOf(t);
+  const has = t.confidence != null || t.emotionAfter != null || t.exitReason != null || t.execTf != null || t.delivery != null || mistakes || held;
+  if (!has) return null;
+  const name = (list, v) => (list.find(([k]) => k === v) || [])[1];
+  const scale = (list, v) => v == null ? el('b', { class: 'is-none' }, '—')
+    : el('b', {}, el('span', { class: 'td-pips is-' + v }, ...[1, 2, 3, 4, 5].map(i => el('i', { class: i <= v ? 'on' : '' }))), `${v} · ${name(list, v)}`);
+  const cell = (k, v, cls = '') => el('div', { class: 'td-cell' + cls }, el('span', { class: 'k' }, k), v);
+  const plain = v => v == null ? el('b', { class: 'is-none' }, '—') : el('b', {}, v);
+  const heldTone = held ? (held.outcome === 'win' ? ' is-pos' : held.outcome === 'loss' ? ' is-neg' : '') : '';
+  return el('div', { class: 'card td-how', style: { flex: 'none' } },
+    el('div', { class: 'eyebrow' }, 'How it went'),
+    el('div', { class: 'td-grid' },
+      cell('Confidence', scale(CONFIDENCE, t.confidence)),
+      cell('Feeling after', open ? plain('after it closes') : scale(EMOTION_AFTER, t.emotionAfter)),
+      cell('Exit', plain(open ? 'still in it' : name(EXIT_REASONS, t.exitReason) ?? null), t.exitReason ? ' is-xr-' + t.exitReason : ''),
+      heldAsked(t) || held ? cell('If held to target', plain(held ? heldText(held) : null), ' is-held' + heldTone) : null,
+      cell('Timeframe', plain(t.execTf ?? null)),
+      cell('Price delivery', plain(name(DELIVERY, t.delivery) ?? null), t.delivery ? ' is-dl-' + t.delivery : '')),
+    el('div', { class: 'td-mist' },
+      el('span', { class: 'k' }, 'Mistakes'),
+      mistakes == null ? el('span', { class: 'td-none' }, 'not asked')
+        : mistakes.length ? el('span', { class: 'td-chips' }, ...MISTAKES.filter(([k]) => mistakes.includes(k)).map(([, n]) => el('span', { class: 'td-chip' }, n)))
+        : el('span', { class: 'td-clean' }, 'None — a clean trade')));
+}

@@ -13,6 +13,7 @@ import { fs, isTauri } from './fs.js';
 import { zip, unzip, bytesOfText, textOfBytes } from './vault.js';
 import { blankSheet } from './lab.js';
 import { blankRules } from './ghost.js';
+import { KEEP_ITEMS } from './wire.js';
 export { todayISO, isTauri };
 
 /* ============================================================
@@ -38,6 +39,7 @@ export const FILES = {
   news:     'data/news.json',
   wire:     'data/wire.json',
   lab:      'data/lab.json',
+  review:   'data/review.json',
 };
 const LEGACY = {
   accounts: 'accounts.json',
@@ -157,7 +159,7 @@ class Store {
   async connect() {
     const carry = this.data
       ? [...Object.values(FILES),
-         ...this.trades.flatMap(t => tradeShotsOf(t))]
+         ...this.trades.flatMap(t => [...tradeShotsOf(t), ...reviewShotsOf(t)])]
       : [];
     /* A folder that already holds a vault — this shape or the older one — is
        opened rather than written over. */
@@ -208,7 +210,7 @@ class Store {
   async load() {
     await this.tidyVault();
     await this.ensureDir('data');
-    const [accounts, trades, playbook, replay, outlooks, news, wire, lab] = await Promise.all([
+    const [accounts, trades, playbook, replay, outlooks, news, wire, lab, review] = await Promise.all([
       this.readJSON(FILES.accounts, defaultAccounts()),
       this.readJSON(FILES.trades,   { version: 1, trades: [] }),
       this.readJSON(FILES.playbook, defaultPlaybook()),
@@ -217,8 +219,9 @@ class Store {
       this.readJSON(FILES.news,     { version: 1, fetchedAt: null, events: [] }),
       this.readJSON(FILES.wire,     { version: 1, fetchedAt: null, seenAt: null, items: [] }),
       this.readJSON(FILES.lab,      defaultLab()),
+      this.readJSON(FILES.review,   { version: 1, weeks: {} }),
     ]);
-    this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab };
+    this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab, review };
     this.heal();
     this.migrate();
     applyTheme(this.theme, this.colours);
@@ -235,6 +238,7 @@ class Store {
       this.writeJSON(FILES.news, news),
       this.writeJSON(FILES.wire, wire),
       this.writeJSON(FILES.lab, this.data.lab),
+      this.writeJSON(FILES.review, this.data.review),
       this.ensureDir(SHOTS),
       this.writeText(MANIFEST, JSON.stringify({
         kind: 'quire-vault', version: 1, app: 'Quire',
@@ -282,7 +286,7 @@ class Store {
      silently loses — which is why the outlooks are read here and not only the
      trades. */
   shotNames() {
-    const fromTrades = this.trades.flatMap(t => tradeShotsOf(t));
+    const fromTrades = this.trades.flatMap(t => [...tradeShotsOf(t), ...reviewShotsOf(t)]);
     const fromOutlooks = Object.values(this.data.outlooks?.days || {})
       .flatMap(day => (day.instruments || []).flatMap(i => outlookShotsOf(i)));
     return [...fromTrades, ...fromOutlooks].filter(Boolean);
@@ -430,12 +434,22 @@ class Store {
     /* An item with no time cannot be put in order, which on a page whose
        whole promise is newest-first is worse than not being there at all. */
     { const n = d.wire.items.length;
-      d.wire.items = d.wire.items.filter(x => x && x.id && x.title && x.at && !isNaN(new Date(x.at)));
+      d.wire.items = d.wire.items.filter(x => x && x.id && x.title && x.at && !isNaN(new Date(x.at)))
+        /* Only the newest are kept; a vault saved when the wire held more is trimmed on open. */
+        .sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, KEEP_ITEMS);
       if (d.wire.items.length !== n) note(); }
 
     /* The Lab's rule sheets. A sheet saved by an older copy, or edited by
        hand, is filled out to the current shape field by field — anything
        it had is kept, anything it lacks arrives empty rather than guessed. */
+    /* The weekly review: notes per week, keyed '2026-W38'. What you said
+       about each trade lives on the trade itself, as `review`. */
+    if (!d.review || typeof d.review !== 'object') { d.review = { version: 1, weeks: {} }; note(); }
+    if (!d.review.weeks || typeof d.review.weeks !== 'object' || Array.isArray(d.review.weeks)) { d.review.weeks = {}; note(); }
+    for (const t of d.trades.trades) {
+      if (t.review != null && (typeof t.review !== 'object' || Array.isArray(t.review))) { delete t.review; note(); }
+      else if (t.review && t.review.after != null && !Array.isArray(t.review.after)) { t.review.after = []; note(); }
+    }
     if (!d.lab || typeof d.lab !== 'object') { d.lab = defaultLab(); note(); }
     if (!Array.isArray(d.lab.firms)) { d.lab.firms = []; note(); }
     d.lab.firms = d.lab.firms.filter(f => f && typeof f === 'object' && f.id);
@@ -529,7 +543,7 @@ class Store {
   async save(which) {
     const map = { accounts: FILES.accounts, trades: FILES.trades, playbook: FILES.playbook,
                   replay: FILES.replay, outlooks: FILES.outlooks, news: FILES.news,
-                  wire: FILES.wire, lab: FILES.lab };
+                  wire: FILES.wire, lab: FILES.lab, review: FILES.review };
     await this.writeJSON(map[which], this.data[which]);
     this.emit();
   }
@@ -910,7 +924,7 @@ class Store {
      is left. Returns how many trades went with it. */
   async deleteAccount(id) {
     const doomed = this.trades.filter(t => t.accountId === id);
-    for (const t of doomed) for (const name of tradeShotsOf(t)) await this.dropImage(name);
+    for (const t of doomed) for (const name of [...tradeShotsOf(t), ...reviewShotsOf(t)]) await this.dropImage(name);
     this.data.trades.trades = this.trades.filter(t => t.accountId !== id);
     this.data.accounts.accounts = this.allAccounts.filter(a => a.id !== id);
     if (this.data.accounts.activeAccountId === id) this.data.accounts.activeAccountId = this.accounts[0]?.id || null;
@@ -937,7 +951,7 @@ class Store {
     /* The charts go with the trade. Leaving them behind would quietly grow a
        folder of pictures of trades that no longer exist. */
     const t = this.trades.find(x => x.id === id);
-    if (t) for (const name of tradeShotsOf(t)) await this.dropImage(name);
+    if (t) for (const name of [...tradeShotsOf(t), ...reviewShotsOf(t)]) await this.dropImage(name);
     this.data.trades.trades = this.trades.filter(x => x.id !== id);
     await this.save('trades');
   }
@@ -968,6 +982,48 @@ class Store {
     return name;
   }
 
+  /* ============================================================
+     The weekly review
+     ============================================================ */
+  get reviewWeeks() { return this.data.review.weeks; }
+
+  /** What you said about one trade, after the fact. Merged, not replaced. */
+  async setTradeReview(id, patch) {
+    const t = this.data.trades.trades.find(x => x.id === id);
+    if (!t) return;
+    t.review = { ...(t.review || {}), ...patch, at: new Date().toISOString() };
+    await this.save('trades');
+  }
+
+  /** Notes for one week: what worked, what to fix, one focus, and done. */
+  async setWeekNote(week, patch) {
+    this.data.review.weeks[week] = { ...(this.data.review.weeks[week] || {}), ...patch };
+    await this.save('review');
+  }
+
+  /** A picture of what price did after the trade. Kept apart from the trade's
+      own charts, which show what you saw when you took it. */
+  async putReviewShot(tradeId, blob) {
+    const name = `screenshots/${tradeId}-after-${newShotId()}.jpg`;
+    await fs.ensureDir('screenshots');
+    await fs.writeImage(name, blob);
+    forgetUrl(name);
+    const t = this.data.trades.trades.find(x => x.id === tradeId);
+    if (t) {
+      t.review = { ...(t.review || {}) };
+      t.review.after = [...reviewShotsOf(t), name];
+      await this.save('trades');
+    }
+    return name;
+  }
+
+  async dropReviewShot(trade, name) {
+    if (!trade?.review || !reviewShotsOf(trade).includes(name)) return;
+    await this.dropImage(name);
+    trade.review.after = reviewShotsOf(trade).filter(n => n !== name);
+    await this.save('trades');
+  }
+
   async clearShot(trade, name) {
     if (!trade || !name) return;
     const held = tradeShotsOf(trade);
@@ -996,6 +1052,11 @@ export function tradeShotsOf(trade) {
   if (!trade) return [];
   if (Array.isArray(trade.shots)) return trade.shots.filter(Boolean);
   return [trade.shotLtf, trade.shotHtf].filter(Boolean);
+}
+
+/** The "after" pictures added while reviewing a trade. */
+export function reviewShotsOf(trade) {
+  return Array.isArray(trade?.review?.after) ? trade.review.after.filter(Boolean) : [];
 }
 
 /** A short, unrepeatable name for one chart. */
