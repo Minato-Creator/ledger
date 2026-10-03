@@ -971,7 +971,21 @@ html[data-glass="on"] .field:focus { box-shadow:inset 0 0 0 1px var(--blue), 0 0
    nothing new to learn about where things are. */
 /* The writing is the point of this page, so it gets the room. The charts are
    what you looked at, which is a column beside it rather than half the block. */
-.ob-body { margin-top:16px; display:grid; grid-template-columns:minmax(0,1fr) 252px; gap:16px; align-items:stretch; }
+.ob-body { margin-top:16px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:22px; align-items:stretch; }
+/* half text, half the instrument's live chart; the chart sits on the block itself */
+.ob-text { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.ob-text .outlook-notes { flex:1; min-height:200px; }
+.ob-chart > .tc { flex:1 1 auto; min-width:0; padding:0; background:none; border-radius:0; box-shadow:none; }
+/* half a block is narrower than a trade page: the controls go onto a second line under the name */
+.ob-chart > .tc .tc-head { flex-wrap:wrap; row-gap:8px; }
+.ob-chart > .tc .tc-head h3 { flex:1 0 100%; }
+.ob-chart > .tc .tc-head > .spacer { display:none; }
+.ob-chart > .tc .tc-plot { margin-top:12px; }
+.ob-chart-empty { display:flex; align-items:center; justify-content:center; border-radius:var(--r-inset); background:var(--inset);
+                  font:400 11px var(--mono); color:var(--ink-4); }
+.ob-older { align-self:flex-start; display:inline-flex; align-items:center; gap:7px; font:400 10.5px var(--mono); color:var(--ink-4);
+            padding:5px 11px; border-radius:var(--r-pill); background:var(--inset); }
+.ob-older:hover { color:var(--ink-2); }
 .outlook-notes {
   width:100%; height:100%; min-height:190px; resize:vertical; background:var(--grey-9);
   border-radius:var(--r-inset); padding:16px 18px;
@@ -980,7 +994,7 @@ html[data-glass="on"] .field:focus { box-shadow:inset 0 0 0 1px var(--blue), 0 0
 }
 .outlook-notes::placeholder { color:var(--grey-6); line-height:1.7; }
 .outlook-notes:focus { box-shadow:inset 0 0 0 1px var(--grey-6); color:var(--ink); }
-.ob-chart { display:flex; min-width:0; }
+.ob-chart { display:block; min-width:0; }
 .shot-zone.outlook-shot { aspect-ratio:auto; flex:1; min-height:190px; }
 
 /* ---------- an instrument's charts ----------
@@ -3063,3 +3077,43 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .tc-rplay:active { transform:scale(.96); }
 .tc-rplay i.is-play { width:0; height:0; border-left:7px solid currentColor; border-top:4.5px solid transparent; border-bottom:4.5px solid transparent; }
 .tc-rplay i.is-pause { width:8px; height:9px; border-left:2.5px solid currentColor; border-right:2.5px solid currentColor; }
+
+/* ---------- review: the month ---------- */
+.rv-mstats { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+.rv-stat.is-warn .v { color:var(--yellow); }
+.rv-mweeks { padding:22px 24px; gap:4px; }
+.rv-mweeks .lab-chart-head { margin-bottom:10px; }
+.rv-mrow { all:unset; box-sizing:border-box; display:grid; align-items:center; column-gap:14px; padding:11px 12px; border-radius:14px;
+           grid-template-columns:minmax(150px, 1.3fr) minmax(170px, 2fr) repeat(6, minmax(52px, .7fr)); font:400 12px var(--mono); color:var(--ink-2); }
+button.rv-mrow { cursor:pointer; }
+button.rv-mrow:hover { background:var(--inset); }
+.rv-mrow.is-head { font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-4); padding-top:0; padding-bottom:6px; }
+.rv-mrow.is-empty { color:var(--ink-5); }
+.rv-mrow .wk { display:flex; align-items:baseline; gap:8px; min-width:0; }
+.rv-mrow .wk b { font-weight:400; color:var(--ink); }
+.rv-mrow .wk small { font-size:10.5px; color:var(--ink-4); white-space:nowrap; }
+.rv-mrow .wk em { font-style:normal; font-size:9.5px; padding:2px 7px; border-radius:var(--r-pill); }
+.rv-mrow .wk em.is-best { color:var(--profit); background:rgba(var(--profit-rgb), .14); }
+.rv-mrow .wk em.is-worst { color:var(--loss); background:rgba(var(--loss-rgb), .14); }
+.rv-mrow .r { display:flex; align-items:center; gap:10px; }
+.rv-mrow .r b { font-weight:400; min-width:54px; text-align:right; font-variant-numeric:tabular-nums; }
+.rv-mrow .r.is-pos b { color:var(--profit); } .rv-mrow .r.is-neg b { color:var(--loss); }
+.rv-mbar { position:relative; flex:1; height:8px; border-radius:4px; background:var(--inset); }
+.rv-mbar i { position:absolute; top:0; bottom:0; border-radius:4px; }
+.rv-mbar i.is-pos { background:var(--profit); } .rv-mbar i.is-neg { background:var(--loss); }
+.rv-mrow .is-warn { color:var(--yellow); }
+.rv-mrow .is-done { color:var(--profit); }
+.rv-msec { display:flex; align-items:baseline; gap:12px; padding:14px 6px 2px; }
+.rv-mweek { padding:20px 24px; gap:14px; }
+.rv-mweek-h { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+.rv-mweek-h h2 { font:400 14px var(--mono); }
+.rv-mweek-h .spacer { flex:1; }
+.rv-mline { font:400 11.5px var(--mono); color:var(--ink-3); }
+.rv-mline b { font-weight:400; } .rv-mline b.is-pos { color:var(--profit); } .rv-mline b.is-neg { color:var(--loss); }
+.rv-mdone { display:inline-flex; align-items:center; gap:5px; font:400 10px var(--mono); color:var(--profit); }
+.rv-mopen { padding:6px 12px; font-size:11px; }
+.rv-mnotes { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
+.rv-mnote { background:var(--inset); border-radius:var(--r-inset); padding:14px 16px; display:flex; flex-direction:column; gap:8px; min-width:0; }
+.rv-mnote p { margin:0; font:400 13px var(--sans); line-height:1.6; color:var(--ink-2); white-space:pre-wrap; }
+.rv-mnote p.is-none { color:var(--ink-5); font-size:12px; }
+@media (max-width:1180px) { .rv-mnotes { grid-template-columns:1fr; } .rv-mstats { grid-template-columns:repeat(2, minmax(0, 1fr)); } }

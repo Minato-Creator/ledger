@@ -29,6 +29,7 @@ import * as cd from '../candles.js';
 import { measure, inPips } from '../tradeplay.js';
 
 let week = null;           // '2026-W38'
+let month = null;          // '2026-09', for the Month tab
 let picked = null;         // the trade being reviewed
 
 export const WHAT = [
@@ -38,6 +39,7 @@ export const WHAT = [
   ['gaveback', 'Gave back profit'],
   ['be', 'BE, then it ran'],
   ['wrong', 'Wrong read'],
+  ['tpfar', 'TP too far'],
   ['other', 'Something else'],
 ];
 const ENTRY = [['early', 'Early'], ['ontime', 'On time'], ['late', 'Late']];
@@ -57,7 +59,8 @@ export const isReviewed = t => !!t?.review?.what;
    did not yet reach a day past the exit.
    ============================================================ */
 export const factsKey = t => [t.date, t.timeOpen, t.timeClose, t.entryPrice, t.stopLoss, t.takeProfit, t.exitPrice, t.side, t.status].join('|');
-export const factsOf = t => (t?.review?.chart && t.review.chart.key === factsKey(t) ? t.review.chart : null);
+export const FACTS_V = 2;
+export const factsOf = t => (t?.review?.chart && t.review.chart.v === FACTS_V && t.review.chart.key === factsKey(t) ? t.review.chart : null);
 const busy = new Map(), trouble = new Map();
 /** Resolves true when there is something new to show. */
 export function ensureFacts(store, t) {
@@ -76,7 +79,8 @@ export function ensureFacts(store, t) {
       if (!m) { trouble.set(t.id, 'none'); return !!have; }
       trouble.delete(t.id);
       const pips = inPips(m.toStop, inst);
-      const chart = { v: 1, key: factsKey(t), heatR: m.heatR, toStop: pips.n, unit: pips.unit, availR: m.availR,
+      const chart = { v: FACTS_V, key: factsKey(t), heatR: m.heatR, toStop: pips.n, unit: pips.unit, availR: m.availR,
+        couldR: m.couldR, duringR: m.duringR, targetR: m.targetR, fromStop: inPips(m.fromStop, inst).n,
         held: m.held, reachedTarget: m.reachedTarget, reachedAt: m.reachedAt, covered: m.covered };
       const same = have && JSON.stringify({ ...have, at: 0 }) === JSON.stringify({ ...chart, at: 0 });
       if (!same) await store.setTradeReview(t.id, { chart: { ...chart, at: new Date().toISOString() } });
@@ -130,8 +134,9 @@ export function reviewOf(acct, t) {
   /* What the candles said, when they have been read (see ensureFacts). */
   const ch = factsOf(t);
   if (ch) {
-    if (kind === 'sl') { if (ch.reachedTarget) fill('dir', 'right'); fill('avail', ch.availR); }
-    else { fill('heat', ch.heatR); fill('avail', ch.availR); }
+    /* "could have made" is your target if price got there, never more */
+    if (kind === 'sl') { if (ch.reachedTarget) fill('dir', 'right'); fill('avail', ch.couldR); }
+    else { fill('heat', ch.heatR); fill('avail', ch.couldR); }
   }
   if (r != null && r > 0) fill('dir', 'right');
   if (kind === 'tp') { fill('dir', 'right'); if (r != null && r > 0) fill('avail', +r.toFixed(2)); }
@@ -151,10 +156,12 @@ export function suggestWhat(acct, t) {
   const v = reviewOf(acct, t), kind = v.kind;
   const m = Array.isArray(t?.mistakes) ? t.mistakes : [];
   if (kind === 'tp') return 'target';
-  if (kind === 'sl') return v.dir === 'right' ? 'stopped' : v.dir === 'wrong' ? 'wrong' : null;
   const ch = factsOf(t);
-  if (kind === 'be') return v.dir === 'wrong' ? 'wrong' : ch && !ch.reachedTarget ? null : 'be';
-  if (kind === 'manual') return m.includes('closed_early') || (t.heldOutcome === 'win') ? 'early' : null;
+  /* went well your way while you were in, but turned before the target */
+  const far = !!ch && ch.targetR != null && ch.duringR >= 1 && ch.duringR >= ch.targetR * 0.6;
+  if (kind === 'sl') return v.dir === 'right' ? 'stopped' : far ? 'tpfar' : v.dir === 'wrong' ? 'wrong' : null;
+  if (kind === 'be') return v.dir === 'wrong' ? 'wrong' : ch && !ch.reachedTarget ? (far ? 'tpfar' : null) : 'be';
+  if (kind === 'manual') return m.includes('closed_early') || (t.heldOutcome === 'win') ? 'early' : far && t.heldOutcome === 'loss' ? 'tpfar' : null;
   return null;
 }
 const rOf = (acct, t) => { const r = c.rMultiple(acct, t); return r != null && isFinite(r) ? r : null; };
@@ -201,17 +208,20 @@ export function weekStats(acct, trades) {
 export function review(store, nav, sub) {
   const acct = store.activeAccount;
   const all = c.chronological(store.tradesFor(acct.id));
-  const tab = sub === 'week' ? 'week' : 'trades';
+  const tab = sub === 'week' ? 'week' : sub === 'month' ? 'month' : 'trades';
 
   if (week == null) {
     const now = P.periodOf(c.todayISO(), 'week');
     week = all.some(t => P.periodOf(t.date, 'week') === now) || !all.length
       ? now : P.periodOf(all[all.length - 1].date, 'week');
   }
-  const { start, end } = P.rangeOf(week);
+  /* The month follows the week until it is stepped on its own — a week
+     belongs to the month its Thursday is in, the way ISO counts it. */
+  if (month == null) month = P.periodOf(shiftDay(P.rangeOf(week).start, 3), 'month');
+  const { start, end } = P.rangeOf(tab === 'month' ? month : week);
   const trades = all.filter(t => t.date >= start && t.date <= end);
   if (!trades.some(t => t.id === picked)) picked = (trades.find(t => !isReviewed(t)) || trades[0])?.id || null;
-  const L = P.labelOf(week);
+  const L = tab === 'month' ? (() => { const m = P.labelOf(month); return { short: m.title, tick: '' }; })() : P.labelOf(week);
   /* How far through the week you are. Repainted as each trade is answered. */
   const prog = el('div', { class: 'rv-progress', title: 'Trades reviewed this week' });
   const paintProg = () => {
@@ -221,20 +231,35 @@ export function review(store, nav, sub) {
   };
   paintProg();
 
-  const go = delta => { week = P.step(week, delta); picked = null; nav.refresh(); };
+  const go = delta => {
+    if (tab === 'month') {
+      month = P.step(month, delta);
+      /* the week goes with it: the last week of the month with a trade */
+      week = P.periodOf(P.anchorOf(month, all), 'week');
+    } else {
+      week = P.step(week, delta);
+      month = P.periodOf(shiftDay(P.rangeOf(week).start, 3), 'month');
+    }
+    picked = null; nav.refresh();
+  };
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Weekly review'),
     el('div', { class: 'seg', role: 'tablist' },
-      ...[['trades', 'Trades', '#/review'], ['week', 'Week', '#/review/week']].map(([k, label, href]) =>
+      ...[['trades', 'Trades', '#/review'], ['week', 'Week', '#/review/week'], ['month', 'Month', '#/review/month']].map(([k, label, href]) =>
         el('button', { class: k === tab ? 'is-on' : '', role: 'tab', onClick: () => { if (k !== tab) nav.go(href); } }, label))),
     el('div', { class: 'stepper rv-week' },
       el('button', { onClick: () => go(-1), 'aria-label': 'Previous week' }, icon('chevleft', 12, 'var(--grey-2)', 2.4)),
-      el('span', { class: 'val' }, `${L.short} · ${L.tick}`),
+      el('span', { class: 'val' }, L.tick ? `${L.short} · ${L.tick}` : L.short),
       el('button', { onClick: () => go(1), 'aria-label': 'Next week' }, icon('chevright', 12, 'var(--grey-2)', 2.4))),
     trades.length ? prog : null,
     el('div', { class: 'spacer' }));
 
   if (!trades.length) {
+    if (tab === 'month') return el('div', { class: 'view rv-view' }, head,
+      el('div', { class: 'card', style: { flex: '1' } },
+        el('div', { class: 'empty' }, icon('review', 34, 'var(--grey-6)', 1.4),
+          el('h2', { style: { fontSize: '16px' } }, 'No trades this month'),
+          el('p', {}, 'Step back a month, or come back once it is traded.'))));
     return el('div', { class: 'view' }, head,
       el('div', { class: 'card', style: { flex: '1' } },
         el('div', { class: 'empty' },
@@ -243,7 +268,9 @@ export function review(store, nav, sub) {
           el('p', {}, 'Step back a week, or come back once the week is traded.'))));
   }
 
-  const body = tab === 'week' ? weekTab(store, acct, trades, nav, all) : tradesTab(store, acct, trades, nav, paintProg);
+  const body = tab === 'week' ? weekTab(store, acct, trades, nav, all)
+    : tab === 'month' ? monthTab(store, acct, trades, nav)
+    : tradesTab(store, acct, trades, nav, paintProg);
   return el('div', { class: 'view rv-view' }, head, body);
 }
 
@@ -379,14 +406,22 @@ function reviewCard(store, acct, t, pb, on) {
     const facts = [];
     if (kind === 'sl') {
       facts.push(fact('heat', 'Stopped out', '−1.0R', 'is-neg'));
-      facts.push(fact('avail', 'After the stop', v.avail != null ? rr(v.avail) + ' your way' : '—', v.avail > 0 ? 'is-pos' : '',
-        ch ? (ch.reachedTarget ? `reached your target ${when(ch.reachedAt)}` : 'never reached your target') : ''));
+      facts.push(fact('avail', 'Could have made', v.avail != null ? rr(v.avail) : '—', v.avail > 0 ? 'is-pos' : '',
+        typed('avail') ? 'typed by you' : ch ? (ch.reachedTarget ? `price reached your target after the stop · ${when(ch.reachedAt)}` : 'the best it got after the stop — it never reached your target') : ''));
+      /* the idea was right: how far it went your way from the stop */
+      if (v.dir === 'right' && ch && ch.fromStop != null)
+        facts.push(fact('fromstop', 'From your stop', `${ch.fromStop} ${unit} your way`, ch.fromStop > 0 ? 'is-pos' : '',
+          ch.reachedTarget ? 'all the way to your target' : 'up to the target at most'));
     } else {
       const heatTxt = v.heat == null ? '—' : v.heat < 0.005 ? 'never against you' : rr(-v.heat);
       facts.push(fact('heat', 'Heat', heatTxt, v.heat >= 0.8 ? 'is-neg' : '',
         typed('heat') ? 'typed by you' : ch && v.heat >= 0.005 ? `came within ${ch.toStop} ${unit} of your stop` : ''));
-      facts.push(fact('avail', 'Ran your way', v.avail != null ? rr(v.avail) : '—', v.avail > 0 ? 'is-pos' : '',
-        typed('avail') ? 'typed by you' : kind === 'tp' && r != null && v.avail > r + 0.05 ? `${rr(v.avail - r)} past your target` : ch ? 'until your stop, or a day after you got out' : ''));
+      /* what it could have made — your target if price got there, never
+         more: how far it ran past the target is not this trade's business.
+         A target hit already made it; a manual close says it as "held". */
+      if (kind !== 'tp' && kind !== 'manual')
+        facts.push(fact('avail', 'Could have made', v.avail != null ? rr(v.avail) : '—', v.avail > 0 ? 'is-pos' : '',
+          typed('avail') ? 'typed by you' : ch ? (ch.reachedTarget ? 'your target was reached' : 'the best it got — it never reached your target') : ''));
       if (kind === 'manual') {
         const held = heldOf(t);
         facts.push(fact('held', 'Held to target', held ? heldText(held) : ch && !ch.held ? 'neither yet' : '—',
@@ -412,9 +447,10 @@ function reviewCard(store, acct, t, pb, on) {
     if (!editing) return el('div', { class: 'rv-facts' }, head, el('div', { class: 'rv-facts-row' }, ...facts));
     /* typing them in: the old questions, filled with what the chart said */
     const boxes = [];
-    if (kind === 'sl') { if (v.dir === 'right') boxes.push(num('heat', 'Heat', 'how far it went against you — 1R is your stop', { neg: true }), num('avail', 'Ran after', 'how far it went your way once it turned')); }
+    const could = () => num('avail', 'Could have made', 'your target if price got there — never more than that');
+    if (kind === 'sl') { if (v.dir === 'right') boxes.push(num('heat', 'Heat', 'how far it went against you — 1R is your stop', { neg: true }), could()); }
     else {
-      boxes.push(num('avail', kind === 'be' ? 'Ran after BE' : 'Available', 'how far it ran your way'));
+      boxes.push(could());
       if (v.dir !== 'wrong') boxes.push(num('heat', 'Heat', 'how close it came to your stop', { neg: true }));
     }
     return el('div', { class: 'rv-facts is-editing' }, head,
@@ -530,7 +566,7 @@ function rulerOf(r, v, big) {
     big ? el('div', { class: 'lbls' }, ...marks.map(k => el('span', { style: { left: X(k) + '%' } }, k === 0 ? '0' : rr(k, 0)))) : null,
     big ? el('div', { class: 'key' },
       el('span', {}, el('i', { class: 'heat' }), `heat ${v.heat != null ? rr(-v.heat) : '—'}`),
-      el('span', {}, el('i', { class: 'avail' }), `available ${rr(v.avail)}`),
+      el('span', {}, el('i', { class: 'avail' }), `could have made ${rr(v.avail)}`),
       el('span', {}, el('i', { class: 'you' }), `you ${rr(r, 2)}`),
       v.better != null ? el('span', {}, el('i', { class: 'bx' }), `better exit ${rr(v.better)}`) : null) : null);
 }
@@ -761,7 +797,7 @@ function drawScatter(acct, pts, S, W, H) {
 }
 
 /* ---------- what happened, how you got in, whether the read was right ---------- */
-const WHAT_TONE = { target: 'var(--profit)', stopped: 'var(--yellow)', early: 'var(--blue)', gaveback: '#A78BFA', be: 'var(--grey-4)', wrong: 'var(--loss)', other: 'var(--grey-6)' };
+const WHAT_TONE = { target: 'var(--profit)', stopped: 'var(--yellow)', early: 'var(--blue)', gaveback: '#A78BFA', be: 'var(--grey-4)', tpfar: '#F59E0B', wrong: 'var(--loss)', other: 'var(--grey-6)' };
 function mixCard(acct, trades, S) {
   const parts = WHAT.filter(([k]) => S.what[k]).map(([k, label]) => ({ k, label, n: S.what[k] }));
   const total = parts.reduce((a, x) => a + x.n, 0);
@@ -861,6 +897,110 @@ function drawTrend(weeks, vals, fmt, W, H) {
 }
 
 /* Three notes to yourself, and last week's focus to hold it against. */
+const shiftDay = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+/* ============================================================
+   Month — the weeks side by side
+
+   The whole month added up first, then the weeks against each other — which
+   were good, where the early entries and the unplanned trades bunched up —
+   then, scrolling down, each week with what you wrote about it. A week
+   that runs over the month's edge counts only its days inside the month.
+   ============================================================ */
+/** The weeks of a month, each with its trades inside the month. Exported so
+    it can be checked on its own. */
+export function monthWeeks(acct, monthKey, trades) {
+  const { start, end } = P.rangeOf(monthKey);
+  const out = [];
+  for (let k = P.periodOf(start, 'week'); P.rangeOf(k).start <= end; k = P.step(k, 1)) {
+    const r = P.rangeOf(k);
+    const inside = trades.filter(t => t.date >= r.start && t.date <= r.end && t.date >= start && t.date <= end);
+    const S = weekStats(acct, inside);
+    const closed = inside.map(t => rOf(acct, t)).filter(v => v != null);
+    out.push({ key: k, trades: inside, S,
+      wins: closed.filter(v => v > 0).length, closed: closed.length,
+      winRate: closed.length ? closed.filter(v => v > 0).length / closed.length : null,
+      early: S.entry.early, late: S.entry.late });
+  }
+  return out;
+}
+
+function monthTab(store, acct, trades, nav) {
+  const S = weekStats(acct, trades);
+  const W = monthWeeks(acct, month, trades);
+  const traded = W.filter(w => w.trades.length);
+  const best = traded.length > 1 ? traded.reduce((a, b) => (b.S.taken > a.S.taken ? b : a)) : null;
+  const worst = traded.length > 1 ? traded.reduce((a, b) => (b.S.taken < a.S.taken ? b : a)) : null;
+  const closed = trades.map(t => rOf(acct, t)).filter(v => v != null);
+  const wins = closed.filter(v => v > 0).length;
+  const stat = (k, v, s, cls = '') => el('div', { class: 'rv-stat' + cls },
+    el('span', { class: 'k' }, k), el('span', { class: 'v' }, v), el('span', { class: 's' }, s || ' '));
+  const stats = el('div', { class: 'rv-stats rv-mstats' },
+    stat('Taken', rr(S.taken), `${S.trades} trade${S.trades === 1 ? '' : 's'} this month`, S.taken > 0 ? ' is-pos' : S.taken < 0 ? ' is-neg' : ''),
+    stat('Win rate', closed.length ? c.pct(wins / closed.length, 0) : '—', closed.length ? `${wins} of ${closed.length}` : 'nothing closed'),
+    stat('Plan followed', S.plan == null ? '—' : c.pct(S.plan, 0), S.planned ? `${S.planYes} of ${S.planned} trades` : 'not answered yet'),
+    stat('Early entries', String(S.entry.early), S.reviewed ? `of ${S.reviewed} reviewed` : 'none reviewed yet', S.entry.early ? ' is-warn' : ''),
+    stat('Left on the table', rr(S.left), 'could have made, not taken'),
+    stat('Reviewed', `${S.reviewed} / ${S.trades}`, S.reviewed === S.trades ? 'every trade' : `${S.trades - S.reviewed} to go`));
+
+  /* ---------- the weeks against each other ---------- */
+  const maxR = Math.max(0.5, ...W.map(w => Math.abs(w.S.taken)));
+  const bar = v => el('span', { class: 'rv-mbar' },
+    el('i', { class: v >= 0 ? 'is-pos' : 'is-neg', style: { width: (Math.abs(v) / maxR * 50) + '%', [v >= 0 ? 'left' : 'right']: '50%' } }));
+  const grades = S => ['A', 'B', 'C'].map(g => S.grade[g] ? `${S.grade[g]}${g}` : null).filter(Boolean).join(' ') || '—';
+  const openWeek = key => { week = key; picked = null; nav.go('#/review/week'); };
+  const table = el('section', { class: 'card rv-mweeks' },
+    el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Week by week'),
+      el('span', { class: 'lab-sub' }, best ? `best ${P.labelOf(best.key).tick} ${rr(best.S.taken)} · hardest ${P.labelOf(worst.key).tick} ${rr(worst.S.taken)}` : 'which weeks went well, and where the habits bunched up')),
+    el('div', { class: 'rv-mrow is-head' },
+      ...['Week', 'R taken', 'Trades', 'Win rate', 'Plan', 'Early', 'Grades', 'Reviewed'].map(h => el('span', {}, h))),
+    ...W.map(w => {
+      const L = P.labelOf(w.key), notes = store.reviewWeeks[w.key] || {};
+      const tag = w === best ? el('em', { class: 'is-best' }, 'best') : w === worst ? el('em', { class: 'is-worst' }, 'hardest') : null;
+      return el('button', { class: 'rv-mrow' + (w.trades.length ? '' : ' is-empty'), 'data-week': w.key, onClick: () => openWeek(w.key),
+        title: `Open ${L.title}` },
+        el('span', { class: 'wk' }, el('b', {}, L.tick), el('small', {}, L.short), tag),
+        el('span', { class: 'r ' + (w.S.taken > 0 ? 'is-pos' : w.S.taken < 0 ? 'is-neg' : '') }, bar(w.S.taken), el('b', {}, w.trades.length ? rr(w.S.taken) : '—')),
+        el('span', {}, String(w.trades.length || '—')),
+        el('span', {}, w.winRate == null ? '—' : c.pct(w.winRate, 0)),
+        el('span', {}, w.S.plan == null ? '—' : c.pct(w.S.plan, 0)),
+        el('span', { class: w.early ? 'is-warn' : '' }, w.trades.length ? String(w.early) : '—'),
+        el('span', {}, grades(w.S)),
+        el('span', { class: notes.done ? 'is-done' : '' }, w.trades.length ? `${w.S.reviewed}/${w.S.trades}${notes.done ? ' ✓' : ''}` : '—'));
+    }));
+
+  /* ---------- each week, with what you wrote ---------- */
+  const weekCards = W.filter(w => w.trades.length || store.reviewWeeks[w.key]).map(w => {
+    const L = P.labelOf(w.key), n = store.reviewWeeks[w.key] || {};
+    const note = (k, label) => el('div', { class: 'rv-mnote' }, el('span', { class: 'rv-k' }, label),
+      n[k] ? el('p', {}, n[k]) : el('p', { class: 'is-none' }, 'nothing written'));
+    return el('section', { class: 'card rv-mweek', 'data-week': w.key },
+      el('div', { class: 'rv-mweek-h' },
+        el('h2', {}, L.title), el('span', { class: 'lab-sub' }, L.span),
+        n.done ? el('span', { class: 'rv-mdone' }, icon('check', 11, 'currentColor', 2.4), 'done') : null,
+        el('div', { class: 'spacer' }),
+        el('span', { class: 'rv-mline' },
+          el('b', { class: w.S.taken > 0 ? 'is-pos' : w.S.taken < 0 ? 'is-neg' : '' }, rr(w.S.taken)),
+          ` · ${w.trades.length} trade${w.trades.length === 1 ? '' : 's'}`,
+          w.winRate != null ? ` · ${c.pct(w.winRate, 0)} won` : '',
+          w.S.plan != null ? ` · plan ${c.pct(w.S.plan, 0)}` : '',
+          w.early ? ` · ${w.early} early` : ''),
+        el('button', { class: 'btn btn-quiet rv-mopen', onClick: () => openWeek(w.key) }, 'Open week')),
+      el('div', { class: 'rv-mnotes' },
+        note('worked', 'What worked'), note('fix', 'What to fix'), note('focus', 'Focus for the next week')));
+  });
+
+  return el('div', { class: 'rv-body rv-month' },
+    el('div', { class: 'rv-hero' }, captureCard(S), stats),
+    table,
+    habitsCard(acct, trades),
+    S.reviewed ? (trades.filter(t => isReviewed(t) && reviewOf(acct, t).heat != null && reviewOf(acct, t).avail != null).length >= 2
+      ? el('div', { class: 'rv-wpair' }, scatterCard(acct, trades, S), mixCard(acct, trades, S))
+      : mixCard(acct, trades, S)) : null,
+    el('div', { class: 'rv-msec' }, el('span', { class: 'rv-k' }, 'The weeks'), el('span', { class: 'lab-sub' }, 'what you wrote at the end of each')),
+    ...weekCards);
+}
+
 function notesCard(store, nav) {
   const notes = store.reviewWeeks[week] || {};
   const last = store.reviewWeeks[P.step(week, -1)]?.focus;

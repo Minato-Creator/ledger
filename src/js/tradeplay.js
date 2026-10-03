@@ -63,27 +63,37 @@ export function measure(trade, rows, w, kind) {
 
   const inMin = Math.floor(w.entry / 60) * 60, outMin = Math.floor(w.exit / 60) * 60;
   const lastT = rows[rows.length - 1][0];
-  let worst = 0, i = 0;
+  let worst = 0, during = 0, i = 0;
   while (i < rows.length && rows[i][0] < inMin) i++;
   const first = i;
-  for (; i < rows.length && rows[i][0] <= outMin; i++) worst = Math.max(worst, adv(rows[i][2], rows[i][3]));
+  for (; i < rows.length && rows[i][0] <= outMin; i++) {
+    worst = Math.max(worst, adv(rows[i][2], rows[i][3]));
+    during = Math.max(during, fav(rows[i][2], rows[i][3]));
+  }
   if (first >= rows.length) return null;
   if (kind === 'sl') worst = Math.max(worst, risk);
   worst = Math.min(worst, risk);                                 // a stop is a stop
 
   /* how far it ran: from the entry until the original stop is touched, or a
      day after the exit, whichever comes first */
-  let best = 0, stoppedAt = null, reached = false, reachedAt = null;
+  let best = 0, fromStop = 0, stoppedAt = null, reached = false, reachedAt = null;
   const until = w.exit + H24;
   for (let k = first; k < rows.length && rows[k][0] <= until; k++) {
     const [t, , h, l] = rows[k];
     if (kind === 'sl') {
       /* stopped out: only what it did afterwards — did the idea come good? */
       if (t <= outMin) continue;
+      fromStop = Math.max(fromStop, long ? h - sl : sl - l);
     } else if (t > outMin && hitsStop(h, l)) { stoppedAt = t; break; }
     best = Math.max(best, fav(h, l));
     if (!reached && hitsTarget(h, l)) { reached = true; reachedAt = t; }
   }
+  /* What it could have made: your target if price got there — how far it
+     went beyond is no business of this trade — or, if it never did, the
+     best it got your way. */
+  const toTarget = Number.isFinite(tp) ? Math.abs(tp - entry) : Infinity;
+  const could = reached ? toTarget : Math.min(Math.max(0, best), toTarget);
+  if (Number.isFinite(tp)) fromStop = Math.min(fromStop, Math.abs(tp - sl));
 
   /* had you held: from the minute after you got out, target or stop first */
   let held = null;
@@ -100,6 +110,10 @@ export function measure(trade, rows, w, kind) {
     heatR: +R(worst).toFixed(2), heat: worst,
     toStop: Math.max(0, risk - worst),
     availR: +R(Math.max(0, best)).toFixed(2),
+    couldR: +R(could).toFixed(2),
+    duringR: +R(Math.max(0, during)).toFixed(2),
+    fromStop: Math.max(0, fromStop),
+    targetR: Number.isFinite(tp) ? +R(toTarget).toFixed(2) : null,
     held,
     reachedTarget: reached, reachedAt,
     stoppedAfter: stoppedAt,

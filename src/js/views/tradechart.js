@@ -56,7 +56,7 @@ export function tradeChart(store, nav, t, opts = {}) {
   async function start() {
     if (!inst) return message(`No chart for ${t.pair || 'this trade'} — OANDA has no instrument that matches it.`);
     const cred = await cd.getKey();
-    if (!cred) return message('Add your OANDA key in Settings to see this trade on its week’s chart.',
+    if (!cred) return message('Add your OANDA key in Settings to see the chart here.',
       el('button', { class: 'tc-btn', onClick: () => nav.go('#/settings') }, 'Open Settings'));
     card.classList.remove('is-quiet');
     card.replaceChildren(headOnly(), el('div', { class: 'tc-plot is-loading', style: { height: height + 'px' } },
@@ -66,7 +66,7 @@ export function tradeChart(store, nav, t, opts = {}) {
     catch (e) {
       return message(cd.explain(e), el('button', { class: 'tc-btn', onClick: start }, 'Try again'));
     }
-    if (!res.rows.length) return message('OANDA has no prices around this trade — the market may have been closed.');
+    if (!res.rows.length) return message('OANDA has no prices for this time — the market may have been closed.');
     card.classList.remove('is-quiet');
     chart(res);
   }
@@ -77,7 +77,9 @@ export function tradeChart(store, nav, t, opts = {}) {
     const num = v => (v == null || v === '' ? NaN : Number(v));
     const entry = num(t.entryPrice), sl = num(t.stopLoss), tp = num(t.takeProfit), exitP = num(t.exitPrice);
     const closed = t.status !== 'open';
-    const timed = !!t.timeOpen;
+    /* plain: a chart of the instrument alone (the Outlook), no trade on it */
+    const plain = !!opts.plain;
+    const timed = !!t.timeOpen && !plain;
     const eps = Math.abs(entry || 1) * 1e-6;
     const same = (a, b) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= eps;
     const hasExit = closed && Number.isFinite(exitP);
@@ -97,7 +99,7 @@ export function tradeChart(store, nav, t, opts = {}) {
     /* The price scale. On auto it fits the candles on screen, the way
        TradingView does; drag the price axis, or the chart up or down, and it
        stays where you put it until auto is switched back on. */
-    const yr = { auto: true, lo: 0, hi: 1 };
+    const yr = { auto: false, lo: 0, hi: 1 };
     let hover = null, drag = null, raf = 0, over = false;
     /* replay: null, or where it has got to and whether it is moving */
     let replay = null, timer = null;
@@ -149,24 +151,37 @@ export function tradeChart(store, nav, t, opts = {}) {
     /* Back to the trade: its time in the middle, and — on the small
        timeframes — the price scale opened up just enough to show the whole
        position, target and stop included. */
+    /* The price scale is set when the chart is placed — here, on a new
+       timeframe, or by the auto button — and then it holds still: moving
+       through time never rescales it, so nothing on the chart jumps. */
+    function fitY(withLevels) {
+      const r = candleRange() || allRange();
+      if (!r) return;
+      yr.auto = false;
+      const levels = withLevels && timed ? [entry, sl, tp, hasExit ? exitP : NaN].filter(Number.isFinite) : [];
+      const u = levels.some(p => p < r.lo || p > r.hi) ? padded(Math.min(r.lo, ...levels), Math.max(r.hi, ...levels)) : r;
+      yr.lo = u.lo; yr.hi = u.hi;
+    }
+    function allRange() {
+      if (!bars.length) return null;
+      let lo = Infinity, hi = -Infinity;
+      for (const b of bars) { if (b[3] < lo) lo = b[3]; if (b[2] > hi) hi = b[2]; }
+      return padded(lo, hi);
+    }
     function fit() {
       if (tf >= 240) {
         view.count = Math.max(12, bars.length + 2); view.start = -1;
-        clamp(); yr.auto = true; return;
+        clamp(); fitY(false); return;
       }
-      const a = idxAt(res.entry), z = idxAt(timed ? res.exit : res.entry + 3600);
-      const span = Math.max(1, z - a), pad = Math.max(span * 0.7, 24);
+      /* a stretch of time to open on — the trade, or (opts.focus) any span,
+         never past the last candle there is */
+      const f0 = opts.focus?.from ?? res.entry, f1 = opts.focus?.to ?? (timed ? res.exit : res.entry + 3600);
+      const a = idxAt(f0), z = Math.min(idxAt(f1), bars.length + 1);
+      const span = Math.max(1, z - a), pad = opts.focus ? Math.max(span * 0.04, 4) : Math.max(span * 0.7, 24);
       view.count = Math.min(Math.max(span + pad * 2, 40), Math.max(40, bars.length + 10));
       view.start = (a + z) / 2 - view.count / 2;
       clamp();
-      yr.auto = true;
-      const r = candleRange();
-      if (!r || !timed) return;
-      const levels = [entry, sl, tp, hasExit ? exitP : NaN].filter(Number.isFinite);
-      if (levels.some(p => p < r.lo || p > r.hi)) {
-        const u = padded(Math.min(r.lo, ...levels), Math.max(r.hi, ...levels));
-        yr.auto = false; yr.lo = u.lo; yr.hi = u.hi;
-      }
+      fitY(!plain);
     }
     function clamp() {
       const maxCount = Math.max(60, bars.length * 1.3);
@@ -183,7 +198,8 @@ export function tradeChart(store, nav, t, opts = {}) {
       view.start = idxAt(mid) - view.count / 2;
       if (replay) replay.upto = Math.max(0, Math.min(bars.length - 1, Math.floor(idxAt(replayT))));
       clamp();
-      yr.auto = true;
+      /* a new timeframe is placed once — then it sits still */
+      if (!yr.auto) fitY(false);
       /* 4H and daily are for the structure: everything loaded, at once */
       if (tf >= 240 && !replay) fit();
       remember(TF_KEY, tf);

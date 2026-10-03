@@ -23,7 +23,11 @@ import { el, icon, toast, folderMark, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { cleanSymbol } from '../calc.js';
 import { outlookShotsOf } from '../store.js';
-import { prepare, isImage, imageOnClipboard, imageOnDrop, readableSize, MAX_INPUT } from '../shots.js';
+import { tradeChart } from './tradechart.js';
+import * as cd from '../candles.js';
+
+/* The chart's height in an outlook block — half the block is chart. */
+const OB_CHART_H = 470;
 import { fetchFeed, parseFeed, eventsOn, localTime, whenText, minutesTo, FRESH_MINS } from '../news.js';
 
 const BIASES = [
@@ -224,66 +228,27 @@ export function outlook(store, nav, dateArg) {
     });
     notes.value = item.notes || '';
 
-    /* ---------- the charts ----------
-       One instrument, as many charts as the morning needed. With none it is
-       the drop area it always was; with one or more it is the pictures
-       themselves, each of which opens full size, and a small button on the
-       end for the next one.
-
-       The whole column takes a drop or a paste whichever it is showing, so
-       the habit of snipping and hitting paste never stops working. */
-    const shots = outlookShotsOf(item);
-
-    const input = el('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true,
-      onChange: e => { const files = [...e.target.files]; e.target.value = ''; takeMany(item, files); } });
-
-    const pick = () => { focused = item.id; paintTargets(); input.click(); };
-
-    const zone = el('div', { class: 'ob-charts' + (shots.length ? ' has-shots' : ''),
-      tabIndex: shots.length ? -1 : 0,
-      onFocus: () => { focused = item.id; paintTargets(); },
-      onDragOver: e => { e.preventDefault(); zone.classList.add('is-over'); },
-      onDragLeave: () => zone.classList.remove('is-over'),
-      onDrop: e => { e.preventDefault(); zone.classList.remove('is-over'); take(item, imageOnDrop(e)); } });
-
-    /* The tiles scroll; the button to add the next one does not, so it is
-       never the thing you have to scroll down to find. */
-    const strip = el('div', { class: 'ob-shot-strip' });
-
-    if (shots.length) {
-      strip.append(...shots.map((name, at) => {
-        const tile = el('button', { type: 'button', class: 'ob-shot is-loading',
-          title: 'View full size',
-          onClick: () => { if (tile.dataset.url) lightbox({
-            items: shots.map(n => ({ label: item.pair || 'Chart', name: n })),
-            urlFor: n => store.shotUrl(n), at }); } },
-          confirmButton({
-            label: icon('close', 11, 'currentColor', 2.2), armedLabel: 'delete?',
-            title: 'Remove this chart',
-            className: 'ob-shot-x', armedClassName: 'ob-shot-x is-armed-text',
-            onConfirm: () => dropShot(item, name) }));
-        store.shotUrl(name).then(url => {
-          tile.classList.remove('is-loading');
-          if (url) { tile.dataset.url = url; tile.style.backgroundImage = `url("${url}")`; }
-          else tile.append(el('span', { class: 'm', style: { fontSize: '10px', color: 'var(--yellow)' } }, 'missing'));
-        });
-        return tile;
-      }));
-      zone.append(strip,
-        el('button', { type: 'button', class: 'ob-shot-add', title: 'Add another chart', onClick: pick },
-          icon('plus', 13, 'currentColor', 2),
-          el('span', { class: 'm' }, 'Chart'),
-          shots.length > 3 ? el('span', { class: 'n' }, String(shots.length)) : null));
-      /* Past three the strip scrolls, and a hidden picture is a picture you
-         forget you took — so the edge fades to say there is more. */
-      requestAnimationFrame(() => strip.classList.toggle('is-more', strip.scrollHeight > strip.clientHeight + 1));
+    /* ---------- the chart ----------
+       The instrument's own chart, live — the same one the trade page and
+       the weekly review use, from the same saved prices — in place of the
+       screenshot. It opens on yesterday and today. Screenshots added before
+       this are still in the journal and open from the line under the notes. */
+    const chartSlot = el('div', { class: 'ob-chart' });
+    if (cd.oandaInstrument(item.pair)) {
+      const prev = shift(-1);
+      chartSlot.append(tradeChart(store, nav,
+        { id: 'outlook-' + item.id, pair: item.pair, date, timeOpen: '00:00', timeClose: '23:59', status: 'closed', side: 'buy' },
+        { height: OB_CHART_H, plain: true,
+          focus: { from: cd.localStamp(prev, '00:00'), to: Math.min(Date.now() / 1000, cd.localStamp(date, '23:59')) } }));
     } else {
-      zone.append(el('button', { type: 'button', class: 'shot-zone outlook-shot', onClick: pick,
-        onFocus: () => { focused = item.id; paintTargets(); } },
-        icon('image', 19, 'var(--grey-5)', 1.6),
-        el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } }, 'Drop, paste or click')));
+      chartSlot.append(el('div', { class: 'ob-chart-empty', style: { height: OB_CHART_H + 'px' } },
+        el('span', {}, item.pair ? `No chart for ${item.pair}` : 'Type the instrument and its chart appears here')));
     }
-    zones.set(item.id, zone);
+    zones.set(item.id, chartSlot);
+    const older = outlookShotsOf(item);
+    const olderLine = older.length ? el('button', { type: 'button', class: 'ob-older',
+      onClick: () => lightbox({ items: older.map(n => ({ label: item.pair || 'Chart', name: n })), urlFor: n => store.shotUrl(n), at: 0 }) },
+      icon('image', 12, 'currentColor', 1.7), `${older.length} earlier screenshot${older.length === 1 ? '' : 's'}`) : null;
 
     const verdictSlot = el('div', {});
     verdicts.set(item.id, verdictSlot);
@@ -301,7 +266,7 @@ export function outlook(store, nav, dateArg) {
               className: 'ob-x', armedClassName: 'ob-x is-armed-text',
               onConfirm: () => removeBlock(item) })
           : null),
-      el('div', { class: 'ob-body' }, notes, el('div', { class: 'ob-chart' }, zone, input)),
+      el('div', { class: 'ob-body' }, el('div', { class: 'ob-text' }, notes, olderLine), chartSlot),
       verdictSlot);
   }
 
@@ -354,35 +319,6 @@ export function outlook(store, nav, dateArg) {
   }
 
   /* ---------- editing ---------- */
-  /* Charts are added, never replaced — a second screenshot on an instrument
-     is a second timeframe, not a correction of the first. */
-  async function take(item, file) {
-    if (!file) return;
-    if (!isImage(file)) return toast('That is not an image', 'bad');
-    if (file.size > MAX_INPUT) return toast(`That file is ${readableSize(file.size)} — too big`, 'bad');
-    try {
-      const out = await prepare(file);
-      item.shots = outlookShotsOf(item);
-      item.shots.push(await store.putOutlookShot(date, item.id, out.blob, newShotId()));
-      focused = item.id;
-      await commit();
-      paint();
-    } catch (e) { toast(e.message, 'bad'); }
-  }
-
-  /* Picking several at once writes them in the order they were chosen, one
-     after another — two at the same filename would be one file on disk. */
-  async function takeMany(item, files) {
-    for (const f of files) await take(item, f);
-  }
-
-  async function dropShot(item, name) {
-    item.shots = outlookShotsOf(item).filter(n => n !== name);
-    await store.dropImage(name);
-    await commit();
-    paint();
-  }
-
   async function removeBlock(item) {
     const n = day.instruments.indexOf(item);
     if (n < 0) return;
@@ -410,18 +346,7 @@ export function outlook(store, nav, dateArg) {
       el('span', { class: 'm' }, 'Another instrument'));
   }
 
-  /* A screenshot arrives from the snipping tool, not from disk. It goes to
-     whichever block you last touched. */
-  function onPaste(e) {
-    const file = imageOnClipboard(e);
-    if (!file) return;
-    const item = day.instruments.find(x => x.id === focused);
-    if (!item) return;
-    e.preventDefault();
-    take(item, file);
-  }
-
-  const view = el('div', { class: 'view', onPaste },
+  const view = el('div', { class: 'view' },
     el('header', { class: 'head' },
       el('h1', {}, 'Daily outlook'),
       stamp,
