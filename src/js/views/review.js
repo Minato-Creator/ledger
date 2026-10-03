@@ -25,6 +25,7 @@ import { tipLayer } from './chartkit.js';
 import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName, heldOf, heldText } from '../questions.js';
 import { heldEditor } from './held.js';
 import { fromPricesOf } from './addtrade.js';
+import { tradeChart } from './tradechart.js';
 
 let week = null;           // '2026-W38'
 let picked = null;         // the trade being reviewed
@@ -190,6 +191,16 @@ export function review(store, nav, sub) {
 function tradesTab(store, acct, trades, nav, paintProg) {
   const rail = el('section', { class: 'card rv-rail' });
   const main = el('div', { class: 'rv-main' });
+  /* The week's chart for the trade being reviewed, across the whole page —
+     built when the trade changes, not every time an answer is saved. */
+  const chartSlot = el('div', { class: 'rv-tchart' });
+  let charted = null;
+  function paintChart() {
+    const t = trade();
+    if (!t || charted === t.id) return;
+    charted = t.id;
+    chartSlot.replaceChildren(tradeChart(store, nav, t, { height: 440, wide: true }));
+  }
   const pb = store.playbook;
   const trade = () => trades.find(t => t.id === picked);
 
@@ -198,7 +209,7 @@ function tradesTab(store, acct, trades, nav, paintProg) {
       el('div', { class: 'rv-k' }, 'This week'),
       el('div', { class: 'rv-list' }, ...trades.map(t => {
         const r = rOf(acct, t);
-        return el('button', { class: 'rv-item' + (t.id === picked ? ' is-on' : ''), onClick: () => { picked = t.id; paintRail(); paintMain(); } },
+        return el('button', { class: 'rv-item' + (t.id === picked ? ' is-on' : ''), onClick: () => { const moved = picked !== t.id; picked = t.id; paintRail(); paintMain(); if (moved) wrap.scrollTop = 0; } },
           el('span', { class: 'dot ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }),
           el('span', { class: 'p' }, t.pair || '—', el('small', {}, `${dayOf(t.date)} ${Number(t.date.slice(8))} · ${t.timeOpen || '—'}`)),
           el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2)),
@@ -209,7 +220,8 @@ function tradesTab(store, acct, trades, nav, paintProg) {
   function paintMain() {
     const t = trade();
     if (!t) { main.replaceChildren(); return; }
-    const keep = main.scrollTop;
+    const keep = wrap.scrollTop;
+    paintChart();
     main.replaceChildren(reviewCard(store, acct, t, pb, {
       changed: () => { paintRail(); paintProg(); },
       repaint: () => paintMain(),
@@ -218,16 +230,16 @@ function tradesTab(store, acct, trades, nav, paintProg) {
         const after = [...trades.slice(i + 1), ...trades.slice(0, i)].find(x => !isReviewed(x));
         const to = after || trades[(i + 1) % trades.length];
         if (!after) toast('Every trade this week is reviewed — the Week tab has what it adds up to');
-        picked = to.id; paintRail(); paintMain(); main.scrollTop = 0;
+        picked = to.id; paintRail(); paintMain(); wrap.scrollTop = 0;
       },
-      prev: () => { const i = trades.indexOf(t); picked = trades[(i - 1 + trades.length) % trades.length].id; paintRail(); paintMain(); },
+      prev: () => { const i = trades.indexOf(t); picked = trades[(i - 1 + trades.length) % trades.length].id; paintRail(); paintMain(); wrap.scrollTop = 0; },
     }));
-    main.scrollTop = keep;
+    wrap.scrollTop = keep;
   }
 
   /* A screenshot of what price did after goes onto the trade being reviewed,
      wherever focus is — the same as on New trade. */
-  const wrap = el('div', { class: 'rv-trades' }, rail, main);
+  const wrap = el('div', { class: 'rv-trades' }, chartSlot, el('div', { class: 'rv-row' }, rail, main));
   const onPaste = async e => {
     if (!wrap.isConnected) { document.removeEventListener('paste', onPaste); return; }
     const file = imageOnClipboard(e);

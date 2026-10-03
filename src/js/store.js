@@ -40,6 +40,7 @@ export const FILES = {
   wire:     'data/wire.json',
   lab:      'data/lab.json',
   review:   'data/review.json',
+  drawings: 'data/drawings.json',
 };
 const LEGACY = {
   accounts: 'accounts.json',
@@ -210,7 +211,7 @@ class Store {
   async load() {
     await this.tidyVault();
     await this.ensureDir('data');
-    const [accounts, trades, playbook, replay, outlooks, news, wire, lab, review] = await Promise.all([
+    const [accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings] = await Promise.all([
       this.readJSON(FILES.accounts, defaultAccounts()),
       this.readJSON(FILES.trades,   { version: 1, trades: [] }),
       this.readJSON(FILES.playbook, defaultPlaybook()),
@@ -220,8 +221,9 @@ class Store {
       this.readJSON(FILES.wire,     { version: 1, fetchedAt: null, seenAt: null, items: [] }),
       this.readJSON(FILES.lab,      defaultLab()),
       this.readJSON(FILES.review,   { version: 1, weeks: {} }),
+      this.readJSON(FILES.drawings, { version: 1, lines: {} }),
     ]);
-    this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab, review };
+    this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings };
     this.heal();
     this.migrate();
     applyTheme(this.theme, this.colours);
@@ -239,6 +241,7 @@ class Store {
       this.writeJSON(FILES.wire, wire),
       this.writeJSON(FILES.lab, this.data.lab),
       this.writeJSON(FILES.review, this.data.review),
+      this.writeJSON(FILES.drawings, this.data.drawings),
       this.ensureDir(SHOTS),
       this.writeText(MANIFEST, JSON.stringify({
         kind: 'quire-vault', version: 1, app: 'Quire',
@@ -445,6 +448,14 @@ class Store {
     /* The weekly review: notes per week, keyed '2026-W38'. What you said
        about each trade lives on the trade itself, as `review`. */
     if (!d.review || typeof d.review !== 'object') { d.review = { version: 1, weeks: {} }; note(); }
+    /* Lines drawn on the trade charts, kept per instrument so a level marked
+       on one gold trade is there on the next. */
+    if (!d.drawings || typeof d.drawings !== 'object') { d.drawings = { version: 1, lines: {} }; note(); }
+    if (!d.drawings.lines || typeof d.drawings.lines !== 'object' || Array.isArray(d.drawings.lines)) { d.drawings.lines = {}; note(); }
+    for (const [k, list] of Object.entries(d.drawings.lines)) {
+      const ok = Array.isArray(list) ? list.filter(x => x && x.id && [x.t1, x.t2, x.p].every(Number.isFinite)) : [];
+      if (!Array.isArray(list) || ok.length !== list.length) { d.drawings.lines[k] = ok; note(); }
+    }
     if (!d.review.weeks || typeof d.review.weeks !== 'object' || Array.isArray(d.review.weeks)) { d.review.weeks = {}; note(); }
     for (const t of d.trades.trades) {
       if (t.review != null && (typeof t.review !== 'object' || Array.isArray(t.review))) { delete t.review; note(); }
@@ -546,7 +557,7 @@ class Store {
   async save(which) {
     const map = { accounts: FILES.accounts, trades: FILES.trades, playbook: FILES.playbook,
                   replay: FILES.replay, outlooks: FILES.outlooks, news: FILES.news,
-                  wire: FILES.wire, lab: FILES.lab, review: FILES.review };
+                  wire: FILES.wire, lab: FILES.lab, review: FILES.review, drawings: FILES.drawings };
     await this.writeJSON(map[which], this.data[which]);
     this.emit();
   }
@@ -580,6 +591,22 @@ class Store {
   static outlookHasContent(day) {
     return (day.instruments || []).some(i =>
       (i.notes || '').trim() || outlookShotsOf(i).length || (i.bias && i.bias !== 'neutral') || (i.pair || '').trim());
+  }
+
+  /* ---------- lines drawn on the charts ---------- */
+  drawingsFor(inst) { return this.data.drawings?.lines?.[inst] || []; }
+  async putDrawing(inst, line) {
+    const all = this.data.drawings.lines;
+    const list = all[inst] || (all[inst] = []);
+    const at = list.findIndex(x => x.id === line.id);
+    if (at >= 0) list[at] = line; else list.push(line);
+    await this.save('drawings');
+  }
+  async dropDrawing(inst, id) {
+    const list = this.data.drawings.lines[inst];
+    if (!list) return;
+    this.data.drawings.lines[inst] = list.filter(x => x.id !== id);
+    await this.save('drawings');
   }
 
   async saveOutlook(day) {

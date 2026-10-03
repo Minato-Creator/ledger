@@ -119,7 +119,7 @@ export function localStamp(date, time) {
   return Math.floor(new Date(y, m - 1, d, hh || 0, mm || 0).getTime() / 1000);
 }
 
-/** Where the trade sits in time: entry, exit (or now), and the window worth loading. */
+/** Where the trade sits in time: entry, exit (or now), and 8 hours either side. */
 export function tradeWindow(t, now = Date.now() / 1000) {
   const entry = localStamp(t.date, t.timeOpen || '00:00');
   let exit = t.status === 'open' ? Math.min(now, entry + DAY) : t.timeClose ? localStamp(t.date, t.timeClose) : entry + 3600;
@@ -130,48 +130,141 @@ export function tradeWindow(t, now = Date.now() / 1000) {
   return { entry, exit, from, to, days };
 }
 
+/* Sunday 00:00 UTC of the week a moment falls in. The FX week opens on
+   Sunday evening New York time, which is still Sunday in UTC. */
+function sundayOf(s) {
+  const d = new Date(s * 1000);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000 - d.getUTCDay() * DAY;
+}
+
+/**
+ * The whole trading week the trade sits in — Sunday's open to Friday's
+ * close — so a 4H or daily chart shows the week's structure, and every other
+ * trade on the same instrument that week reads the same days. A trade held
+ * over a weekend gets both weeks.
+ */
+export function weekWindow(t, now = Date.now() / 1000) {
+  const w = tradeWindow(t, now);
+  const from = sundayOf(w.entry);
+  const to = Math.min(now, sundayOf(w.exit) + 6 * DAY);   // Saturday 00:00 UTC
+  const days = [];
+  for (let d = from; d < to; d += DAY) if (new Date(d * 1000).getUTCDay() !== 6) days.push(dayOf(d));
+  return { entry: w.entry, exit: w.exit, from, to, days };
+}
+
 const fileOf = (inst, day) => `candles/${inst}/${day}.json`;
 
 /* Kept only where the journal is a real folder. A journal held inside the
    browser has a few megabytes to its name and would fill up in a week. */
 const keeps = () => fs.kind === 'native' || fs.kind === 'browser';
 
+/* Days already read this session, so moving between trades of the same week
+   reads nothing twice. A day still running is asked for again after a minute. */
+const memory = new Map();
+export function forgetCandles() { memory.clear(); }
+
 /**
  * One UTC day of 1-minute candles: from the vault if it is there, else from
  * OANDA — kept in the vault once the day is over, so it is never fetched again.
  */
 export async function loadDay(store, inst, day, cred, now = Date.now() / 1000) {
+  const key = inst + '/' + day;
+  const seen = memory.get(key);
+  if (seen && (seen.done || now - seen.at < 60)) return seen.rows;
   const kept = await store.readJSON(fileOf(inst, day), null);
-  if (kept && Array.isArray(kept.candles)) return kept.candles;
+  if (kept && Array.isArray(kept.candles)) { memory.set(key, { rows: kept.candles, done: true, at: now }); return kept.candles; }
   const from = dayStart(day), to = from + DAY;
   if (from > now) return [];
   const rows = parseCandles(await call(`/v3/instruments/${inst}/candles?granularity=M1&price=M&from=${from}&to=${Math.min(to, Math.floor(now))}`, cred));
-  if (to <= now - 120 && keeps()) {
+  const done = to <= now - 120;
+  if (done && keeps()) {
     /* One candle to a line: plain to read, and a day is about 60 KB. */
     const body = rows.map(r => '    ' + JSON.stringify(r)).join(',\n');
     await store.writeText(fileOf(inst, day),
       `{\n  "version": 1,\n  "instrument": "${inst}",\n  "day": "${day}",\n  "source": "OANDA mid",\n  "candles": [\n${body}\n  ]\n}\n`);
   }
+  memory.set(key, { rows, done, at: now });
   return rows;
 }
 
-/** Every 1-minute candle the trade's window needs. */
+/**
+ * The calendar month the trade is in, as whole trading weeks: from the week
+ * holding the 1st to the week holding the last day, and always the trade's
+ * own week, never past now. About 22 trading days, ~1.5 MB a pair.
+ */
+export function monthWindow(t, now = Date.now() / 1000) {
+  const w = weekWindow(t, now);
+  /* the month on your calendar — the trade's own date */
+  const [y, m] = String(t.date).split('-').map(Number);
+  const first = Date.UTC(y, m - 1, 1) / 1000;
+  const last = Date.UTC(y, m, 0) / 1000;
+  const from = Math.min(sundayOf(first), w.from);
+  const to = Math.min(now, Math.max(sundayOf(last) + 6 * DAY, w.to));
+  const days = [];
+  for (let x = from; x < to; x += DAY) if (new Date(x * 1000).getUTCDay() !== 6) days.push(dayOf(x));
+  return { from, to, days, mid: first + 14 * DAY };
+}
+
+/** Several days, three asked for at a time, as one run of rows. */
+export async function loadDays(store, inst, days, cred, now = Date.now() / 1000) {
+  const got = new Array(days.length);
+  let next = 0;
+  const worker = async () => { while (next < days.length) { const i = next++; got[i] = await loadDay(store, inst, days[i], cred, now); } };
+  await Promise.all([worker(), worker(), worker()]);
+  return got.flat();
+}
+
+/**
+ * The trade's week first, so the chart is up quickly; the rest of its month
+ * is named in `rest` for the chart to fetch behind it.
+ */
 export async function candlesFor(store, trade, cred, now = Date.now() / 1000) {
   const inst = oandaInstrument(trade.pair);
   if (!inst) return { inst: null, rows: [] };
-  const w = tradeWindow(trade, now);
-  const rows = [];
-  for (const day of w.days) rows.push(...(await loadDay(store, inst, day, cred, now)));
-  return { inst, rows, ...w };
+  const w = weekWindow(trade, now), month = monthWindow(trade, now);
+  const rows = await loadDays(store, inst, w.days, cred, now);
+  const rest = month.days.filter(d => !w.days.includes(d));
+  return { inst, rows, ...w, month, rest };
 }
 
-/** 1-minute rows built up into a bigger timeframe, on clock boundaries. */
+/* ---------- New York's trading day ----------
+   4-hour and daily candles start at 17:00 New York, where the FX day rolls
+   over — the way OANDA and TradingView draw them. */
+let nyFmt = null;
+const nyCache = new Map();
+function nyOffset(s) {
+  const hour = Math.floor(s / 3600);
+  if (nyCache.has(hour)) return nyCache.get(hour);
+  let off = -4 * 3600;
+  try {
+    nyFmt ||= new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const g = {};
+    for (const p of nyFmt.formatToParts(new Date(hour * 3600 * 1000))) g[p.type] = +p.value;
+    off = Date.UTC(g.year, g.month - 1, g.day, g.hour % 24, g.minute, g.second) / 1000 - hour * 3600;
+  } catch { /* keep the summer offset */ }
+  nyCache.set(hour, off);
+  return off;
+}
+/** When the trading day holding this moment began: 17:00 New York. */
+export function rolloverOf(s) {
+  const off = nyOffset(s), local = s + off;
+  return Math.floor((local - 17 * 3600) / DAY) * DAY + 17 * 3600 - off;
+}
+/** The trading day a daily candle belongs to, as YYYY-MM-DD. */
+export const tradingDayOf = s => dayOf(rolloverOf(s) + 12 * 3600);
+
+/** 1-minute rows built up into a bigger timeframe: on the clock up to 1H,
+    from New York's 17:00 rollover for 4H and daily. */
 export function aggregate(rows, minutes) {
   if (minutes <= 1) return rows.slice();
   const size = minutes * 60, out = [];
+  const bucket = minutes >= 240
+    ? t => { const a = rolloverOf(t); return a + Math.floor((t - a) / size) * size; }
+    : t => Math.floor(t / size) * size;
   let cur = null;
   for (const [t, o, h, l, c] of rows) {
-    const b = Math.floor(t / size) * size;
+    const b = bucket(t);
     if (!cur || cur[0] !== b) { cur = [b, o, h, l, c]; out.push(cur); }
     else { if (h > cur[2]) cur[2] = h; if (l < cur[3]) cur[3] = l; cur[4] = c; }
   }

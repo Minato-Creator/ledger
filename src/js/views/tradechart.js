@@ -1,37 +1,51 @@
 /* ============================================================
-   tradechart.js — the trade, on the day's chart.
+   tradechart.js — the trade, on its week's chart.
 
    For looking only. The candles are OANDA's, which are never quite your
    broker's, so nothing here feeds a number anywhere else in the journal.
 
-   What is drawn, and nothing more: the candles, green and red; the killzones
-   from the Playbook, shaded with their names along the top; red-folder news
-   for the instrument's currencies; the position as two boxes — green from
-   entry to target, red from entry to stop — between the time you got in and
-   the time you got out; and dotted lines for In, TP and SL. A trade closed by
-   hand keeps its original target box and gets one more dotted line where you
-   got out; a break-even gets one at BE.
+   The whole trading week is loaded — Sunday's open to Friday's close — so
+   the 4H and daily candles show the week's structure, and every trade on the
+   same instrument that week reads the same saved days.
 
-   Drag to move, scroll to zoom, double-click to go back to the trade. The
-   timeframes are all built from the same one-minute candles.
+   What is drawn, and nothing more: the candles; the killzones from the
+   Playbook, shaded and named along the top; red-folder news for the
+   instrument's currencies; the position as two boxes — entry to target,
+   entry to stop — between the time you got in and the time you got out; a
+   small dot where you got in and one where you got out; and the prices of
+   all four on the right. Plus your own dotted lines (BOS, x, protected
+   highs…), kept per instrument so a level marked on one gold trade is there
+   on the next.
+
+   Drag to move, scroll to zoom, double-click to go back to the trade.
+   Replay starts just before the entry, with pause, step and speed.
    ============================================================ */
-import { el, icon } from '../ui.js';
+import { el, icon, toast } from '../ui.js';
 import * as cd from '../candles.js';
 
-export const CHART_TFS = [['1m', 1], ['5m', 5], ['15m', 15], ['1H', 60]];
-const TF_KEY = 'quire:chartTf';
+export const CHART_TFS = [['1m', 1], ['5m', 5], ['15m', 15], ['1H', 60], ['4H', 240], ['D', 1440]];
+export const SPEEDS = [['1×', 250], ['2×', 125], ['5×', 50], ['10×', 25]];
+export const QUICK_LABELS = ['BOS', 'CHoCH', 'x', 'Protected high', 'Protected low', 'Liquidity'];
+const TF_KEY = 'quire:chartTf', SPEED_KEY = 'quire:replaySpeed', FOLLOW_KEY = 'quire:replayFollow';
 const DAY = 86400;
+const FOOT = 'for viewing only · prices can differ slightly from your broker’s';
 
 /* The plot's margins: names along the top, times along the bottom, prices
-   and tags down the right. */
-const PAD_T = 24, PAD_B = 22, AXIS_W = 84;
+   down the right. */
+const PAD_T = 24, PAD_B = 22, AXIS_W = 88;
 
-export function tradeChart(store, nav, t, now = Date.now() / 1000) {
+const remember = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* fine */ } };
+const recall = k => { try { return localStorage.getItem(k); } catch { return null; } };
+
+export function tradeChart(store, nav, t, opts = {}) {
+  const now = opts.now ?? Date.now() / 1000;
+  const height = opts.height || 340;
   const inst = cd.oandaInstrument(t.pair);
-  const card = el('section', { class: 'card tc', style: { flex: 'none' } });
+  const card = el('section', { class: 'card tc' + (opts.wide ? ' is-wide' : ''), style: { flex: 'none' } });
 
-  const title = el('h3', {}, t.pair || 'Chart', el('span', { class: 'tc-sub' }, inst ? 'OANDA · mid' : ''));
-  const headOnly = (...right) => el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }), ...right);
+  const sub = el('span', { class: 'tc-sub' }, inst ? 'OANDA · mid' : '');
+  const title = el('h3', {}, t.pair || 'Chart', sub);
+  const headOnly = () => el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }));
 
   const message = (text, ...actions) => {
     card.classList.add('is-quiet');
@@ -41,10 +55,11 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
   async function start() {
     if (!inst) return message(`No chart for ${t.pair || 'this trade'} — OANDA has no instrument that matches it.`);
     const cred = await cd.getKey();
-    if (!cred) return message('Add your OANDA key in Settings to see this trade on the day’s chart.',
+    if (!cred) return message('Add your OANDA key in Settings to see this trade on its week’s chart.',
       el('button', { class: 'tc-btn', onClick: () => nav.go('#/settings') }, 'Open Settings'));
     card.classList.remove('is-quiet');
-    card.replaceChildren(headOnly(), el('div', { class: 'tc-plot is-loading' }, el('span', {}, 'Getting the day’s prices…')));
+    card.replaceChildren(headOnly(), el('div', { class: 'tc-plot is-loading', style: { height: height + 'px' } },
+      el('span', {}, 'Getting the prices…')));
     let res;
     try { res = await cd.candlesFor(store, t, cred, now); }
     catch (e) {
@@ -64,25 +79,33 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
     const timed = !!t.timeOpen;
     const eps = Math.abs(entry || 1) * 1e-6;
     const same = (a, b) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= eps;
-    const exitLine = exitLineOf();
-    function exitLineOf() {
-      if (!closed || !Number.isFinite(exitP)) return null;
-      if (same(exitP, tp) || same(exitP, sl)) return null;
-      const be = t.exitReason === 'be' || same(exitP, entry);
-      if (be && same(exitP, entry)) return { atEntry: true };
-      return { price: exitP, label: be ? 'BE' : 'Out', kind: be ? 'be' : 'out' };
-    }
+    const hasExit = closed && Number.isFinite(exitP);
+    const exitOwnTag = hasExit && !same(exitP, tp) && !same(exitP, sl) && !same(exitP, entry);
+
     const curs = cd.currenciesOf(inst);
-    const news = (store.data.news?.events || [])
+    const newsFor = () => (store.data.news?.events || [])
       .filter(ev => ev.impact === 'High' && curs.includes(ev.country))
       .map(ev => ({ at: Date.parse(ev.at) / 1000, title: ev.title }))
-      .filter(ev => Number.isFinite(ev.at) && ev.at >= res.rows[0][0] - DAY && ev.at <= res.rows[res.rows.length - 1][0] + DAY);
+      .filter(ev => Number.isFinite(ev.at) && ev.at >= res.rows[0][0] && ev.at <= res.rows[res.rows.length - 1][0] + 60);
+    let news = newsFor();
     const sessions = store.playbook?.sessions || [];
 
     let tf = firstTf();
     let bars = cd.aggregate(res.rows, tf);
     const view = { start: 0, count: 60 };
-    let hover = null, drag = null, upto = null, timer = null, raf = 0;
+    /* The price scale. On auto it fits the candles on screen, the way
+       TradingView does; drag the price axis, or the chart up or down, and it
+       stays where you put it until auto is switched back on. */
+    const yr = { auto: true, lo: 0, hi: 1 };
+    let hover = null, drag = null, raf = 0, over = false;
+    /* replay: null, or where it has got to and whether it is moving */
+    let replay = null, timer = null;
+    let speed = Math.max(0, SPEEDS.findIndex(([k]) => k === recall(SPEED_KEY)));
+    let follow = recall(FOLLOW_KEY) !== '0';
+    /* drawing: off, armed, or a line being drawn; and the line picked */
+    let drawMode = false, sketch = null, picked = null, hot = null;
+    let lastGroups = [];
+    let loadingMore = false;
 
     /* where a moment sits, in bars — gaps (weekends) take no room */
     function idxAt(T) {
@@ -91,32 +114,8 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
       if (T <= bars[0][0]) return (T - bars[0][0]) / step;
       let lo = 0, hi = n - 1;
       while (lo < hi) { const m = (lo + hi + 1) >> 1; if (bars[m][0] <= T) lo = m; else hi = m - 1; }
+      if (lo === n - 1) return lo + (T - bars[lo][0]) / step;
       return lo + Math.min(1, (T - bars[lo][0]) / step);
-    }
-    function fit() {
-      const a = idxAt(res.entry), z = idxAt(timed ? res.exit : res.entry + 3600);
-      const span = Math.max(1, z - a), pad = Math.max(span * 0.7, 24);
-      view.count = Math.min(Math.max(span + pad * 2, 40), Math.max(40, bars.length + 10));
-      view.start = (a + z) / 2 - view.count / 2;
-      clamp();
-    }
-    function clamp() {
-      const maxCount = Math.max(60, bars.length * 1.3);
-      view.count = Math.min(Math.max(view.count, 12), maxCount);
-      view.start = Math.min(Math.max(view.start, -view.count * 0.8), bars.length - view.count * 0.2);
-    }
-    function setTf(m) {
-      if (m === tf) return;
-      const mid = timeAtIdx(view.start + view.count / 2);
-      const replayT = upto != null ? bars[upto][0] : null;
-      const secs = view.count * tf;
-      tf = m; bars = cd.aggregate(res.rows, tf);
-      view.count = secs / tf;
-      view.start = idxAt(mid) - view.count / 2;
-      if (replayT != null) upto = Math.max(0, Math.floor(idxAt(replayT)));
-      clamp();
-      try { localStorage.setItem(TF_KEY, String(tf)); } catch { /* fine */ }
-      paintSeg(); draw();
     }
     function timeAtIdx(i) {
       const n = bars.length, step = tf * 60;
@@ -126,87 +125,345 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
       const k = Math.floor(i);
       return bars[k][0] + (i - k) * step;
     }
+    /* the highest high and lowest low on screen, with a little air */
+    function candleRange() {
+      const last = replay ? replay.upto : bars.length - 1;
+      const i0 = Math.max(0, Math.floor(view.start)), i1 = Math.min(last, Math.ceil(view.start + view.count));
+      let lo = Infinity, hi = -Infinity;
+      for (let i = i0; i <= i1; i++) { if (bars[i][3] < lo) lo = bars[i][3]; if (bars[i][2] > hi) hi = bars[i][2]; }
+      if (lo === Infinity) return null;
+      return padded(lo, hi);
+    }
+    function padded(lo, hi) {
+      if (hi - lo < 1e-9) { hi += Math.abs(hi) * 0.001 || 1; lo -= Math.abs(lo) * 0.001 || 1; }
+      const p = (hi - lo) * 0.07;
+      return { lo: lo - p, hi: hi + p };
+    }
+    /* Back to the trade: its time in the middle, and — on the small
+       timeframes — the price scale opened up just enough to show the whole
+       position, target and stop included. */
+    function fit() {
+      if (tf >= 240) {
+        view.count = Math.max(12, bars.length + 2); view.start = -1;
+        clamp(); yr.auto = true; return;
+      }
+      const a = idxAt(res.entry), z = idxAt(timed ? res.exit : res.entry + 3600);
+      const span = Math.max(1, z - a), pad = Math.max(span * 0.7, 24);
+      view.count = Math.min(Math.max(span + pad * 2, 40), Math.max(40, bars.length + 10));
+      view.start = (a + z) / 2 - view.count / 2;
+      clamp();
+      yr.auto = true;
+      const r = candleRange();
+      if (!r || !timed) return;
+      const levels = [entry, sl, tp, hasExit ? exitP : NaN].filter(Number.isFinite);
+      if (levels.some(p => p < r.lo || p > r.hi)) {
+        const u = padded(Math.min(r.lo, ...levels), Math.max(r.hi, ...levels));
+        yr.auto = false; yr.lo = u.lo; yr.hi = u.hi;
+      }
+    }
+    function clamp() {
+      const maxCount = Math.max(60, bars.length * 1.3);
+      view.count = Math.min(Math.max(view.count, 8), maxCount);
+      view.start = Math.min(Math.max(view.start, -view.count * 0.8), bars.length - view.count * 0.2);
+    }
+    function setTf(m) {
+      if (m === tf) return;
+      const mid = timeAtIdx(view.start + view.count / 2);
+      const replayT = replay ? bars[replay.upto][0] : null;
+      const secs = view.count * tf;
+      tf = m; bars = cd.aggregate(res.rows, tf);
+      view.count = secs / tf;
+      view.start = idxAt(mid) - view.count / 2;
+      if (replay) replay.upto = Math.max(0, Math.min(bars.length - 1, Math.floor(idxAt(replayT))));
+      clamp();
+      yr.auto = true;
+      /* 4H and daily are for the structure: everything loaded, at once */
+      if (tf >= 240 && !replay) fit();
+      remember(TF_KEY, tf);
+      paintHead(); draw();
+    }
+    /* More of the month arrived: the same moments stay where they were. */
+    function extend(more) {
+      if (!more.length) return;
+      const tA = timeAtIdx(view.start), tZ = timeAtIdx(view.start + view.count);
+      const replayT = replay ? bars[replay.upto][0] : null;
+      const seen = new Set(res.rows.map(r => r[0]));
+      res.rows = [...res.rows, ...more.filter(r => !seen.has(r[0]))].sort((a, b) => a[0] - b[0]);
+      bars = cd.aggregate(res.rows, tf);
+      view.start = idxAt(tA); view.count = Math.max(8, idxAt(tZ) - view.start);
+      if (replay) replay.upto = Math.max(0, Math.min(bars.length - 1, Math.floor(idxAt(replayT))));
+      news = newsFor();
+      clamp();
+      if (tf >= 240 && !replay) fit();
+      draw();
+    }
 
     /* ---------- the controls ---------- */
     const seg = el('div', { class: 'seg tc-seg' });
-    function paintSeg() {
+    const lineBtn = el('button', { class: 'tc-tool', title: 'Draw a dotted line', onClick: () => { setDraw(!drawMode); } },
+      el('i', { class: 'tc-dash' }), 'Line');
+    const replayBtn = el('button', { class: 'tc-play', onClick: () => { if (replay) { endReplay(); draw(); } else startReplay(); } }, el('i'), 'Replay');
+    const resetBtn = el('button', { class: 'tc-reset', title: 'Back to the trade', onClick: () => { endReplay(); fit(); draw(); } },
+      icon('refresh', 13, 'currentColor', 1.9));
+    /* Replay's controls sit under the chart while it runs, the way
+       TradingView's bar does, so the header never has to make room. */
+    const rbar = el('div', { class: 'tc-rbar', hidden: true });
+    function paintHead() {
       seg.replaceChildren(...CHART_TFS.map(([label, m]) =>
         el('button', { class: m === tf ? 'is-on' : '', 'data-tf': label, onClick: () => setTf(m) }, label)));
+      lineBtn.classList.toggle('is-on', drawMode);
+      replayBtn.classList.toggle('is-on', !!replay);
+      autoBtn.classList.toggle('is-on', yr.auto);
+      rbar.hidden = !replay;
+      if (!replay) { rbar.replaceChildren(); return; }
+      rbar.replaceChildren(
+        el('button', { class: 'tc-rb tc-pp', title: replay.playing ? 'Pause (space)' : 'Play (space)', onClick: togglePlay },
+          el('i', { class: replay.playing ? 'is-pause' : 'is-play' })),
+        el('button', { class: 'tc-rb tc-back', title: 'One candle back (←)', onClick: () => stepReplay(-1) }, icon('chevleft', 12, 'currentColor', 2.2)),
+        el('button', { class: 'tc-rb tc-fwd', title: 'One candle forward (→)', onClick: () => stepReplay(1) }, icon('chevright', 12, 'currentColor', 2.2)),
+        el('div', { class: 'tc-speeds' }, ...SPEEDS.map(([k], i) =>
+          el('button', { class: i === speed ? 'is-on' : '', 'data-speed': k, onClick: () => setSpeed(i) }, k))),
+        el('div', { class: 'tc-speeds tc-follow' },
+          el('button', { class: follow ? 'is-on' : '', 'data-follow': '1', title: 'The chart moves with the newest candle', onClick: () => setFollow(true) }, 'Follow price'),
+          el('button', { class: follow ? '' : 'is-on', 'data-follow': '0', title: 'The chart stays where you put it', onClick: () => setFollow(false) }, 'Free view')),
+        el('div', { class: 'spacer' }),
+        el('span', { class: 'tc-rwhen' }, replayWhen()),
+        el('button', { class: 'tc-rend', onClick: () => { endReplay(); draw(); } }, 'End replay'));
     }
-    paintSeg();
-    const playBtn = el('button', { class: 'tc-play', onClick: () => (timer ? stopReplay() : startReplay()) });
-    function paintPlay() {
-      playBtn.replaceChildren(el('i', { class: timer ? 'is-stop' : '' }), timer ? 'Stop' : 'Replay');
-    }
-    paintPlay();
-    const resetBtn = el('button', { class: 'tc-reset', title: 'Back to the trade', onClick: () => { stopReplay(true); fit(); draw(); } },
-      icon('refresh', 13, 'currentColor', 1.9));
-    const sub = title.querySelector('.tc-sub');
+    const replayWhen = () => {
+      if (!replay) return '';
+      const d = new Date(bars[replay.upto][0] * 1000);
+      return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${clock(d)}`;
+    };
 
     const canvas = el('canvas', { class: 'tc-canvas' });
-    const plot = el('div', { class: 'tc-plot' }, canvas);
+    const editor = el('div', { class: 'tc-edit', hidden: true });
+    const autoBtn = el('button', { class: 'tc-auto' + (yr.auto ? ' is-on' : ''), title: 'Fit the price scale to the candles',
+      onClick: () => { yr.auto = !yr.auto; paintHead(); draw(); } }, 'auto');
+    const plot = el('div', { class: 'tc-plot', style: { height: height + 'px' } }, canvas, editor, autoBtn);
+    const footL = el('span', { class: 'tc-read' }, FOOT), footR = el('span', {}, 'drag to move · scroll to zoom');
     card.replaceChildren(
-      el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }), seg, playBtn, resetBtn),
-      plot,
-      el('div', { class: 'tc-foot' },
-        el('span', {}, 'for viewing only · prices can differ slightly from your broker’s'),
-        el('span', {}, 'drag to move · scroll to zoom')));
+      el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }), seg, lineBtn, replayBtn, resetBtn),
+      plot, rbar,
+      el('div', { class: 'tc-foot' }, footL, footR));
+    const monthLabel = () => { const d = new Date((res.month.mid) * 1000); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
+    const paintSub = () => { sub.textContent = `OANDA · mid · ${monthLabel()}${loadingMore ? ' · loading the month…' : ''}`; };
 
     /* ---------- replay ---------- */
     function startReplay() {
+      endDraw();
       const a = Math.floor(idxAt(timed ? res.entry : bars[0][0]));
-      upto = Math.max(1, a - Math.round(view.count * 0.35));
+      const upto = Math.max(1, Math.min(bars.length - 1, a - Math.max(3, Math.round(view.count * 0.35))));
+      replay = { upto, playing: true };
       view.start = upto - view.count * 0.65; clamp();
-      timer = setInterval(stepReplay, 90);
-      paintPlay(); draw();
+      run(); paintHead(); draw();
     }
-    function stepReplay() {
-      if (!card.isConnected) return stopReplay(true);
-      upto++;
-      if (upto >= bars.length - 1) return stopReplay(true);
-      if (upto > view.start + view.count * 0.85) view.start = upto - view.count * 0.85;
-      draw();
-    }
-    function stopReplay(full) {
+    function run() {
       if (timer) clearInterval(timer);
-      timer = null;
-      if (full !== false) upto = null;
-      paintPlay(); draw();
+      timer = replay?.playing ? setInterval(tick, SPEEDS[speed][1]) : null;
+    }
+    function tick() {
+      if (!card.isConnected || !replay) { clearInterval(timer); timer = null; return; }
+      if (replay.upto >= bars.length - 1) { replay.playing = false; run(); paintHead(); return; }
+      replay.upto++;
+      followNow(); paintWhen(); draw();
+    }
+    const paintWhen = () => { const w = rbar.querySelector('.tc-rwhen'); if (w) w.textContent = replayWhen(); };
+    /* Follow price: the newest candle stays in view, sideways and — when
+       the scale is not on auto — up and down. Free view leaves it to you. */
+    function followNow() {
+      if (!replay || !follow) return;
+      if (replay.upto > view.start + view.count * 0.85) view.start = replay.upto - view.count * 0.85;
+      if (replay.upto < view.start + view.count * 0.1) view.start = replay.upto - view.count * 0.5;
+      clamp();
+      if (!yr.auto) {
+        const b = bars[replay.upto], m = (yr.hi - yr.lo) * 0.08;
+        if (b[2] > yr.hi - m) { const d = b[2] - (yr.hi - m); yr.hi += d; yr.lo += d; }
+        if (b[3] < yr.lo + m) { const d = (yr.lo + m) - b[3]; yr.hi -= d; yr.lo -= d; }
+      }
+    }
+    function togglePlay() {
+      if (!replay) return;
+      if (!replay.playing && replay.upto >= bars.length - 1) return;
+      replay.playing = !replay.playing; run(); paintHead();
+    }
+    function stepReplay(d) {
+      if (!replay) return;
+      replay.playing = false; run();
+      replay.upto = Math.max(1, Math.min(bars.length - 1, replay.upto + d));
+      followNow(); paintHead(); draw();
+    }
+    function setSpeed(i) { speed = i; remember(SPEED_KEY, SPEEDS[i][0]); run(); paintHead(); }
+    function setFollow(on) {
+      follow = on; remember(FOLLOW_KEY, on ? '1' : '0');
+      if (on) followNow();
+      paintHead(); draw();
+    }
+    function endReplay() {
+      if (timer) clearInterval(timer);
+      timer = null; replay = null; paintHead();
     }
 
-    /* ---------- the pointer ---------- */
-    const geo = () => {
-      const W = plot.clientWidth, H = plot.clientHeight;
-      return { W, H, pw: Math.max(10, W - AXIS_W), ph: Math.max(10, H - PAD_T - PAD_B) };
-    };
+    /* ---------- your lines ---------- */
+    const lines = () => store.drawingsFor(inst);
+    function setDraw(on) {
+      drawMode = on; sketch = null;
+      if (on) { closeEditor(); if (replay && replay.playing) togglePlay(); }
+      plot.classList.toggle('is-drawing', on);
+      footR.textContent = on ? 'drag across to draw · Esc to stop' : 'drag to move · scroll to zoom';
+      paintHead(); draw();
+    }
+    function endDraw() { if (drawMode) setDraw(false); }
+    /* A line starts on the price you point at — or on the candle's high,
+       low, open or close when you are within a few pixels of one. */
+    function priceAt(x, y, G) {
+      let p = G.hi - (y - PAD_T) / G.ph * (G.hi - G.lo);
+      const i = Math.floor(view.start + x / G.bw);
+      if (i >= 0 && i < bars.length) {
+        let best = 8;
+        for (const v of bars[i].slice(1)) { const d = Math.abs(G.Y(v) - y); if (d < best) { best = d; p = v; } }
+      }
+      return p;
+    }
+    function lineAt(x, y, G) {
+      for (const L of lines()) {
+        const xa = G.xT(L.t1), xz = G.xT(L.t2), ly = G.Y(L.p);
+        if (x >= xa - 5 && x <= xz + 5 && Math.abs(y - ly) <= 5) return L;
+      }
+      return null;
+    }
+    async function saveLine(L) {
+      try { await store.putDrawing(inst, L); } catch (e) { toast('Could not save the line: ' + (e.message || e), 'bad'); }
+    }
+    function openEditor(L) {
+      picked = L.id;
+      const G = geom();
+      const x = Math.min(Math.max(8, (G.xT(L.t1) + G.xT(L.t2)) / 2 - 130), G.pw - 270);
+      const y = G.Y(L.p) > PAD_T + 120 ? G.Y(L.p) - 96 : G.Y(L.p) + 14;
+      const input = el('input', { class: 'tc-lab', value: L.label || '', placeholder: 'Label — BOS, x, protected high…', maxlength: 40,
+        onKeydown: e => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(input.value); }
+          if (e.key === 'Escape') { e.preventDefault(); closeEditor(); }
+          e.stopPropagation();
+        } });
+      const commit = async v => {
+        const label = String(v || '').trim();
+        const cur = lines().find(x => x.id === L.id);
+        if (cur && cur.label !== label) await saveLine({ ...cur, label });
+        closeEditor();
+      };
+      editor.replaceChildren(
+        input,
+        el('div', { class: 'tc-chips' }, ...QUICK_LABELS.map(q => el('button', { onClick: () => commit(q) }, q))),
+        el('div', { class: 'tc-editrow' },
+          el('button', { class: 'tc-del', onClick: async () => { await store.dropDrawing(inst, L.id); closeEditor(); } }, 'Delete line'),
+          el('button', { class: 'tc-ok', onClick: () => commit(input.value) }, 'Done')));
+      editor.style.left = x + 'px'; editor.style.top = Math.max(4, y) + 'px';
+      editor.hidden = false;
+      draw();
+      setTimeout(() => input.focus(), 0);
+    }
+    function closeEditor() { editor.hidden = true; editor.replaceChildren(); picked = null; draw(); }
+
+    /* ---------- the pointer, the way TradingView takes it ----------
+       In the chart: drag to move through time and up and down.
+       On the price scale: drag up or down to squeeze or stretch the prices.
+       On the time scale: drag left or right to squeeze or stretch time.
+       Wheel: zoom time around the pointer (prices, over the price scale).
+       Double-click: the chart goes back to the trade; the price scale goes
+       back to auto; the time scale goes back to the trade's time. */
+    const zoneOf = (x, y, G) => (x >= G.pw && y < PAD_T + G.ph ? 'price' : y >= PAD_T + G.ph && x < G.pw ? 'time' : x < G.pw ? 'pane' : 'corner');
+    const fixScale = G => { if (yr.auto) { yr.auto = false; yr.lo = G.lo; yr.hi = G.hi; paintHead(); } };
     canvas.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;
-      drag = { x: e.clientX, start: view.start };
+      const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const G = geom();
+      const zone = zoneOf(x, y, G);
+      if (drawMode && zone === 'pane' && y > PAD_T) {
+        sketch = { p: priceAt(x, y, G), t1: timeAtIdx(view.start + x / G.bw), t2: null, x0: x };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (!editor.hidden) closeEditor();
+      drag = { zone, x: e.clientX, y: e.clientY, start: view.start, count: view.count, lo: G.lo, hi: G.hi, ph: G.ph, pw: G.pw,
+               moved: false, vertical: false, line: zone === 'pane' ? lineAt(x, y, G) : null };
       canvas.setPointerCapture(e.pointerId);
-      plot.classList.add('is-dragging');
     });
     canvas.addEventListener('pointermove', e => {
       const r = canvas.getBoundingClientRect();
       hover = { x: e.clientX - r.left, y: e.clientY - r.top };
-      if (drag) {
-        const { pw } = geo();
-        view.start = drag.start - (e.clientX - drag.x) / (pw / view.count);
-        clamp();
+      const G = geom();
+      if (sketch) {
+        sketch.t2 = timeAtIdx(view.start + Math.min(G.pw, Math.max(0, hover.x)) / G.bw);
+      } else if (drag) {
+        const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+        if (drag.moved) {
+          plot.classList.add('is-dragging');
+          if (drag.zone === 'pane') {
+            view.start = drag.start - dx / (drag.pw / drag.count); clamp();
+            if (Math.abs(dx) > 3 && replay && follow) setFollow(false);
+            if (Math.abs(dy) > 6 || drag.vertical) {
+              if (!drag.vertical) { drag.vertical = true; fixScale(G); drag.lo = yr.lo; drag.hi = yr.hi; drag.y = e.clientY; }
+              const shift = (e.clientY - drag.y) / drag.ph * (drag.hi - drag.lo);
+              yr.lo = drag.lo + shift; yr.hi = drag.hi + shift;
+            }
+          } else if (drag.zone === 'price') {
+            fixScale(G);
+            const k = Math.exp(dy * 0.006), mid = (drag.lo + drag.hi) / 2, half = (drag.hi - drag.lo) / 2 * k;
+            yr.lo = mid - half; yr.hi = mid + half;
+          } else if (drag.zone === 'time') {
+            const right = drag.start + drag.count;
+            view.count = drag.count * Math.exp(-dx * 0.006);
+            clamp();
+            view.start = right - view.count; clamp();
+          }
+        }
+      } else {
+        const zone = zoneOf(hover.x, hover.y, G);
+        plot.classList.toggle('on-price', zone === 'price');
+        plot.classList.toggle('on-time', zone === 'time');
+        hot = drawMode || zone !== 'pane' ? null : lineAt(hover.x, hover.y, G)?.id || null;
+        plot.classList.toggle('is-hot', !!hot);
       }
       draw();
     });
-    const endDrag = () => { drag = null; plot.classList.remove('is-dragging'); };
-    canvas.addEventListener('pointerup', endDrag);
-    canvas.addEventListener('pointercancel', endDrag);
-    canvas.addEventListener('pointerleave', () => { if (!drag) { hover = null; draw(); } });
+    const up = async e => {
+      if (sketch) {
+        const s = sketch; sketch = null;
+        const r = canvas.getBoundingClientRect();
+        if (s.t2 != null && Math.abs((e.clientX - r.left) - s.x0) >= 6) {
+          const L = { id: 'ln_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            t1: Math.min(s.t1, s.t2), t2: Math.max(s.t1, s.t2), p: +s.p.toFixed(dp + 1), label: '', at: new Date().toISOString() };
+          await saveLine(L);
+          setDraw(false);
+          openEditor(L);
+        } else draw();
+        return;
+      }
+      if (drag && !drag.moved && drag.line) openEditor(drag.line);
+      drag = null; plot.classList.remove('is-dragging');
+    };
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', () => { sketch = null; drag = null; plot.classList.remove('is-dragging'); draw(); });
+    canvas.addEventListener('pointerenter', () => { over = true; });
+    canvas.addEventListener('pointerleave', () => {
+      over = false;
+      if (!drag && !sketch) { hover = null; hot = null; plot.classList.remove('on-price', 'on-time'); draw(); }
+    });
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
-      const { pw } = geo();
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        view.start += e.deltaX / (pw / view.count);
+      const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const G = geom();
+      if (zoneOf(x, y, G) === 'price') {
+        fixScale(G);
+        const k = Math.exp(e.deltaY * 0.0015), p = G.hi - (y - PAD_T) / G.ph * (G.hi - G.lo);
+        yr.lo = p - (p - G.lo) * k; yr.hi = p + (G.hi - p) * k;
+      } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        view.start += e.deltaX / (G.pw / view.count);
+        if (replay && follow) setFollow(false);
       } else {
-        const r = canvas.getBoundingClientRect();
-        const f = Math.min(1, Math.max(0, (e.clientX - r.left) / pw));
+        const f = Math.min(1, Math.max(0, x / G.pw));
         const anchor = view.start + f * view.count;
         view.count *= Math.exp(e.deltaY * 0.0015);
         clamp();
@@ -214,16 +471,48 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
       }
       clamp(); draw();
     }, { passive: false });
-    canvas.addEventListener('dblclick', () => { stopReplay(true); fit(); draw(); });
+    canvas.addEventListener('dblclick', e => {
+      if (drawMode) return;
+      const r = canvas.getBoundingClientRect(), G = geom();
+      const zone = zoneOf(e.clientX - r.left, e.clientY - r.top, G);
+      if (zone === 'price') { yr.auto = true; paintHead(); draw(); return; }
+      if (zone === 'time') { const keep = { ...yr }; endReplay(); fit(); Object.assign(yr, keep); paintHead(); draw(); return; }
+      endReplay(); fit(); paintHead(); draw();
+    });
+    const onKey = e => {
+      if (!card.isConnected) { document.removeEventListener('keydown', onKey); return; }
+      if (e.target.closest?.('input, textarea')) return;
+      if (e.key === 'Escape' && drawMode) { setDraw(false); return; }
+      if (!over || !replay) return;
+      if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); stepReplay(1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); stepReplay(-1); }
+    };
+    document.addEventListener('keydown', onKey);
 
     /* ---------- drawing ---------- */
     function draw() {
       if (raf) return;
       raf = requestAnimationFrame(() => { raf = 0; paint(); });
     }
+    /* Everything that turns a time or a price into a place, for this frame. */
+    function geom() {
+      const W = plot.clientWidth, H = plot.clientHeight;
+      const pw = Math.max(10, W - AXIS_W), ph = Math.max(10, H - PAD_T - PAD_B);
+      const last = replay ? replay.upto : bars.length - 1;
+      const bw = pw / view.count;
+      const i0 = Math.max(0, Math.floor(view.start)), i1 = Math.min(last, Math.ceil(view.start + view.count));
+      const replayT = replay ? bars[replay.upto][0] + tf * 60 : Infinity;
+      if (yr.auto) { const r = candleRange(); if (r) { yr.lo = r.lo; yr.hi = r.hi; } }
+      const lo = yr.lo, hi = yr.hi;
+      const xT0 = T => (idxAt(T) - view.start) * bw;
+      return { W, H, pw, ph, last, bw, i0, i1, replayT, lo, hi,
+        xI: i => (i - view.start + 0.5) * bw, xT: xT0, Y: p => PAD_T + (hi - p) / (hi - lo) * ph };
+    }
     function paint() {
-      const { W, H, pw, ph } = geo();
-      if (!W || !H) return;
+      const G = geom();
+      const { W, H, pw, ph, last, bw, i0, i1, replayT, lo, hi, xI, xT, Y } = G;
+      if (!plot.clientWidth || !plot.clientHeight) return;
       const dpr = window.devicePixelRatio || 1;
       if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
         canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
@@ -235,38 +524,26 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
       const cs = getComputedStyle(card);
       const v = name => cs.getPropertyValue(name).trim();
       const C = {
-        ink: v('--ink'), ink3: v('--ink-3'), ink4: v('--ink-4'), ink5: v('--ink-5'),
-        inset: v('--inset') || 'rgba(128,128,128,.2)', card: v('--card'),
+        ink: v('--ink'), ink2: v('--ink-2'), ink3: v('--ink-3'), ink4: v('--ink-4'), ink5: v('--ink-5'),
+        inset: v('--inset') || 'rgba(128,128,128,.2)', card: v('--card') || '#111',
         profit: v('--profit'), loss: v('--loss'), yellow: v('--yellow'),
         prgb: v('--profit-rgb'), lrgb: v('--loss-rgb'), yrgb: v('--yellow-rgb') || '255, 184, 0',
         mono: v('--mono') || 'monospace',
       };
       const font = px => `400 ${px}px ${C.mono}`;
-      const last = upto != null ? upto : bars.length - 1;
-      const bw = pw / view.count;
-      const xI = i => (i - view.start + 0.5) * bw;          // a bar's middle
-      const xT = T => (idxAt(T) - view.start) * bw;          // a moment
-      const i0 = Math.max(0, Math.floor(view.start)), i1 = Math.min(last, Math.ceil(view.start + view.count));
-      const replayT = upto != null ? bars[upto][0] + tf * 60 : Infinity;
-
-      /* the price range: what is on screen, and the position when it is */
-      let lo = Infinity, hi = -Infinity;
-      for (let i = i0; i <= i1; i++) { if (bars[i][3] < lo) lo = bars[i][3]; if (bars[i][2] > hi) hi = bars[i][2]; }
-      const ea = idxAt(res.entry), ez = idxAt(res.exit);
-      const boxInView = timed && ez >= view.start && ea <= view.start + view.count;
-      if (boxInView || lo === Infinity) {
-        for (const p of [entry, sl, tp, exitLine?.price]) if (Number.isFinite(p)) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
-      }
-      if (lo === Infinity) { lo = 0; hi = 1; }
-      if (hi - lo < 1e-9) { hi += Math.abs(hi) * 0.001 || 1; lo -= Math.abs(lo) * 0.001 || 1; }
-      const padP = (hi - lo) * 0.07; lo -= padP; hi += padP;
-      const Y = p => PAD_T + (hi - p) / (hi - lo) * ph;
+      /* text that stays readable over candles */
+      const say = (text, x, y, colour, align = 'left') => {
+        g.textAlign = align; g.lineJoin = 'round';
+        g.strokeStyle = C.card; g.lineWidth = 3; g.strokeText(text, x, y);
+        g.fillStyle = colour; g.fillText(text, x, y);
+        g.textAlign = 'left';
+      };
 
       g.save();
       g.beginPath(); g.rect(0, 0, pw, H); g.clip();
 
       /* killzones */
-      if (sessions.length && bars.length) {
+      if (sessions.length && bars.length && tf < 1440) {
         const tA = timeAtIdx(view.start) - DAY, tZ = timeAtIdx(view.start + view.count) + DAY;
         g.font = font(9.5); g.textBaseline = 'alphabetic';
         for (let d = tA; d <= tZ + DAY; d += DAY) {
@@ -296,7 +573,7 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
       /* the position */
       if (timed && Number.isFinite(entry)) {
         const end = Math.min(res.exit, replayT);
-        const xa = xT(res.entry), xz = xT(end);
+        const xa = xT(res.entry), xz = Math.max(xT(end), xa + 2);
         if (end > res.entry && xz > 0 && xa < pw) {
           if (Number.isFinite(tp)) {
             g.fillStyle = `rgba(${C.prgb}, .18)`;
@@ -315,77 +592,116 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
         const [, o, h, l, c] = bars[i];
         const x = xI(i);
         g.fillStyle = c >= o ? C.profit : C.loss;
-        const xr = Math.round(x);
-        g.fillRect(xr, Y(h), 1, Math.max(1, Y(l) - Y(h)));
-        const yt = Y(Math.max(o, c)), hgt = Math.max(1, Math.abs(Y(o) - Y(c)));
-        g.fillRect(Math.round(x - body / 2), yt, Math.max(1, Math.round(body)), hgt);
+        g.fillRect(Math.round(x), Y(h), 1, Math.max(1, Y(l) - Y(h)));
+        g.fillRect(Math.round(x - body / 2), Y(Math.max(o, c)), Math.max(1, Math.round(body)), Math.max(1, Math.abs(Y(o) - Y(c))));
       }
 
-      /* red-folder news */
-      g.font = font(9.5);
+      /* red-folder news — releases at the same moment share one marker,
+         their names stacked under it, turned to the left near the edge */
+      g.font = font(9.5); g.textBaseline = 'alphabetic';
+      const groups = [];
       for (const ev of news) {
         if (ev.at > replayT) continue;
         const x = Math.round(xT(ev.at)) + 0.5;
         if (x < 0 || x > pw) continue;
-        g.strokeStyle = withAlpha(C.loss, 0.7); g.setLineDash([2, 3]);
-        g.beginPath(); g.moveTo(x, PAD_T); g.lineTo(x, PAD_T + ph); g.stroke(); g.setLineDash([]);
-        g.fillStyle = C.loss;
-        g.fillRect(x - 4, PAD_T + 4, 8, 8);
-        g.fillText(ev.title, x + 8, PAD_T + 12);
+        const gp = groups.find(q => Math.abs(q.x - x) < 8);
+        if (gp) { if (!gp.titles.includes(ev.title)) gp.titles.push(ev.title); } else groups.push({ x, titles: [ev.title] });
       }
+      lastGroups = groups.map(q => ({ x: q.x, titles: q.titles.slice(), left: q.x > pw - 170 }));
+      /* names never sit on each other: a block that would overlap one
+         already placed drops below it */
+      const placed = [];
+      for (const { x, titles } of groups) {
+        g.strokeStyle = withAlpha(C.loss, 0.7); g.lineWidth = 1; g.setLineDash([2, 3]);
+        g.beginPath(); g.moveTo(x, PAD_T); g.lineTo(x, PAD_T + ph); g.stroke(); g.setLineDash([]);
+        g.fillStyle = C.loss; g.fillRect(x - 3.5, PAD_T + 4, 7, 7);
+        const shown = titles.length > 3 ? [...titles.slice(0, 2), `+${titles.length - 2} more`] : titles;
+        const left = x > pw - 170;
+        const w = Math.max(...shown.map(s => g.measureText(s).width));
+        const x0 = left ? x - 8 - w : x + 8, x1 = x0 + w;
+        let row = 0;
+        const hits = r => placed.some(b => b.x0 < x1 + 6 && x0 < b.x1 + 6 && b.r0 < r + shown.length && r < b.r1);
+        while (hits(row) && row < 12) row++;
+        placed.push({ x0, x1, r0: row, r1: row + shown.length });
+        shown.forEach((s, k) => say(s, left ? x - 8 : x + 8, PAD_T + 11 + (row + k) * 12, C.loss, left ? 'right' : 'left'));
+      }
+
+      /* your lines */
+      g.font = font(9.5);
+      const drawn = [...lines()];
+      if (sketch && sketch.t2 != null) drawn.push({ id: '_sketch', t1: Math.min(sketch.t1, sketch.t2), t2: Math.max(sketch.t1, sketch.t2), p: sketch.p, label: '' });
+      for (const L of drawn) {
+        if (L.t1 > replayT) continue;
+        const xa = xT(L.t1), xz = Math.min(xT(L.t2), xT(replayT)), y = Math.round(Y(L.p)) + 0.5;
+        if (xz < 0 || xa > pw || y < PAD_T || y > PAD_T + ph) continue;
+        const lit = L.id === picked || L.id === hot || L.id === '_sketch';
+        g.strokeStyle = lit ? C.ink : C.ink2; g.lineWidth = lit ? 1.5 : 1; g.setLineDash([2, 3]);
+        g.beginPath(); g.moveTo(xa, y); g.lineTo(xz, y); g.stroke(); g.setLineDash([]);
+        if (lit) { g.fillStyle = C.ink; for (const ex of [xa, xz]) { g.beginPath(); g.arc(ex, y, 2.5, 0, Math.PI * 2); g.fill(); } }
+        if (L.label) say(L.label, (xa + xz) / 2, y - 5, lit ? C.ink : C.ink2, 'center');
+      }
+
+      /* where you got in and out */
+      g.font = font(9);
+      const dot = (x, y, label, side) => {
+        g.fillStyle = C.card; g.beginPath(); g.arc(x, y, 3.6, 0, Math.PI * 2); g.fill();
+        g.fillStyle = C.ink; g.beginPath(); g.arc(x, y, 2.2, 0, Math.PI * 2); g.fill();
+        say(label, side === 'left' ? x - 7 : x + 7, y - 5, C.ink2, side === 'left' ? 'right' : 'left');
+      };
+      if (timed && Number.isFinite(entry) && res.entry <= replayT) dot(xT(res.entry), Y(entry), 'Entry', 'left');
+      if (timed && hasExit && res.exit <= replayT) dot(xT(res.exit), Y(exitP), 'Exit', 'right');
       g.restore();
 
-      /* dotted levels across, with their tags on the right */
-      const levels = [];
-      if (Number.isFinite(tp)) levels.push({ p: tp, label: 'TP', line: C.profit, tag: `rgba(${C.prgb}, .28)` });
-      if (Number.isFinite(sl)) levels.push({ p: sl, label: 'SL', line: C.loss, tag: `rgba(${C.lrgb}, .28)` });
-      if (Number.isFinite(entry)) levels.push({ p: entry, label: exitLine?.atEntry && res.exit <= replayT ? 'In · BE' : 'In', line: C.ink3, tag: C.inset });
-      if (exitLine?.price != null && res.exit <= replayT) {
-        levels.push(exitLine.kind === 'be'
-          ? { p: exitLine.price, label: 'BE', line: C.ink3, tag: C.inset }
-          : { p: exitLine.price, label: 'Out', line: C.yellow, tag: `rgba(${C.yrgb}, .28)` });
-      }
-      g.setLineDash([3, 4]); g.lineWidth = 1;
-      for (const L of levels) {
-        const y = Math.round(Y(L.p)) + 0.5;
-        if (y < PAD_T || y > PAD_T + ph) continue;
-        g.strokeStyle = L.line; g.beginPath(); g.moveTo(0, y); g.lineTo(pw, y); g.stroke();
-      }
-      g.setLineDash([]);
-
-      /* the price axis, leaving room for the tags */
-      const tagYs = spread(levels.map(L => Math.min(PAD_T + ph - 8, Math.max(PAD_T + 8, Y(L.p)))), 17, PAD_T + 8, PAD_T + ph - 8);
+      /* prices on the right: the axis, and a tag for each level */
+      const tags = [];
+      if (Number.isFinite(tp)) tags.push({ p: tp, label: 'TP', bg: `rgba(${C.prgb}, .28)` });
+      if (Number.isFinite(sl)) tags.push({ p: sl, label: 'SL', bg: `rgba(${C.lrgb}, .28)` });
+      if (Number.isFinite(entry)) tags.push({ p: entry, label: 'Entry', bg: C.inset });
+      if (exitOwnTag && res.exit <= replayT) tags.push({ p: exitP, label: 'Exit', bg: `rgba(${C.yrgb}, .28)` });
+      const tagYs = spread(tags.map(L => Math.min(PAD_T + ph - 8, Math.max(PAD_T + 8, Y(L.p)))), 17, PAD_T + 8, PAD_T + ph - 8);
       g.font = font(9.5); g.textBaseline = 'middle'; g.fillStyle = C.ink5;
       for (const p of ticks) {
         const y = Y(p);
         if (y < PAD_T + 4 || y > PAD_T + ph - 4 || tagYs.some(ty => Math.abs(ty - y) < 11)) continue;
         g.fillText(fmt(p, dp), pw + 8, y);
       }
-      levels.forEach((L, k) => {
+      tags.forEach((L, k) => {
         const y = tagYs[k];
-        g.fillStyle = L.tag; roundRect(g, pw + 4, y - 8, AXIS_W - 8, 16, 4); g.fill();
+        g.fillStyle = L.bg; roundRect(g, pw + 4, y - 8, AXIS_W - 8, 16, 4); g.fill();
         g.fillStyle = C.ink; g.fillText(`${L.label} ${fmt(L.p, dp)}`, pw + 9, y + 0.5, AXIS_W - 16);
       });
 
       /* the time axis */
+      g.fillStyle = C.ink5; g.textBaseline = 'alphabetic'; g.font = font(9.5);
       const pxMin = bw / tf;
-      const step = [1, 5, 15, 30, 60, 120, 180, 240, 360, 720, 1440].find(m => m >= tf && m * pxMin >= 64) || 1440;
-      g.fillStyle = C.ink5; g.textBaseline = 'alphabetic';
-      for (let i = i0; i <= Math.min(bars.length - 1, Math.ceil(view.start + view.count)); i++) {
-        const d = new Date(bars[i][0] * 1000), m = d.getHours() * 60 + d.getMinutes();
-        if (m % step) continue;
-        const x = xI(i) - bw / 2;
-        if (x < 0 || x > pw - 24) continue;
-        g.fillText(m === 0 ? `${d.getDate()} ${MONTHS[d.getMonth()]}` : clock(d), x - 14, H - 6);
+      const step = [1, 5, 15, 30, 60, 120, 180, 240, 360, 720].find(m => m >= tf && m * pxMin >= 64);
+      let lastX = -1e9, prevDay = null;
+      const iEnd = Math.min(bars.length - 1, Math.ceil(view.start + view.count));
+      for (let i = Math.max(0, i0 - 1); i <= iEnd; i++) {
+        const bt = bars[i][0], d = new Date(bt * 1000);
+        const day = tf >= 1440 ? cd.tradingDayOf(bt) : localDay(bt);
+        const newDay = prevDay !== null && day !== prevDay;
+        prevDay = day;
+        if (i < i0) continue;
+        const m = d.getHours() * 60 + d.getMinutes();
+        let text = null;
+        if (tf >= 1440) text = dayLabel(day);
+        else if (step && tf < 240 && m % step === 0) text = m === 0 ? dayLabel(day) : clock(d);
+        else if ((!step || tf >= 240) && newDay) text = dayLabel(day);
+        if (!text) continue;
+        const x = xI(i) - (tf >= 1440 ? 0 : bw / 2);
+        if (x < 0 || x > pw - 24 || x - lastX < 56) continue;
+        g.fillText(text, x - 14, H - 6);
+        lastX = x;
       }
 
-      /* the crosshair */
-      sub.textContent = 'OANDA · mid';
+      /* the crosshair, and the candle under it read out underneath */
+      footL.textContent = FOOT;
       if (hover && !drag && hover.x < pw && hover.y > PAD_T && hover.y < PAD_T + ph) {
         const i = Math.floor(view.start + hover.x / bw);
         if (i >= 0 && i <= last) {
           const x = Math.round(xI(i)) + 0.5, y = Math.round(hover.y) + 0.5;
-          g.strokeStyle = withAlpha(C.ink, 0.28); g.setLineDash([2, 3]);
+          g.strokeStyle = withAlpha(C.ink, 0.28); g.lineWidth = 1; g.setLineDash([2, 3]);
           g.beginPath(); g.moveTo(x, PAD_T); g.lineTo(x, PAD_T + ph); g.moveTo(0, y); g.lineTo(pw, y); g.stroke();
           g.setLineDash([]);
           const price = hi - (hover.y - PAD_T) / ph * (hi - lo);
@@ -393,26 +709,48 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
           g.fillStyle = C.card; g.textBaseline = 'middle'; g.fillText(fmt(price, dp), pw + 9, y + 0.5);
           const [bt, o, h, l, c] = bars[i];
           const d = new Date(bt * 1000);
-          const tl = (localDay(bt) === t.date ? '' : `${d.getDate()} ${MONTHS[d.getMonth()]} `) + clock(d);
-          g.fillStyle = C.ink3; const tw = tl.length * 6 + 10;
-          roundRect(g, Math.min(pw - tw, Math.max(0, x - tw / 2)), H - 18, tw, 16, 4); g.fill();
-          g.fillStyle = C.card; g.fillText(tl, Math.min(pw - tw, Math.max(0, x - tw / 2)) + 5, H - 9.5);
-          sub.textContent = `${tl}   O ${fmtP(o, dp)}  H ${fmtP(h, dp)}  L ${fmtP(l, dp)}  C ${fmtP(c, dp)}`;
+          const tl = tf >= 1440 ? dayLabel(cd.tradingDayOf(bt)) : `${WEEKDAYS[d.getDay()]} ${clock(d)}`;
+          const tw = tl.length * 6 + 10, tx = Math.min(pw - tw, Math.max(0, x - tw / 2));
+          g.fillStyle = C.ink3; roundRect(g, tx, H - 18, tw, 16, 4); g.fill();
+          g.fillStyle = C.card; g.fillText(tl, tx + 5, H - 9.5);
+          const when = tf >= 1440 ? dayLabel(cd.tradingDayOf(bt)) : `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${clock(d)}`;
+          footL.textContent = `${when}   O ${fmtP(o, dp)}  H ${fmtP(h, dp)}  L ${fmtP(l, dp)}  C ${fmtP(c, dp)}`;
         }
       }
     }
 
     new ResizeObserver(() => draw()).observe(plot);
+    paintHead();
     fit();
+    paintHead();
     draw();
-    card.__chart = { get view() { return { ...view }; }, get tf() { return tf; }, get bars() { return bars.length; },
-                     get replaying() { return !!timer; }, get upto() { return upto; },
-                     get news() { return news.map(n => n.title); }, idxAt, levels: () => levelsNow() };
-    function levelsNow() {
+    /* The trade's week is on screen; the rest of its month follows. */
+    if (res.rest?.length) {
+      loadingMore = true; paintSub();
+      cd.getKey().then(cred => cd.loadDays(store, inst, res.rest, cred, now))
+        .then(more => { loadingMore = false; paintSub(); extend(more); card.dispatchEvent(new Event('tc-month')); })
+        .catch(() => { loadingMore = false; paintSub(); footR.textContent = 'the rest of the month could not be loaded'; });
+    } else paintSub();
+    card.__chart = {
+      get view() { return { ...view }; }, get tf() { return tf; }, get bars() { return bars.length; },
+      get replaying() { return !!replay?.playing; }, get upto() { return replay ? replay.upto : null; },
+      get speed() { return SPEEDS[speed][0]; }, get drawing() { return drawMode; },
+      get news() { return news.map(n => n.title); }, get days() { return res.days.slice(); }, get loadingMore() { return loadingMore; },
+      get auto() { return yr.auto; }, get yRange() { return { lo: yr.lo, hi: yr.hi }; }, get follow() { return follow; },
+      firstBar: () => res.rows[0][0], lastBar: () => res.rows[res.rows.length - 1][0],
+      barTimes: () => bars.map(b => b[0]), barAt: i => bars[i], groups: () => lastGroups, lineCount: () => lines().length, idxAt, tags: () => tagsNow(), dots: () => dotsNow(),
+      xy: (T, p) => { const G = geom(); return { x: G.xT(T), y: G.Y(p) }; },
+    };
+    function tagsNow() {
       const out = [];
       if (Number.isFinite(tp)) out.push('TP'); if (Number.isFinite(sl)) out.push('SL');
-      if (Number.isFinite(entry)) out.push(exitLine?.atEntry ? 'In · BE' : 'In');
-      if (exitLine?.price != null) out.push(exitLine.kind === 'be' ? 'BE' : 'Out');
+      if (Number.isFinite(entry)) out.push('Entry'); if (exitOwnTag) out.push('Exit');
+      return out;
+    }
+    function dotsNow() {
+      const out = [];
+      if (timed && Number.isFinite(entry)) out.push('Entry');
+      if (timed && hasExit) out.push('Exit');
       return out;
     }
   }
@@ -420,10 +758,8 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
   function firstTf() {
     const own = CHART_TFS.find(([k]) => k === t.execTf);
     if (own) return own[1];
-    try {
-      const kept = Number(localStorage.getItem(TF_KEY));
-      if (CHART_TFS.some(([, m]) => m === kept)) return kept;
-    } catch { /* fine */ }
+    const kept = Number(recall(TF_KEY));
+    if (CHART_TFS.some(([, m]) => m === kept)) return kept;
     return 5;
   }
 
@@ -433,9 +769,11 @@ export function tradeChart(store, nav, t, now = Date.now() / 1000) {
 
 /* ---------- small pieces ---------- */
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const pad2 = n => String(n).padStart(2, '0');
 const clock = d => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 function localDay(T) { const d = new Date(T * 1000); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function dayLabel(iso) { const d = new Date(iso + 'T12:00:00Z'); return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()}`; }
 const fmt = (v, dp) => Number(v).toLocaleString('en-US', { minimumFractionDigits: Math.min(dp, 5), maximumFractionDigits: Math.min(dp, 5) });
 const fmtP = (v, dp) => Number(v).toFixed(dp);
 
