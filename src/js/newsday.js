@@ -13,7 +13,7 @@
    ============================================================ */
 import { oandaInstrument, currenciesOf } from './candles.js';
 import { localDay } from './news.js';
-import { isRedFolder, isBankHoliday, holidayFromCurrency } from './questions.js';
+import { isRedFolder, isBankHoliday, holidayFromCurrency, holidayName } from './questions.js';
 
 export const pairCurrencies = pair => currenciesOf(oandaInstrument(pair));
 /** A bank holiday's key: the country where Quire knows it, else the currency. */
@@ -44,13 +44,43 @@ export function dayNews(news, pair, date) {
 export const snapEvent = e => ({ title: e.title, country: e.country, at: e.at });
 
 const AROUND = ['before', 'during', 'after', 'between'];
+const sameEv = (a, b) => !!a && !!b && a.title === b.title && a.country === b.country && a.at === b.at;
+
+/**
+ * The news and bank holidays of a trade's day, the way every page shows
+ * them. Where the calendar was read for that day it answers — whatever was
+ * saved on the trade before (an old tick, nothing at all) — so a trade
+ * logged before the calendar filled these in reads right without being
+ * opened and saved. Where it was not, what is on the trade stands.
+ *   events     the red folder(s) for the pair's own currencies: the one you
+ *              picked, else every one that day
+ *   holidays   country keys ('CA', 'CN', …), any country's
+ *   from       'calendar' | 'trade'
+ */
+export function newsOf(t, news) {
+  const d = dayNews(news, t?.pair, t?.date);
+  if (d) {
+    const picked = d.red.find(e => sameEv(snapEvent(e), t.newsEvent));
+    return { events: (picked ? [picked] : d.red).map(snapEvent), holidays: [...new Set(d.holidays.map(e => holidayKey(e.country)))], from: 'calendar' };
+  }
+  return { events: t?.newsEvent?.title ? [t.newsEvent] : [], holidays: Array.isArray(t?.holidays) ? t.holidays : [], from: 'trade' };
+}
+
 /** What kind of day a trade was taken on: { red, holiday }. The calendar
     answers where it can; otherwise what is on the trade. */
 export function newsDayOf(t, news) {
-  const d = dayNews(news, t.pair, t.date);
-  if (d) return { red: d.red.length > 0, holiday: d.holidays.length > 0 };
-  return { red: !!t.newsEvent || AROUND.includes(t.news), holiday: Array.isArray(t.holidays) && t.holidays.length > 0 };
+  const n = newsOf(t, news);
+  if (n.from === 'calendar') return { red: n.events.length > 0, holiday: n.holidays.length > 0 };
+  return { red: n.events.length > 0 || AROUND.includes(t.news), holiday: n.holidays.length > 0 };
 }
 
-/** The red folder a trade was taken around: "USD · Core PCE Price Index m/m". */
-export const newsText = t => (t.newsEvent?.title ? (t.newsEvent.country ? `${t.newsEvent.country} · ` : '') + t.newsEvent.title : null);
+/** The red folder(s) of a trade's day as words: "USD · Core PCE Price Index m/m",
+    or several, one after the other. null when there were none. */
+export function newsText(t, news) {
+  const evs = newsOf(t, news).events;
+  if (!evs.length) return null;
+  const curs = [...new Set(evs.map(e => e.country).filter(Boolean))];
+  return (curs.length ? curs.join(', ') + ' · ' : '') + evs.map(e => e.title).join(', ');
+}
+/** Its bank holidays as words: "Canada", "China, Canada". null for none. */
+export const holidayText = (t, news) => { const h = newsOf(t, news).holidays; return h.length ? h.map(holidayName).join(', ') : null; };

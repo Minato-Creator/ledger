@@ -39,7 +39,10 @@ export const holidayCountry = cur => { const k = holidayFromCurrency(cur); retur
 /* Red folders and bank holidays are different things: a red folder is a
    high-impact release at a time; a bank holiday is a country closed all day. */
 export const isRedFolder = e => e?.impact === 'High';
-export const isBankHoliday = e => e?.impact === 'Holiday';
+/* Forex Factory files more than bank holidays in its grey "Holiday" folder —
+   the clocks changing ("Daylight Saving Time Shift") comes in it too. Only a
+   day the banks are shut is a bank holiday. */
+export const isBankHoliday = e => e?.impact === 'Holiday' && /holiday/i.test(e?.title || '');
 
 /* ---------- if held ----------
    What a trade would have made had it been left alone. Asked only of a

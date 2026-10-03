@@ -422,6 +422,9 @@ class Store {
 
     if (!d.news || typeof d.news !== 'object') { d.news = { version: 1, fetchedAt: null, events: [] }; note(); }
     if (!Array.isArray(d.news.events)) { d.news.events = []; note(); }
+    /* kept before a clock change was told apart from a bank holiday */
+    { const ok = d.news.events.filter(e => !(e?.impact === 'Holiday' && !/holiday/i.test(e?.title || '')));
+      if (ok.length !== d.news.events.length) { d.news.events = ok; note(); } }
     /* the stretches of time the calendar has been read for — so a day it was
        never read for is "not known", not "nothing on" */
     if (!Array.isArray(d.news.spans)) {
@@ -692,6 +695,8 @@ class Store {
       logged later — or the News card in Analytics — can still see the red
       folders and bank holidays of the day it was taken. */
   async saveNews(events) {
+    /* a clock change comes in the bank-holiday folder; it is neither */
+    events = events.filter(e => !(e?.impact === 'Holiday' && !/holiday/i.test(e?.title || '')));
     const held = this.data.news?.events || [];
     let kept = held, span = this.data.news?.span || null;
     if (events.length) {

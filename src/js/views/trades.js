@@ -2,6 +2,7 @@ import { el, icon, ft } from '../ui.js';
 import * as c from '../calc.js';
 import { tradeRow } from './dashboard.js';
 import { CONFIDENCE, EXIT_REASONS, EXEC_TFS, MISTAKES, NEWS } from '../questions.js';
+import { newsDayOf } from '../newsday.js';
 
 const filters = { q: '', side: 'all', result: 'all', setupId: 'all', mistake: 'all', exit: 'all', conf: 'all', tf: 'all', news: 'all' };
 const FRESH = { ...filters };
@@ -9,7 +10,7 @@ const FRESH = { ...filters };
 /* The questions New trade asks, as filters. A mistake filter of 'none' is
    the clean trades — asked, and nothing went wrong; a confidence of '4+' is
    solid or better; news 'any' is every trade logged around news. A trade never asked a question never matches it. */
-export function matchesQuestions(t, f) {
+export function matchesQuestions(t, f, news = null) {
   if (f.mistake !== 'all') {
     if (!Array.isArray(t.mistakes)) return false;
     if (f.mistake === 'none' ? t.mistakes.length : f.mistake === 'any' ? !t.mistakes.length : !t.mistakes.includes(f.mistake)) return false;
@@ -22,7 +23,7 @@ export function matchesQuestions(t, f) {
   if (f.tf !== 'all' && t.execTf !== f.tf) return false;
   /* News: a timing, any news at all (not "No news"), or a bank holiday. */
   if (f.news && f.news !== 'all') {
-    if (f.news === 'holiday') { if (!(Array.isArray(t.holidays) && t.holidays.length)) return false; }
+    if (f.news === 'holiday') { if (!newsDayOf(t, news).holiday) return false; }
     else if (f.news === 'any') { if (!t.news || t.news === 'none') return false; }
     else if (t.news !== f.news) return false;
   }
@@ -36,7 +37,7 @@ export function trades(store, nav) {
   if (filters.side !== 'all')   rows = rows.filter(t => t.side === filters.side);
   if (filters.setupId !== 'all')rows = rows.filter(t => t.setupId === filters.setupId);
   if (filters.result !== 'all') rows = rows.filter(t => c.outcome(t) === filters.result);
-  rows = rows.filter(t => matchesQuestions(t, filters));
+  rows = rows.filter(t => matchesQuestions(t, filters, store.data.news));
   if (filters.q.trim()) {
     const q = filters.q.toLowerCase();
     rows = rows.filter(t => (t.notes || '').toLowerCase().includes(q) || (t.pair || '').toLowerCase().includes(q));

@@ -2,7 +2,7 @@ import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { tradeShotsOf } from '../store.js';
 import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName } from '../questions.js';
-import { newsText } from '../newsday.js';
+import { newsText, holidayText } from '../newsday.js';
 import { heldAsked, heldOf, heldText } from '../questions.js';
 import { tradeChart } from './tradechart.js';
 
@@ -77,7 +77,7 @@ export function tradeDetail(store, nav, id) {
   const left = el('div', { class: 'td-left', style: { width: '780px', flex: 'none', display: 'flex', flexDirection: 'column', gap: '8px',
                                                       minHeight: 0, overflowY: 'auto' } },
     tradeChart(store, nav, t),
-    howItWent(t),
+    howItWent(t, store.data.news),
     el('div', { class: 'card', style: { flex: 'none', minHeight: '170px' } },
       el('div', { class: 'eyebrow' }, 'Journal'),
       el('div', { style: { marginTop: '13px', fontSize: '13.5px', lineHeight: 1.62, color: 'var(--ink-2)', whiteSpace: 'pre-wrap', flex: '1', overflowY: 'auto' } },
@@ -174,12 +174,12 @@ function chartTile(store, trade, name, at, present) {
    how it ended and what it would have made if held, the timeframe, how
    price moved, and what went wrong. Left off entirely for a trade logged
    before they were asked. */
-export function howItWent(t) {
+export function howItWent(t, news = null) {
   const open = t.status === 'open';
   const mistakes = Array.isArray(t.mistakes) ? t.mistakes : null;
   const held = heldOf(t);
   const hols = Array.isArray(t.holidays) ? t.holidays : [];
-  const has = t.confidence != null || t.emotionAfter != null || t.exitReason != null || t.execTf != null || t.delivery != null || mistakes || held || t.news || hols.length || t.newsEvent;
+  const has = t.confidence != null || t.emotionAfter != null || t.exitReason != null || t.execTf != null || t.delivery != null || mistakes || held || t.news || hols.length || t.newsEvent || newsText(t, news) || holidayText(t, news);
   if (!has) return null;
   const name = (list, v) => (list.find(([k]) => k === v) || [])[1];
   const scale = (list, v) => v == null ? el('b', { class: 'is-none' }, '—')
@@ -197,8 +197,9 @@ export function howItWent(t) {
       cell('Timeframe', plain(t.execTf ?? null)),
       open ? null : cell('Price delivery', plain(name(DELIVERY, t.delivery) ?? null), t.delivery ? ' is-dl-' + t.delivery : ''),
       cell('News timing', plain(name(NEWS, t.news) ?? null), t.news && t.news !== 'none' ? ' is-news' : ''),
-      cell('News', plain(newsText(t) ?? 'N/A'), t.newsEvent ? ' is-rf' : ' is-na'),
-      cell('Bank holiday', plain(hols.length ? hols.map(holidayName).join(', ') : 'N/A'), hols.length ? ' is-hol' : ' is-na')),
+      /* from the calendar where it was read for that day, else as saved */
+      cell('News', plain(newsText(t, news) ?? 'N/A'), newsText(t, news) ? ' is-rf' : ' is-na'),
+      cell('Bank holiday', plain(holidayText(t, news) ?? 'N/A'), holidayText(t, news) ? ' is-hol' : ' is-na')),
     open ? null : el('div', { class: 'td-mist' },
       el('span', { class: 'k' }, 'Mistakes'),
       mistakes == null ? el('span', { class: 'td-none' }, 'not asked')

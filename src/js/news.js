@@ -47,6 +47,8 @@ export function parseFeed(text) {
     if (isNaN(at)) continue;
     const impact = String(r.impact || '').trim();
     if (!KEPT.has(impact)) continue;
+    /* a clock change sits in the same grey folder: not a bank holiday, not news */
+    if (impact === 'Holiday' && !/holiday/i.test(String(r.title))) continue;
     out.push({
       id: `${r.date}|${r.country || ''}|${r.title}`,
       title: String(r.title).trim(),

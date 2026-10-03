@@ -18,7 +18,9 @@ const H24 = 24 * 3600;
 export function pipOf(inst) {
   const [a, b] = String(inst || '').split('_');
   if (b === 'JPY') return { size: 0.01, unit: 'pips' };
-  if (a === 'XAU') return { size: 0.1, unit: 'pips' };
+  /* gold is read in points, a point a dollar (4080 → 4081), the way the
+     Nasdaq is read in index points */
+  if (a === 'XAU') return { size: 1, unit: 'points' };
   if (a === 'XAG') return { size: 0.01, unit: 'pips' };
   if (/^[A-Z]{3}$/.test(a) && /^[A-Z]{3}$/.test(b) && !/\d/.test(a)) {
     const fx = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'NZD', 'CAD', 'CHF', 'SGD', 'HKD', 'NOK', 'SEK', 'DKK', 'ZAR', 'MXN', 'PLN', 'TRY', 'CNH', 'CZK', 'HUF'];
@@ -46,6 +48,11 @@ export function pipOf(inst) {
  *                     neither was reached in the prices loaded
  *   reachedTarget     price got to your target at some point after entry
  *                     (for a stop-out: within a day after the stop)
+ *   pastStop          stopped out, then on to the target: how far price went
+ *                     beyond your stop before it turned for the target, in
+ *                     price — from the candle that took the stop to the one
+ *                     before the target. null when it never reached the
+ *                     target within a day
  *   covered           the prices reach a full day past the exit
  */
 export function measure(trade, rows, w, kind) {
@@ -76,14 +83,13 @@ export function measure(trade, rows, w, kind) {
 
   /* how far it ran: from the entry until the original stop is touched, or a
      day after the exit, whichever comes first */
-  let best = 0, fromStop = 0, stoppedAt = null, reached = false, reachedAt = null;
+  let best = 0, stoppedAt = null, reached = false, reachedAt = null;
   const until = w.exit + H24;
   for (let k = first; k < rows.length && rows[k][0] <= until; k++) {
     const [t, , h, l] = rows[k];
     if (kind === 'sl') {
       /* stopped out: only what it did afterwards — did the idea come good? */
       if (t <= outMin) continue;
-      fromStop = Math.max(fromStop, long ? h - sl : sl - l);
     } else if (t > outMin && hitsStop(h, l)) { stoppedAt = t; break; }
     best = Math.max(best, fav(h, l));
     if (!reached && hitsTarget(h, l)) { reached = true; reachedAt = t; }
@@ -93,7 +99,22 @@ export function measure(trade, rows, w, kind) {
      best it got your way. */
   const toTarget = Number.isFinite(tp) ? Math.abs(tp - entry) : Infinity;
   const could = reached ? toTarget : Math.min(Math.max(0, best), toTarget);
-  if (Number.isFinite(tp)) fromStop = Math.min(fromStop, Math.abs(tp - sl));
+
+  /* stopped out, and then the target: how far past the stop it went first */
+  let pastStop = null;
+  if (kind === 'sl' && Number.isFinite(tp)) {
+    let s = -1;
+    for (let k = first; k < rows.length && rows[k][0] <= until; k++) if (hitsStop(rows[k][2], rows[k][3])) { s = k; break; }
+    /* OANDA's mid may not touch a stop your broker's price did: start at the exit */
+    if (s < 0) { s = first; while (s < rows.length && rows[s][0] < outMin) s++; }
+    let deepest = 0;
+    for (let k = s; k < rows.length && rows[k][0] <= until; k++) {
+      const [, , h, l] = rows[k];
+      if (k > s && hitsTarget(h, l)) { pastStop = deepest; break; }
+      deepest = Math.max(deepest, long ? sl - l : h - sl);
+    }
+    if (!reached) pastStop = null;
+  }
 
   /* had you held: from the minute after you got out, target or stop first */
   let held = null;
@@ -112,10 +133,10 @@ export function measure(trade, rows, w, kind) {
     availR: +R(Math.max(0, best)).toFixed(2),
     couldR: +R(could).toFixed(2),
     duringR: +R(Math.max(0, during)).toFixed(2),
-    fromStop: Math.max(0, fromStop),
     targetR: Number.isFinite(tp) ? +R(toTarget).toFixed(2) : null,
     held,
     reachedTarget: reached, reachedAt,
+    pastStop,
     stoppedAfter: stoppedAt,
     covered: lastT >= until,
   };
@@ -125,5 +146,7 @@ export function measure(trade, rows, w, kind) {
 export function inPips(d, inst) {
   const p = pipOf(inst);
   const n = d / p.size;
-  return { n: Math.abs(n) >= 100 ? Math.round(n) : Math.round(n * 10) / 10, unit: p.unit };
+  /* whole from 100, one decimal from 10, two below — gold's $1.25 is 1.25 points */
+  const a = Math.abs(n);
+  return { n: a >= 100 ? Math.round(n) : a >= 10 ? Math.round(n * 10) / 10 : Math.round(n * 100) / 100, unit: p.unit };
 }

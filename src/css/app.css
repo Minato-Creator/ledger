@@ -2726,6 +2726,7 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .td-cell.is-news b, .rv-pill.is-news { color:var(--yellow); }
 .td-cell.is-rf b, .rv-pill.is-rf { color:var(--loss); }
 .td-cell.is-na b { color:var(--ink-4); font-weight:400; }
+.rv-pill.is-na { color:var(--ink-4); }
 .td-cell.is-hol b, .rv-pill.is-hol { color:#A78BFA; }
 .ex-news { flex:1.3 1 0; }
 .ex-hols { flex:1 1 0; }
@@ -3069,7 +3070,7 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .rv-fact { display:flex; flex-direction:column; gap:4px; min-width:0; }
 .rv-fact .k { font:400 9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
 .rv-fact b { font:400 15px var(--sans); color:var(--ink); font-variant-numeric:tabular-nums; }
-.rv-fact.is-pos b { color:var(--profit); } .rv-fact.is-neg b { color:var(--loss); }
+.rv-fact.is-pos b { color:var(--profit); } .rv-fact.is-neg b { color:var(--loss); } .rv-fact.is-warn b { color:var(--yellow); }
 .rv-fact small { font:400 10.5px var(--mono); color:var(--ink-4); line-height:1.4; }
 .rv-facts-edit-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px 18px; }
 .rv-facts .rv-held { margin-top:2px; }
@@ -3093,7 +3094,8 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .tc-rplay i.is-pause { width:8px; height:9px; border-left:2.5px solid currentColor; border-right:2.5px solid currentColor; }
 
 /* ---------- review: the month ---------- */
-.rv-mstats { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+.rv-mstats { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+.rv-stats .rv-stat.is-wide { grid-column:1 / -1; }
 .rv-stat.is-warn .v { color:var(--yellow); }
 .rv-mweeks { padding:22px 24px; gap:4px; }
 .rv-mweeks .lab-chart-head { margin-bottom:10px; }

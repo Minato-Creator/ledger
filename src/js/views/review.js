@@ -22,7 +22,7 @@ import * as P from '../periods.js';
 import { tradeShotsOf } from '../store.js';
 import { tipLayer } from './chartkit.js';
 import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName, heldOf, heldText } from '../questions.js';
-import { newsText } from '../newsday.js';
+import { newsText, holidayText } from '../newsday.js';
 import { heldEditor } from './held.js';
 import { fromPricesOf } from './addtrade.js';
 import { tradeChart } from './tradechart.js';
@@ -60,7 +60,10 @@ export const isReviewed = t => !!t?.review?.what;
    did not yet reach a day past the exit.
    ============================================================ */
 export const factsKey = t => [t.date, t.timeOpen, t.timeClose, t.entryPrice, t.stopLoss, t.takeProfit, t.exitPrice, t.side, t.status].join('|');
-export const FACTS_V = 2;
+export const FACTS_V = 3;
+/** A stop taken by this much or less (pips, or points) before price went on to
+    the target is a stop that was only just too tight. Further is not counted. */
+export const NEAR_STOP = 5;
 export const factsOf = t => (t?.review?.chart && t.review.chart.v === FACTS_V && t.review.chart.key === factsKey(t) ? t.review.chart : null);
 const busy = new Map(), trouble = new Map();
 /** Resolves true when there is something new to show. */
@@ -81,7 +84,7 @@ export function ensureFacts(store, t) {
       trouble.delete(t.id);
       const pips = inPips(m.toStop, inst);
       const chart = { v: FACTS_V, key: factsKey(t), heatR: m.heatR, toStop: pips.n, unit: pips.unit, availR: m.availR,
-        couldR: m.couldR, duringR: m.duringR, targetR: m.targetR, fromStop: inPips(m.fromStop, inst).n,
+        couldR: m.couldR, duringR: m.duringR, targetR: m.targetR, pastStop: m.pastStop == null ? null : inPips(m.pastStop, inst).n,
         held: m.held, reachedTarget: m.reachedTarget, reachedAt: m.reachedAt, covered: m.covered };
       const same = have && JSON.stringify({ ...have, at: 0 }) === JSON.stringify({ ...chart, at: 0 });
       if (!same) await store.setTradeReview(t.id, { chart: { ...chart, at: new Date().toISOString() } });
@@ -214,6 +217,11 @@ export function weekStats(acct, trades) {
   out.leftEarly = closed.reduce((a, x) => a + leftOf(acct, x.t), 0);
   out.leftEarlyN = closed.filter(x => leftOf(acct, x.t) > 0).length;
   out.capture = out.plannedR > 0 ? out.taken / out.plannedR : null;
+  /* Stopped out, then on to the target: how far past the stop each went
+     first, and the ones within NEAR_STOP — a stop only just too tight. */
+  out.pastStops = rows.filter(x => closedBy(x.t) === 'sl' && factsOf(x.t)?.pastStop != null)
+    .map(x => ({ id: x.t.id, pair: x.t.pair, n: factsOf(x.t).pastStop, unit: factsOf(x.t).unit }));
+  out.nearStop = out.pastStops.filter(p => p.n <= NEAR_STOP);
   return out;
 }
 
@@ -434,13 +442,17 @@ function reviewCard(store, acct, t, pb, on) {
     const when = s => { const d = new Date(s * 1000); return `${DAYS[d.getDay()]} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
     const facts = [];
     if (kind === 'sl') {
-      facts.push(fact('heat', 'Stopped out', '−1.0R', 'is-neg'));
+      /* a stop is a loss, said plainly — not "−1R of heat" */
+      facts.push(fact('heat', 'Heat', 'Trade lost', 'is-neg'));
       facts.push(fact('avail', 'Could have made', v.avail != null ? rr(v.avail) : '—', v.avail > 0 ? 'is-pos' : '',
         typed('avail') ? 'typed by you' : ch ? (ch.reachedTarget ? `price reached your target after the stop · ${when(ch.reachedAt)}` : 'the best it got after the stop — it never reached your target') : ''));
-      /* the idea was right: how far it went your way from the stop */
-      if (v.dir === 'right' && ch && ch.fromStop != null)
-        facts.push(fact('fromstop', 'From your stop', `${ch.fromStop} ${unit} your way`, ch.fromStop > 0 ? 'is-pos' : '',
-          ch.reachedTarget ? 'all the way to your target' : 'up to the target at most'));
+      /* the idea was right and price went on to the target: how far past
+         your stop it went first. A few pips is a stop only just too tight. */
+      if (v.dir === 'right' && ch && ch.pastStop != null) {
+        const near = ch.pastStop <= NEAR_STOP;
+        facts.push(fact('paststop', 'Past your stop', `${ch.pastStop} ${unit}`, near ? 'is-warn' : '',
+          near ? `then on to your target · within ${NEAR_STOP} ${unit}` : `more than ${NEAR_STOP} ${unit} — not counted`));
+      }
     } else {
       const heatTxt = v.heat == null ? '—' : v.heat < 0.005 ? 'never against you' : rr(-v.heat);
       facts.push(fact('heat', 'Heat', heatTxt, v.heat >= 0.8 ? 'is-neg' : '',
@@ -477,7 +489,7 @@ function reviewCard(store, acct, t, pb, on) {
     /* typing them in: the old questions, filled with what the chart said */
     const boxes = [];
     const could = () => num('avail', 'Could have made', 'your target if price got there — never more than that');
-    if (kind === 'sl') { if (v.dir === 'right') boxes.push(num('heat', 'Heat', 'how far it went against you — 1R is your stop', { neg: true }), could()); }
+    if (kind === 'sl') { if (v.dir === 'right') boxes.push(could()); }
     else {
       boxes.push(could());
       if (v.dir !== 'wrong') boxes.push(num('heat', 'Heat', 'how close it came to your stop', { neg: true }));
@@ -498,7 +510,7 @@ function reviewCard(store, acct, t, pb, on) {
       el('div', { class: 'p' }, el('b', {}, t.pair || '—'),
         el('span', {}, [`${dayOf(t.date)} ${c.shortDate(t.date)}`, t.timeOpen, setup, t.side === 'sell' ? 'short' : 'long', session].filter(Boolean).join(' · '))),
       el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2))),
-    fromTheTrade(t, on),
+    fromTheTrade(t, on, store.data.news),
     ruler,
     factsBox(),
     /* What a reviewer decides. The rest is read off the chart, above. */
@@ -531,7 +543,7 @@ function reviewCard(store, acct, t, pb, on) {
 /* What you said about the trade when you logged it, read back so the review
    starts from it: confidence, feeling after, how it ended, the timeframe,
    price delivery and any mistakes. Changing them is the trade's own page. */
-function fromTheTrade(t, on) {
+function fromTheTrade(t, on, news = null) {
   const name = (list, k) => (list.find(([v]) => v === k) || [])[1];
   const m = Array.isArray(t.mistakes) ? t.mistakes : null;
   const bits = [
@@ -541,8 +553,9 @@ function fromTheTrade(t, on) {
     t.execTf ? ['TF', t.execTf, ''] : null,
     t.delivery ? ['Price', name(DELIVERY, t.delivery), t.delivery === 'good' ? 'is-good' : t.delivery === 'poor' ? 'is-bad' : ''] : null,
     t.news ? ['News', name(NEWS, t.news), t.news === 'none' ? '' : 'is-news'] : null,
-    t.newsEvent?.title ? ['Red folder', newsText(t), 'is-rf'] : null,
-    Array.isArray(t.holidays) && t.holidays.length ? ['Bank holiday', t.holidays.map(holidayName).join(', '), 'is-hol'] : null,
+    /* the calendar's answer where it was read for that day, else as saved */
+    ['Red folder', newsText(t, news) ?? 'N/A', newsText(t, news) ? 'is-rf' : 'is-na'],
+    ['Bank holiday', holidayText(t, news) ?? 'N/A', holidayText(t, news) ? 'is-hol' : 'is-na'],
   ].filter(Boolean);
   if (!bits.length && !m) return null;
   return el('div', { class: 'rv-from' },
@@ -595,7 +608,7 @@ function rulerOf(r, v, big) {
       r != null ? el('span', { class: 'you', style: { left: X(r) + '%' }, title: `You took ${rr(r, 2)}` }) : null),
     big ? el('div', { class: 'lbls' }, ...marks.map(k => el('span', { style: { left: X(k) + '%' } }, k === 0 ? '0' : rr(k, 0)))) : null,
     big ? el('div', { class: 'key' },
-      el('span', {}, el('i', { class: 'heat' }), `heat ${v.heat != null ? rr(-v.heat) : '—'}`),
+      el('span', {}, el('i', { class: 'heat' }), v.kind === 'sl' ? 'trade lost' : `heat ${v.heat != null ? rr(-v.heat) : '—'}`),
       el('span', {}, el('i', { class: 'avail' }), `could have made ${rr(v.avail)}`),
       el('span', {}, el('i', { class: 'you' }), `you ${rr(r, 2)}`),
       v.better != null ? el('span', {}, el('i', { class: 'bx' }), `better exit ${rr(v.better)}`) : null) : null);
@@ -621,7 +634,8 @@ function weekTab(store, acct, trades, nav, all) {
     stat('Taken', rr(S.taken), `${S.trades} trade${S.trades === 1 ? '' : 's'} this week`, S.taken > 0 ? ' is-pos' : S.taken < 0 ? ' is-neg' : ''),
     stat('Left on the table', rr(S.leftEarly), S.leftEarlyN ? `closed early on ${S.leftEarlyN}, target then hit` : 'nothing closed early that went on'),
     stat('Stopped, but right', String(S.stopped), S.stopped ? `would have made ${rr(S.stoppedWould)}` : 'none this week'),
-    stat('Plan followed', S.plan == null ? '—' : c.pct(S.plan, 0), S.planned ? `${S.planYes} of ${S.planned} trades` : 'not answered yet'));
+    stat('Plan followed', S.plan == null ? '—' : c.pct(S.plan, 0), S.planned ? `${S.planYes} of ${S.planned} trades` : 'not answered yet'),
+    nearStopStat(S, stat, ' is-wide'));
 
   const main = el('div', { class: 'rv-wleft' },
     el('div', { class: 'rv-hero' }, captureCard(S), stats),
@@ -630,6 +644,17 @@ function weekTab(store, acct, trades, nav, all) {
     el('div', { class: 'rv-wpair' }, scatterCard(acct, trades, S), mixCard(acct, trades, S)),
     trendCard(acct, all));
   return el('div', { class: 'rv-body' }, main, notesCard(store, nav));
+}
+
+/* How often a stop was taken by a hair: price went at most NEAR_STOP past
+   it and then on to the target. */
+function nearStopStat(S, stat, cls = '') {
+  const near = S.nearStop, all = S.pastStops;
+  const list = near.slice(0, 4).map(p => `${p.pair} ${p.n} ${p.unit}`).join(' · ') + (near.length > 4 ? ' …' : '');
+  return stat('Just past your stop', String(near.length),
+    near.length ? `of ${all.length} stop${all.length === 1 ? '' : 's'} that went on to target · ${list}`
+      : all.length ? `${all.length} stopped then hit target — each more than ${NEAR_STOP} past` : 'no stop went on to your target',
+    (near.length ? ' is-warn' : '') + cls);
 }
 
 /* ---------- what you logged, added up ----------
@@ -978,6 +1003,8 @@ function monthTab(store, acct, trades, nav) {
     stat('Plan followed', S.plan == null ? '—' : c.pct(S.plan, 0), S.planned ? `${S.planYes} of ${S.planned} trades` : 'not answered yet'),
     stat('Early entries', String(S.entry.early), S.reviewed ? `of ${S.reviewed} reviewed` : 'none reviewed yet', S.entry.early ? ' is-warn' : ''),
     stat('Left on the table', rr(S.leftEarly), S.leftEarlyN ? `closed early on ${S.leftEarlyN}, target then hit` : 'nothing closed early that went on'),
+    stat('Stopped, but right', String(S.stopped), S.stopped ? `would have made ${rr(S.stoppedWould)}` : 'none this month'),
+    nearStopStat(S, stat),
     stat('Reviewed', `${S.reviewed} / ${S.trades}`, S.reviewed === S.trades ? 'every trade' : `${S.trades - S.reviewed} to go`));
 
   /* ---------- the weeks against each other ---------- */

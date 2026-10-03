@@ -27,7 +27,7 @@ export function ghostPage(ctx) {
   if (!state.ghost || typeof state.ghost !== 'object') state.ghost = G.blankRules();
   const R = state.ghost;
 
-  const { rows, skipped: noR } = G.rowsFrom(acct, pick());
+  const { rows, skipped: noR } = G.rowsFrom(acct, pick(), store.data.news);
   const pb = store.playbook;
   const names = {
     sessions: Object.fromEntries((pb.sessions || []).map(s => [s.id, s.name])),

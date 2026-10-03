@@ -32,6 +32,7 @@
 import * as c from './calc.js';
 import { rng } from './lab.js';
 import { heldOf } from './questions.js';
+import { newsDayOf } from './newsday.js';
 
 const NEWS_SHORT = { none: 'no-news days', before: 'before news', during: 'during news', after: 'after news', between: 'in between news' };
 
@@ -47,7 +48,7 @@ export const blankRules = () => ({
 const dowOf = date => (new Date(date + 'T00:00:00').getDay() + 6) % 7;   // Mon = 0
 
 /** Your trades as the ghost reads them: closed, with an R, in the order taken. */
-export function rowsFrom(account, trades) {
+export function rowsFrom(account, trades, news = null) {
   const rows = [];
   let skipped = 0;
   for (const t of trades) {
@@ -58,7 +59,7 @@ export function rowsFrom(account, trades) {
       session: t.sessionId || null, setup: t.setupId || null,
       pair: (t.pair || '').toUpperCase() || null, tags: t.tagIds || [],
       confidence: t.confidence ?? null, tf: t.execTf || null, held: heldOf(t),
-      news: t.news || null, holiday: Array.isArray(t.holidays) && t.holidays.length > 0 });
+      news: t.news || null, holiday: newsDayOf(t, news).holiday });
   }
   rows.sort((a, b) => (a.date + (a.t.timeOpen || '99:99')).localeCompare(b.date + (b.t.timeOpen || '99:99')));
   return { rows, skipped };
