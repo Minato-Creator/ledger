@@ -402,8 +402,13 @@ export function tradeChart(store, nav, t, opts = {}) {
       timer = null; replay = null; paintHead();
     }
 
-    /* ---------- your lines ---------- */
-    const lines = () => store.drawingsFor(inst);
+    /* ---------- your lines ----------
+       Kept per instrument and per place: the trade page and the weekly
+       review share one set (the execution's markings), the Outlook keeps its
+       own (opts.lines = 'outlook'), so gold marked up for the day ahead does
+       not clutter gold's trades, and the other way round. */
+    const dkey = opts.lines ? `${opts.lines}:${inst}` : inst;
+    const lines = () => store.drawingsFor(dkey);
     function setDraw(on) {
       drawMode = on; sketch = null;
       if (on) { closeEditor(); cancelPick(); if (replay && replay.playing) togglePlay(); }
@@ -430,7 +435,7 @@ export function tradeChart(store, nav, t, opts = {}) {
       return null;
     }
     async function saveLine(L) {
-      try { await store.putDrawing(inst, L); } catch (e) { toast('Could not save the line: ' + (e.message || e), 'bad'); }
+      try { await store.putDrawing(dkey, L); } catch (e) { toast('Could not save the line: ' + (e.message || e), 'bad'); }
     }
     function openEditor(L) {
       picked = L.id;
@@ -453,7 +458,7 @@ export function tradeChart(store, nav, t, opts = {}) {
         input,
         el('div', { class: 'tc-chips' }, ...QUICK_LABELS.map(q => el('button', { onClick: () => commit(q) }, q))),
         el('div', { class: 'tc-editrow' },
-          el('button', { class: 'tc-del', onClick: async () => { await store.dropDrawing(inst, L.id); closeEditor(); } }, 'Delete line'),
+          el('button', { class: 'tc-del', onClick: async () => { await store.dropDrawing(dkey, L.id); closeEditor(); } }, 'Delete line'),
           el('button', { class: 'tc-ok', onClick: () => commit(input.value) }, 'Done')));
       editor.style.left = x + 'px'; editor.style.top = Math.max(4, y) + 'px';
       editor.hidden = false;
@@ -496,7 +501,7 @@ export function tradeChart(store, nav, t, opts = {}) {
         const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
         if (drag.moved) {
-          plot.classList.add('is-dragging');
+          plot.classList.add('is-panning');
           if (drag.zone === 'pane') {
             view.start = drag.start - dx / (drag.pw / drag.count); clamp();
             if (Math.abs(dx) > 3 && replay && follow) setFollow(false);
@@ -542,10 +547,10 @@ export function tradeChart(store, nav, t, opts = {}) {
         const r = canvas.getBoundingClientRect(), G = geom();
         pickAt(Math.floor(view.start + (e.clientX - r.left) / G.bw));
       } else if (drag && !drag.moved && drag.line) openEditor(drag.line);
-      drag = null; plot.classList.remove('is-dragging');
+      drag = null; plot.classList.remove('is-panning');
     };
     canvas.addEventListener('pointerup', up);
-    canvas.addEventListener('pointercancel', () => { sketch = null; drag = null; plot.classList.remove('is-dragging'); draw(); });
+    canvas.addEventListener('pointercancel', () => { sketch = null; drag = null; plot.classList.remove('is-panning'); draw(); });
     canvas.addEventListener('pointerenter', () => { over = true; });
     canvas.addEventListener('pointerleave', () => {
       over = false;

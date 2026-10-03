@@ -2713,15 +2713,19 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .news-hint { font:400 10px var(--mono); color:var(--ink-4); letter-spacing:.02em; }
 .xr.is-news.is-on { color:var(--ink); background:rgba(255,184,0,.14); box-shadow:inset 0 0 0 1px rgba(255,184,0,.75); }
 .xr.is-news.is-none.is-on { background:rgba(128,128,128,.18); box-shadow:inset 0 0 0 1px var(--grey-4); }
-.xr.is-hol { min-width:40px; text-align:center; padding-left:10px; padding-right:10px; }
-.xr.is-hol.is-on { color:var(--ink); background:rgba(167,139,250,.16); box-shadow:inset 0 0 0 1px rgba(167,139,250,.8); }
-.news-day { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; padding:10px 12px; border-radius:var(--r-btn); box-shadow:inset 0 0 0 1px var(--grey-7); }
-.news-day[hidden] { display:none; }
-.news-day .k { width:100%; font:400 9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
-.news-day .ev { font:400 11px var(--mono); color:var(--ink-3); }
-.news-day .ev b { font-weight:500; color:var(--loss); margin-right:6px; }
-.news-day .ev.is-hol b { color:#A78BFA; }
+.news-pick { display:flex; align-items:center; gap:12px; flex-wrap:wrap; min-height:28px; }
+.news-pick .exit-reasons { flex:0 1 auto; min-width:0; }
+.xr.is-rf b { font-weight:500; color:var(--loss); margin-right:2px; }
+.xr.is-rf.is-on { color:var(--ink); background:rgba(255,77,77,.10); box-shadow:inset 0 0 0 1px rgba(255,77,77,.65); }
+.news-val { font:400 12px var(--mono); color:var(--ink); }
+.news-val.is-na { color:var(--ink-4); }
+.news-val.is-hol { color:#A78BFA; }
+.news-text { flex:1 1 220px; min-width:0; }
+.news-sel { width:100%; }
+.card.roomy .news-pick .field { height:30px; padding-top:0; padding-bottom:0; font-size:12px; }
 .td-cell.is-news b, .rv-pill.is-news { color:var(--yellow); }
+.td-cell.is-rf b, .rv-pill.is-rf { color:var(--loss); }
+.td-cell.is-na b { color:var(--ink-4); font-weight:400; }
 .td-cell.is-hol b, .rv-pill.is-hol { color:#A78BFA; }
 .ex-news { flex:1.3 1 0; }
 .ex-hols { flex:1 1 0; }
@@ -2737,6 +2741,16 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .ex-row .ex-hol b.is-pos { color:var(--profit); } .ex-row .ex-hol b.is-neg { color:var(--loss); }
 .ex-hol small { font:400 10px var(--mono); color:var(--ink-4); text-align:right; white-space:nowrap; }
 .ex-hol.is-thin .nm, .ex-hol.is-thin b, .ex-hol.is-thin .tr { opacity:.5; }
+.ex-newsdays .ex-hol { grid-template-columns:minmax(128px, 1.2fr) minmax(40px, 1fr) 64px 48px 44px; padding:10px 0; }
+.ex-newsdays .ex-hol.is-cols { padding:0 0 6px; border:0; }
+.ex-newsdays .ex-hol.is-cols span { font:400 9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); text-align:right; }
+.ex-newsdays .ex-hol.is-cols + .ex-hol { border-top:0; }
+.ex-newsdays .ex-hol .nm { display:flex; align-items:center; gap:8px; }
+.ex-newsdays .ex-hol .dot { width:6px; height:6px; border-radius:50%; background:var(--grey-5); flex:none; }
+.ex-newsdays .ex-hol.is-red .dot { background:var(--loss); }
+.ex-newsdays .ex-hol.is-holiday .dot { background:#A78BFA; }
+.ex-newsdays .ex-hol small { font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.ex-newsdays .ex-hol.is-empty .nm, .ex-newsdays .ex-hol.is-empty small, .ex-newsdays .ex-hol.is-empty b { opacity:.45; }
 
 /* ---------- Review · pictures in two rows, answers the trade already gave ---------- */
 .rv-shotgroups { display:grid; grid-template-columns:minmax(0, 1fr); gap:18px; }
@@ -2957,7 +2971,7 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .tc-plot.is-loading { display:flex; align-items:center; justify-content:center; font:400 11px var(--mono); color:var(--ink-4);
                       background:var(--inset); border-radius:var(--r-inset); }
 .tc-canvas { position:absolute; inset:0; display:block; cursor:crosshair; touch-action:none; }
-.tc-plot.is-dragging .tc-canvas { cursor:grabbing; }
+.tc-plot.is-panning .tc-canvas { cursor:grabbing; }
 .tc-plot.is-hot .tc-canvas { cursor:pointer; }
 .tc-plot.is-drawing .tc-canvas { cursor:crosshair; }
 .tc-head { flex-wrap:nowrap; }

@@ -171,7 +171,9 @@ function redFolderStrip(store, nav) {
    ============================================================ */
 function redFolderWeek(store, nav) {
   const cached = store.news;
-  const days = eventsByDay(cached.events);
+  /* the calendar keeps past weeks now; this list is the feed's own week */
+  const sp = cached.span;
+  const days = eventsByDay(sp ? cached.events.filter(e => e.at >= sp.from && e.at <= sp.to) : cached.events);
   const today = c.todayISO();
   const now = Date.now();
 

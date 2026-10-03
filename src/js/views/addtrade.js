@@ -2,9 +2,10 @@ import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { todayISO, tradeShotsOf, newShotId } from '../store.js';
 import { prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
-import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS, holidayFromCurrency, heldAsked, heldOf } from '../questions.js';
+import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS, holidayName, heldAsked, heldOf } from '../questions.js';
 import { heldEditor } from './held.js';
 import { guessAssetClass } from '../broker.js';
+import { dayNews, pairCurrencies, holidayKey, snapEvent } from '../newsday.js';
 
 /** The category, from the instrument as typed — no picker to forget. */
 export const classOf = pair => { const p = String(pair || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return p ? guessAssetClass(p) : null; };
@@ -16,7 +17,6 @@ const ASSET_CLASSES = ['Forex', 'Futures', 'Commodities', 'Indices'];
 export { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS };
 
 const pad2 = n => String(n).padStart(2, '0');
-const localDay = iso => { const d = new Date(iso); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 const localTime = iso => { const d = new Date(iso); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
 /**
@@ -79,7 +79,8 @@ export function addTrade(store, nav, existingId = null) {
     delivery: DELIVERY.some(([v]) => v === editing.delivery) ? editing.delivery : null,
     held: heldOf(editing),
     news: NEWS.some(([v]) => v === editing.news) ? editing.news : null,
-    holidays: Array.isArray(editing.holidays) ? editing.holidays.filter(k => HOLIDAYS.some(([h]) => h === k)) : [],
+    holidays: Array.isArray(editing.holidays) ? editing.holidays.filter(k => typeof k === 'string' && k) : [],
+    newsEvent: editing.newsEvent && editing.newsEvent.title ? { ...editing.newsEvent } : null,
   } : {
     assetClass: 'Forex', pair: '', side: 'buy', setupId: pb.setups[0]?.id || null,
     sessionId: null, sessionAuto: true,
@@ -88,7 +89,7 @@ export function addTrade(store, nav, existingId = null) {
     size: '', sizeUnit: 'lots',
     riskPercent: acct.defaultRiskPercent, netResult: '', resultSign: 'win', rText: '',
     tagIds: [], grade: '', notes: '', status: 'closed', mode: 'live',
-    confidence: null, exitReason: null, emotionAfter: null, execTf: null, mistakes: [], delivery: null, held: null, news: null, holidays: [],
+    confidence: null, exitReason: null, emotionAfter: null, execTf: null, mistakes: [], delivery: null, held: null, news: null, holidays: [], newsEvent: null,
   };
   if (editing) f.sessionAuto = false;
 
@@ -563,7 +564,8 @@ export function addTrade(store, nav, existingId = null) {
          the answer goes with it. */
       heldOutcome: null, heldR: null,
       news: f.news ?? null,
-      holidays: HOLIDAYS.map(([k]) => k).filter(k => f.holidays.includes(k)),
+      holidays: [...new Set(f.holidays)],
+      newsEvent: f.newsEvent && String(f.newsEvent.title || '').trim() ? { ...f.newsEvent, title: String(f.newsEvent.title).trim() } : null,
     };
     if (!isOpen() && heldAsked({ ...f, status: 'closed' }) && f.held && f.held.r != null) {
       payload.heldOutcome = f.held.outcome;
@@ -845,10 +847,8 @@ export function addTrade(store, nav, existingId = null) {
   const tfWrap = pick('execTf', EXEC_TFS.map(v => [v, v]), 'xr is-tf');
 
   /* ---------- news ----------
-     Your call, not the calendar's: which red-folder release mattered to this
-     pair, and whether you were in before it, during it or after it. Bank
-     holidays are ticked by country. When the calendar Quire keeps has that
-     day, it is shown underneath as a reminder — it never answers for you. */
+     Whether you were in before the news, during it or after it is your call.
+     Which release it was and whose bank holiday are the calendar's, below. */
   const NEWS_HINT = { none: 'no red-folder news that mattered', before: 'the news came after you were out', during: 'the news hit while you were in',
     after: 'the news was out before you went in', between: 'news before and after your trade' };
   const newsWrap = el('div', { class: 'exit-reasons', role: 'group', 'aria-label': 'News' });
@@ -859,24 +859,53 @@ export function addTrade(store, nav, existingId = null) {
     newsNote.textContent = f.news ? NEWS_HINT[f.news] : '';
   }
   paintNews();
-  const holWrap = el('div', { class: 'exit-reasons hol', role: 'group', 'aria-label': 'Bank holiday' });
-  function paintHol() {
-    holWrap.replaceChildren(...HOLIDAYS.map(([k, name]) => el('button', { type: 'button', class: 'xr is-hol' + (f.holidays.includes(k) ? ' is-on' : ''), title: name,
-      onClick: () => { f.holidays = f.holidays.includes(k) ? f.holidays.filter(x => x !== k) : [...f.holidays, k]; paintHol(); } }, k)));
+  /* Which red folder, and whose bank holiday — read off the calendar Quire
+     keeps, not ticked by hand. Only the pair's own currencies count: a CAD
+     release is not news for AUDUSD. A bank holiday is anyone's. Where the
+     calendar was never read for that day it cannot say, so you can. */
+  const rfWrap = el('div', { class: 'news-pick' });
+  const holWrap = el('div', { class: 'news-pick' });
+  const sameEv = (a, b) => !!a && !!b && a.title === b.title && a.country === b.country && a.at === b.at;
+  function fromCalendar() {
+    const d = dayNews(store.data.news, f.pair, f.date);
+    if (d) {
+      f.holidays = [...new Set(d.holidays.map(e => holidayKey(e.country)))];
+      const kept = d.red.find(e => sameEv(snapEvent(e), f.newsEvent));
+      f.newsEvent = kept ? snapEvent(kept) : d.red.length === 1 ? snapEvent(d.red[0]) : null;
+    }
+    paintCal(d);
   }
-  paintHol();
-  /* What the kept calendar has for the trade's day, if anything. */
-  const dayNote = el('div', { class: 'news-day' });
-  function paintDay() {
-    const evs = (store.data.news?.events || []).filter(ev => localDay(ev.at) === f.date);
-    dayNote.replaceChildren(...(evs.length ? [el('span', { class: 'k' }, 'On the calendar that day'),
-      ...evs.map(ev => el('span', { class: 'ev' + (ev.impact === 'Holiday' ? ' is-hol' : '') },
-        el('b', {}, ev.impact === 'Holiday' ? 'Bank holiday' : localTime(ev.at)), ev.country,
-        ev.impact === 'Holiday' ? ` · ${holidayFromCurrency(ev.country) ? HOLIDAYS.find(([k]) => k === holidayFromCurrency(ev.country))[1] : ev.title}` : ` · ${ev.title}`))] : []));
-    dayNote.hidden = !evs.length;
+  function paintCal(d = dayNews(store.data.news, f.pair, f.date)) {
+    const curs = pairCurrencies(f.pair);
+    if (d) {
+      rfWrap.replaceChildren(...(d.red.length
+        ? [el('div', { class: 'exit-reasons' }, ...d.red.map(e => el('button', { type: 'button',
+            class: 'xr is-rf' + (sameEv(snapEvent(e), f.newsEvent) ? ' is-on' : ''),
+            onClick: () => { f.newsEvent = sameEv(snapEvent(e), f.newsEvent) ? null : snapEvent(e); paintCal(); } },
+            el('b', {}, localTime(e.at)), ` ${e.country} · ${e.title}`))),
+          d.red.length > 1 && !f.newsEvent ? el('span', { class: 'news-hint' }, 'pick the one that mattered') : null].filter(Boolean)
+        : [el('span', { class: 'news-val is-na' }, 'N/A'),
+           el('span', { class: 'news-hint' }, curs.length ? `no red folder for ${curs.join(' or ')} that day` : 'no red folder that day')]));
+      holWrap.replaceChildren(f.holidays.length
+        ? el('span', { class: 'news-val is-hol' }, f.holidays.map(holidayName).join(', '))
+        : el('span', { class: 'news-val is-na' }, 'N/A'));
+      rfWrap.dataset.from = holWrap.dataset.from = 'calendar';
+      return;
+    }
+    /* a day the calendar was never read for */
+    rfWrap.replaceChildren(
+      el('input', { class: 'field news-text', placeholder: 'e.g. CPI m/m (USD) — or leave empty',
+        value: f.newsEvent?.title || '',
+        onInput: e => { const v = e.target.value; f.newsEvent = v.trim() ? { title: v, country: '', at: null } : null; } }),
+      el('span', { class: 'news-hint' }, 'not in the calendar Quire keeps'));
+    holWrap.replaceChildren(el('select', { class: 'field news-sel',
+      onChange: e => { f.holidays = e.target.value ? [e.target.value] : []; } },
+      el('option', { value: '' }, 'N/A'),
+      ...HOLIDAYS.map(([k, name]) => el('option', { value: k, selected: f.holidays[0] === k }, name))));
+    rfWrap.dataset.from = holWrap.dataset.from = 'hand';
   }
-  paintDay();
-  out.paintDay = paintDay;
+  fromCalendar();
+  out.fromCalendar = fromCalendar;
   const deliveryWrap = el('div', { class: 'delivery' }, pick('delivery', DELIVERY, 'xr is-dl'),
     el('span', { class: 'delivery-hint' }, 'smooth ↔ choppy'));
 
@@ -890,7 +919,7 @@ export function addTrade(store, nav, existingId = null) {
 
   const colLeft = el('div', { class: 'col' },
     sec('The trade', grid('minmax(0,1.5fr) minmax(0,1.3fr)',
-      labelled('Instrument', el('div', { class: 'pair-wrap' }, field({ placeholder: 'XAUUSD', ...bind('pair', { onSet: paintClass }) }), classHint)),
+      labelled('Instrument', el('div', { class: 'pair-wrap' }, field({ placeholder: 'XAUUSD', ...bind('pair', { onSet: () => { paintClass(); out.fromCalendar?.(); } }) }), classHint)),
       labelled('Direction', direction))),
 
     sec('Prices', grid('repeat(4,minmax(0,1fr))',
@@ -900,7 +929,7 @@ export function addTrade(store, nav, existingId = null) {
       labelled('Exit', out.exitField = field({ inputmode: 'decimal', ...bind('exitPrice', { onSet: fromPrices }) })))),
 
     sec('Timing & size', out.timingGrid = grid('repeat(4,minmax(0,1fr))',
-      labelled('Date', field({ type: 'date', ...bind('date', { onSet: () => out.paintDay?.() }) })),
+      labelled('Date', field({ type: 'date', ...bind('date', { onSet: () => out.fromCalendar?.() }) })),
       labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
       labelled('Closed', out.closeField = field({ type: 'time', ...bind('timeClose') })),
       out.sizeCell = labelled('Size', field({ inputmode: 'decimal', ...bind('size') })))),
@@ -927,7 +956,7 @@ export function addTrade(store, nav, existingId = null) {
     sec('Mindset', confBlock, out.afterBlock),
     out.execSec = sec('Execution', labelled('Mistakes', mistakesWrap), labelled('Price delivery', deliveryWrap)),
     sec('News', labelled('Timing', el('div', { class: 'news-row' }, newsWrap, newsNote)),
-      labelled('Bank holiday', holWrap), dayNote),
+      grid('minmax(0,1fr) 168px', labelled('Red folder', rfWrap), labelled('Bank holiday', holWrap))),
     sec('Tags', tagWrap),
   );
 

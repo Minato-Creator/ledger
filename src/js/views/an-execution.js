@@ -12,7 +12,8 @@
 import { el, svg, fitted } from '../ui.js';
 import * as c from '../calc.js';
 import { tipLayer } from './chartkit.js';
-import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, EXEC_TFS, MISTAKES, DELIVERY, NEWS, HOLIDAYS } from '../questions.js';
+import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, EXEC_TFS, MISTAKES, DELIVERY, NEWS } from '../questions.js';
+import { newsDayOf } from '../newsday.js';
 
 const rr = (v, d = 2) => (v == null || !isFinite(v) ? '—' : `${v > 0.0005 ? '+' : v < -0.0005 ? '−' : ''}${Math.abs(v).toFixed(d)}R`);
 const tone = v => (v == null || Math.abs(v) < 1e-9 ? '' : v > 0 ? 'is-pos' : 'is-neg');
@@ -32,7 +33,7 @@ function tally(rows) {
  * count; a trade without an answer to a question is left out of that
  * question only.
  */
-export function execStats(acct, trades) {
+export function execStats(acct, trades, news = null) {
   const rows = [];
   for (const t of trades) {
     if (t.status === 'open') continue;
@@ -42,12 +43,16 @@ export function execStats(acct, trades) {
   }
   const by = (key, keys) => keys.map(k => ({ key: k, ...tally(rows.filter(x => x.t[key] === k)) }));
   const answered = key => rows.filter(x => x.t[key] != null).length;
-  /* Bank holidays: a trade logged with the question has a list, empty on an
-     ordinary day. Each country is measured, and so is the ordinary day. */
-  const holAsked = rows.filter(x => Array.isArray(x.t.holidays));
-  const holidays = HOLIDAYS.map(([k, name]) => ({ key: k, name, ...tally(holAsked.filter(x => x.t.holidays.includes(k))) })).filter(g => g.n);
-  const ordinary = tally(holAsked.filter(x => !x.t.holidays.length));
-  const onHoliday = tally(holAsked.filter(x => x.t.holidays.length));
+  /* What kind of day it was: a red folder for the pair's own currencies, a
+     bank holiday anywhere, or neither. The calendar answers where it was
+     read; otherwise what is on the trade. A day can be both of the first
+     two, and then it counts in both. */
+  const days = rows.map(x => ({ ...x, d: newsDayOf(x.t, news) }));
+  const newsDays = {
+    red: tally(days.filter(x => x.d.red)),
+    holiday: tally(days.filter(x => x.d.holiday)),
+    quiet: tally(days.filter(x => !x.d.red && !x.d.holiday)),
+  };
 
   /* Mistakes: a trade logged with the mistakes question has a list, empty
      when nothing went wrong. Those empty ones are the baseline every mistake
@@ -69,8 +74,8 @@ export function execStats(acct, trades) {
   return {
     total: rows.length,
     answered: { confidence: answered('confidence'), emotionAfter: answered('emotionAfter'), exitReason: answered('exitReason'),
-      execTf: answered('execTf'), delivery: answered('delivery'), mistakes: asked.length, news: answered('news'), holidays: holAsked.length },
-    news: by('news', NEWS.map(([v]) => v)), holidays, ordinary, onHoliday,
+      execTf: answered('execTf'), delivery: answered('delivery'), mistakes: asked.length, news: answered('news') },
+    news: by('news', NEWS.map(([v]) => v)), newsDays,
     confidence: by('confidence', CONFIDENCE.map(([v]) => v)),
     emotionAfter: by('emotionAfter', EMOTION_AFTER.map(([v]) => v)),
     exitReason: by('exitReason', EXIT_REASONS.map(([v]) => v)),
@@ -83,7 +88,7 @@ export function execStats(acct, trades) {
 const best = groups => groups.filter(g => g.n >= ENOUGH).sort((a, b) => b.avg - a.avg)[0] || null;
 
 export function executionTab(store, acct, trades, ctx) {
-  const S = execStats(acct, trades);
+  const S = execStats(acct, trades, store?.data?.news);
   const any = Object.values(S.answered).some(n => n > 0);
   if (!any) {
     return el('div', { class: 'an-body' }, el('section', { class: 'card lab-prompt' },
@@ -106,7 +111,7 @@ export function executionTab(store, acct, trades, ctx) {
     el('div', { class: 'an-row ex-row' }, levelCard('Confidence going in', S.confidence, CONFIDENCE, S.answered.confidence, S.total), gridCard(S)),
     el('div', { class: 'an-row ex-row' }, mistakesCard(S), exitCard(S)),
     el('div', { class: 'an-row ex-row is-low' }, levelCard('Execution timeframe', S.execTf, EXEC_TFS.map(v => [v, '']), S.answered.execTf, S.total, true), deliveryCard(S)),
-    el('div', { class: 'an-row ex-row is-low' }, newsCard(S), holidayCard(S)));
+    el('div', { class: 'an-row ex-row is-low' }, newsCard(S), newsDayCard(S)));
 }
 
 const head = (title, n, total, extra = null) => el('div', { class: 'lab-chart-head' },
@@ -268,21 +273,23 @@ function newsCard(S) {
   return card;
 }
 
-/* ---------- bank holidays ----------
-   An ordinary day against a holiday, then each country that had one. */
-function holidayCard(S) {
-  const n = S.answered.holidays;
-  const card = el('section', { class: 'card lab-chart ex-hols' }, head('Bank holidays', n, S.total));
-  if (!S.onHoliday.n) {
-    card.append(el('p', { class: 'lab-empty' }, n ? 'No trade logged on a bank holiday yet.' : 'Tick a bank holiday on New trade when there is one and this fills in.'));
-    return card;
-  }
-  const rows = [{ key: '_ord', name: 'Ordinary days', ...S.ordinary }, { key: '_hol', name: 'Any bank holiday', ...S.onHoliday }, ...S.holidays];
-  const reach = Math.max(0.25, ...rows.filter(g => g.n).map(g => Math.abs(g.avg)));
-  card.append(el('div', { class: 'ex-holrows' }, ...rows.map(g => el('div', { class: 'ex-hol' + (g.n < ENOUGH ? ' is-thin' : '') + (g.key === '_hol' ? ' is-sum' : '') },
-    el('span', { class: 'nm' }, g.name),
-    el('span', { class: 'tr' }, g.n ? el('i', { class: 'bar-fill ' + (g.avg >= 0 ? 'is-pos' : 'is-neg'), style: { width: (Math.abs(g.avg) / reach * 100) + '%' } }) : null),
-    el('b', { class: tone(g.avg) }, g.n ? rr(g.avg) : '—'),
-    el('small', {}, g.n ? `${g.n} · ${g.winRate == null ? '—' : c.pct(g.winRate, 0)} won` : '—')))));
+/* ---------- news days ----------
+   The day, not the minute: a red folder for the pair's own currencies, a
+   bank holiday anywhere, or a day with neither. R, how many, how often won. */
+const NEWS_DAYS = [['red', 'Red folder day'], ['holiday', 'Bank holiday'], ['quiet', 'No news']];
+function newsDayCard(S) {
+  const card = el('section', { class: 'card lab-chart ex-hols ex-newsdays' }, el('div', { class: 'lab-chart-head' }, el('h2', {}, 'News'),
+    el('span', { class: 'lab-sub' }, `the pair’s own red folders · ${S.total} trade${S.total === 1 ? '' : 's'}`)));
+  if (!S.total) { card.append(el('p', { class: 'lab-empty' }, 'Close a few trades and this fills in.')); return card; }
+  const rows = NEWS_DAYS.map(([k, name]) => ({ key: k, name, ...S.newsDays[k] }));
+  const reach = Math.max(0.25, ...rows.filter(g => g.n).map(g => Math.abs(g.sum)));
+  card.append(el('div', { class: 'ex-holrows' },
+    el('div', { class: 'ex-hol is-cols' }, el('span', {}), el('span', {}), el('span', {}, 'R'), el('span', {}, 'Trades'), el('span', {}, 'Won')),
+    ...rows.map(g => el('div', { class: 'ex-hol is-' + g.key + (g.n && g.n < ENOUGH ? ' is-thin' : '') + (g.n ? '' : ' is-empty'), 'data-day': g.key },
+      el('span', { class: 'nm' }, el('i', { class: 'dot' }), g.name),
+      el('span', { class: 'tr' }, g.n ? el('i', { class: 'bar-fill ' + (g.sum >= 0 ? 'is-pos' : 'is-neg'), style: { width: (Math.abs(g.sum) / reach * 100) + '%' } }) : null),
+      el('b', { class: tone(g.sum) }, g.n ? rr(g.sum, 1) : '—'),
+      el('small', { class: 'n' }, String(g.n)),
+      el('small', { class: 'w' }, g.winRate == null ? '—' : c.pct(g.winRate, 0))))));
   return card;
 }

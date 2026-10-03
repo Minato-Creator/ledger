@@ -22,6 +22,7 @@ import * as P from '../periods.js';
 import { tradeShotsOf } from '../store.js';
 import { tipLayer } from './chartkit.js';
 import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName, heldOf, heldText } from '../questions.js';
+import { newsText } from '../newsday.js';
 import { heldEditor } from './held.js';
 import { fromPricesOf } from './addtrade.js';
 import { tradeChart } from './tradechart.js';
@@ -540,6 +541,7 @@ function fromTheTrade(t, on) {
     t.execTf ? ['TF', t.execTf, ''] : null,
     t.delivery ? ['Price', name(DELIVERY, t.delivery), t.delivery === 'good' ? 'is-good' : t.delivery === 'poor' ? 'is-bad' : ''] : null,
     t.news ? ['News', name(NEWS, t.news), t.news === 'none' ? '' : 'is-news'] : null,
+    t.newsEvent?.title ? ['Red folder', newsText(t), 'is-rf'] : null,
     Array.isArray(t.holidays) && t.holidays.length ? ['Bank holiday', t.holidays.map(holidayName).join(', '), 'is-hol'] : null,
   ].filter(Boolean);
   if (!bits.length && !m) return null;

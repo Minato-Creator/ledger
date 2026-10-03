@@ -245,7 +245,7 @@ export function outlook(store, nav, dateArg) {
       const prev = shift(-1);
       chartSlot.append(tradeChart(store, nav,
         { id: 'outlook-' + item.id, pair: item.pair, date, timeOpen: '00:00', timeClose: '23:59', status: 'closed', side: 'buy' },
-        { height: OB_CHART_H, plain: true,
+        { height: OB_CHART_H, plain: true, lines: 'outlook',
           focus: { from: cd.localStamp(prev, '00:00'), to: Math.min(Date.now() / 1000, cd.localStamp(date, '23:59')) } }));
     } else {
       chartSlot.append(el('div', { class: 'ob-chart-empty', style: { height: OB_CHART_H + 'px' } },

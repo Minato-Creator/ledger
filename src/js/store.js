@@ -422,6 +422,14 @@ class Store {
 
     if (!d.news || typeof d.news !== 'object') { d.news = { version: 1, fetchedAt: null, events: [] }; note(); }
     if (!Array.isArray(d.news.events)) { d.news.events = []; note(); }
+    /* the stretches of time the calendar has been read for — so a day it was
+       never read for is "not known", not "nothing on" */
+    if (!Array.isArray(d.news.spans)) {
+      const ats = d.news.events.map(e => e?.at).filter(x => typeof x === 'string').sort();
+      d.news.spans = ats.length ? [{ from: ats[0], to: ats[ats.length - 1] }] : [];
+      if (!d.news.span && ats.length) d.news.span = d.news.spans[0];
+      note();
+    }
 
     /* Two fixed chart slots became a list. The old fields are read once,
        turned into a list in the order they were shown, and dropped — so a
@@ -679,8 +687,22 @@ class Store {
     return isFinite(mins) ? mins : null;
   }
 
+  /** The feed only ever carries this week. What it says replaces what was
+      held for the same stretch of time; earlier weeks are kept, so a trade
+      logged later — or the News card in Analytics — can still see the red
+      folders and bank holidays of the day it was taken. */
   async saveNews(events) {
-    this.data.news = { version: 1, fetchedAt: new Date().toISOString(), events };
+    const held = this.data.news?.events || [];
+    let kept = held, span = this.data.news?.span || null;
+    if (events.length) {
+      const ats = events.map(e => e.at).sort();
+      span = { from: ats[0], to: ats[ats.length - 1] };
+      kept = held.filter(e => e.at < span.from || e.at > span.to);
+    }
+    const all = [...kept, ...events].sort((a, b) => a.at.localeCompare(b.at));
+    const spans = [...(this.data.news?.spans || [])];
+    if (events.length && !spans.some(x => x.from === span.from && x.to === span.to)) spans.push(span);
+    this.data.news = { version: 1, fetchedAt: new Date().toISOString(), span, spans, events: all };
     await this.save('news');
     return this.data.news;
   }
