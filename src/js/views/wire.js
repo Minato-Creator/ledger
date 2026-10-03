@@ -20,6 +20,7 @@
    • What arrived since you last looked is marked rather than resorted. The
      order on this page is time, and nothing else is allowed to move it.
    ============================================================ */
+import { isRedFolder, isBankHoliday, holidayCountry } from '../questions.js';
 import { el, icon, toast, folderMark } from '../ui.js';
 import * as c from '../calc.js';
 import {
@@ -68,16 +69,15 @@ function redFolderStrip(store, nav) {
   let ticking = [];
 
   function eventLine(e, now) {
-    const holiday = e.impact === 'Holiday';
     const mins = minutesTo(e.at, now);
     const past = mins < 0;
     const soon = !past && mins <= 60;
-    const rel = el('span', { class: 'rel' }, holiday ? 'all day' : whenText(e.at, now));
-    ticking.push({ node: rel, at: e.at, holiday });
+    const rel = el('span', { class: 'rel' }, whenText(e.at, now));
+    ticking.push({ node: rel, at: e.at, holiday: false });
     return el('span', { class: 'rf-ev' + (past ? ' is-past' : '') + (soon ? ' is-soon' : ''),
       title: [e.title, e.forecast && `forecast ${e.forecast}`, e.previous && `previous ${e.previous}`]
         .filter(Boolean).join(' · ') },
-      folderMark(holiday ? 'var(--grey-5)' : 'var(--orange)', 10),
+      folderMark('var(--orange)', 10),
       el('span', { class: 'cur' }, e.country),
       el('span', { class: 'ttl' }, e.title),
       el('span', { class: 'at' }, ffTime(e.at)),
@@ -88,12 +88,17 @@ function redFolderStrip(store, nav) {
     ticking = [];
     const cached = store.news;
     const today = c.todayISO();
-    const events = eventsOn(cached.events, today);
+    const all = eventsOn(cached.events, today);
+    const events = all.filter(isRedFolder);
+    const hols = all.filter(isBankHoliday);
 
     const label = el('span', { class: 'rf-label' },
       folderMark('var(--orange)', 12),
       el('span', { class: 'm t' }, 'Today'),
-      el('span', { class: 'm n' }, events.length ? `${events.length}` : ''));
+      el('span', { class: 'm n' }, events.length ? `${events.length}` : ''),
+      /* bank holidays are not red folders: named beside the label, not scrolled */
+      hols.length ? el('span', { class: 'm rf-hol', title: hols.map(h => h.title).join(' · ') },
+        'Bank holiday · ' + hols.map(h => holidayCountry(h.country)).join(', ')) : null);
 
     if (!events.length) {
       /* An empty strip that still scrolls is an animation for its own sake.
@@ -181,10 +186,10 @@ function redFolderWeek(store, nav) {
             return el('div', { class: 'rf-week-ev' + (past ? ' is-past' : ''),
               title: [e.title, e.forecast && `forecast ${e.forecast}`, e.previous && `previous ${e.previous}`]
                 .filter(Boolean).join(' · ') },
-              el('span', { class: 'at' }, e.impact === 'Holiday' ? '—' : ffTime(e.at)),
-              folderMark(e.impact === 'Holiday' ? 'var(--grey-5)' : 'var(--orange)', 10),
+              el('span', { class: 'at' }, isBankHoliday(e) ? 'all day' : ffTime(e.at)),
+              isBankHoliday(e) ? el('span', { class: 'rf-holmark', title: 'Bank holiday — not a red folder' }) : folderMark('var(--orange)', 10),
               el('span', { class: 'cur' }, e.country),
-              el('span', { class: 'ttl' }, e.title));
+              el('span', { class: 'ttl' }, isBankHoliday(e) ? `Bank holiday · ${holidayCountry(e.country)}` : e.title));
           }),
         ]))
     : el('div', { class: 'rf-week-none m' },

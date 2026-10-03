@@ -24,6 +24,7 @@ import * as c from '../calc.js';
 import { cleanSymbol } from '../calc.js';
 import { outlookShotsOf } from '../store.js';
 import { tradeChart } from './tradechart.js';
+import { isRedFolder, isBankHoliday, holidayCountry } from '../questions.js';
 import * as cd from '../candles.js';
 
 /* The chart's height in an outlook block — half the block is chart. */
@@ -55,7 +56,11 @@ function newsStrip(store, date, nav) {
 
   const paint = (state) => {
     const cached = store.news;
-    const events = eventsOn(cached.events, date);
+    const all = eventsOn(cached.events, date);
+    /* the red folders, and — on their own line, because they are not red
+       folders — any bank holidays */
+    const events = all.filter(isRedFolder);
+    const hols = all.filter(isBankHoliday);
     const age = store.newsAge();
     const now = Date.now();
 
@@ -75,6 +80,9 @@ function newsStrip(store, date, nav) {
         disabled: state === 'loading',
         onClick: () => load(true) }, icon('refresh', 12, 'currentColor', 1.9)));
 
+    const holLine = hols.length ? el('div', { class: 'ns-hol' },
+      el('span', { class: 'm k' }, 'Bank holiday'),
+      ...hols.map(h => el('span', { class: 'm h', title: h.title }, el('b', {}, h.country), holidayCountry(h.country)))) : null;
     const body = !events.length
       ? el('div', { class: 'ns-empty m' },
           cached.fetchedAt
@@ -83,7 +91,6 @@ function newsStrip(store, date, nav) {
             : 'No calendar yet — press refresh.')
       : el('div', { class: 'ns-row' }, ...events.map(e => {
           const mins = minutesTo(e.at, now);
-          const holiday = e.impact === 'Holiday';
           /* Past events stay, dimmed: what has already printed is part of
              reading the day, not clutter to sweep away. */
           const past = mins < 0;
@@ -91,14 +98,14 @@ function newsStrip(store, date, nav) {
           return el('div', { class: 'ns-ev' + (past ? ' is-past' : '') + (soon ? ' is-soon' : ''),
             title: [e.title, e.forecast && `forecast ${e.forecast}`, e.previous && `previous ${e.previous}`]
               .filter(Boolean).join(' · ') },
-            folderMark(holiday ? 'var(--grey-5)' : 'var(--orange)', 11),
+            folderMark('var(--orange)', 11),
             el('span', { class: 'm cur' }, e.country),
             el('span', { class: 'm ttl' }, e.title),
             el('span', { class: 'm at' }, localTime(e.at)),
-            el('span', { class: 'm rel' }, holiday ? 'all day' : whenText(e.at, now)));
+            el('span', { class: 'm rel' }, whenText(e.at, now)));
         }));
 
-    wrap.replaceChildren(head, body);
+    wrap.replaceChildren(head, body, holLine || '');
   };
 
   const ago = (mins) => mins < 60 ? `${mins}m ago`

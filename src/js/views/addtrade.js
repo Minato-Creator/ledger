@@ -871,7 +871,7 @@ export function addTrade(store, nav, existingId = null) {
     const evs = (store.data.news?.events || []).filter(ev => localDay(ev.at) === f.date);
     dayNote.replaceChildren(...(evs.length ? [el('span', { class: 'k' }, 'On the calendar that day'),
       ...evs.map(ev => el('span', { class: 'ev' + (ev.impact === 'Holiday' ? ' is-hol' : '') },
-        el('b', {}, ev.impact === 'Holiday' ? 'Holiday' : localTime(ev.at)), ev.country,
+        el('b', {}, ev.impact === 'Holiday' ? 'Bank holiday' : localTime(ev.at)), ev.country,
         ev.impact === 'Holiday' ? ` · ${holidayFromCurrency(ev.country) ? HOLIDAYS.find(([k]) => k === holidayFromCurrency(ev.country))[1] : ev.title}` : ` · ${ev.title}`))] : []));
     dayNote.hidden = !evs.length;
   }

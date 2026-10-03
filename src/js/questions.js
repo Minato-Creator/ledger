@@ -34,6 +34,12 @@ export const HOLIDAYS = [['US', 'United States', 'USD'], ['UK', 'United Kingdom'
   ['CA', 'Canada', 'CAD'], ['AU', 'Australia', 'AUD'], ['NZ', 'New Zealand', 'NZD'], ['CH', 'Switzerland', 'CHF'], ['CN', 'China', 'CNY']];
 export const holidayName = k => (HOLIDAYS.find(([c]) => c === k) || [])[1] || k;
 export const holidayFromCurrency = cur => (HOLIDAYS.find(([, , c]) => c === String(cur || '').toUpperCase()) || [])[0] || null;
+/** A bank holiday from the calendar, named for its country: "United Kingdom". */
+export const holidayCountry = cur => { const k = holidayFromCurrency(cur); return k ? holidayName(k) : String(cur || '').toUpperCase(); };
+/* Red folders and bank holidays are different things: a red folder is a
+   high-impact release at a time; a bank holiday is a country closed all day. */
+export const isRedFolder = e => e?.impact === 'High';
+export const isBankHoliday = e => e?.impact === 'Holiday';
 
 /* ---------- if held ----------
    What a trade would have made had it been left alone. Asked only of a

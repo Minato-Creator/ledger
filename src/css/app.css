@@ -3117,3 +3117,10 @@ button.rv-mrow:hover { background:var(--inset); }
 .rv-mnote p { margin:0; font:400 13px var(--sans); line-height:1.6; color:var(--ink-2); white-space:pre-wrap; }
 .rv-mnote p.is-none { color:var(--ink-5); font-size:12px; }
 @media (max-width:1180px) { .rv-mnotes { grid-template-columns:1fr; } .rv-mstats { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+/* bank holidays: a country closed all day — not a red folder, so not shown as one */
+.ns-hol { margin-top:10px; display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:8px 10px; border-radius:12px; background:var(--inset); }
+.ns-hol .k { font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-4); }
+.ns-hol .h { font-size:11px; color:var(--ink-2); display:inline-flex; gap:6px; }
+.ns-hol .h b { font-weight:400; color:var(--ink-4); }
+.rf-hol { margin-left:10px; font-size:10.5px; color:var(--ink-3); padding:3px 9px; border-radius:var(--r-pill); background:var(--inset); white-space:nowrap; }
+.rf-holmark { width:8px; height:8px; border-radius:2px; box-shadow:inset 0 0 0 1.5px var(--grey-5); flex:none; }

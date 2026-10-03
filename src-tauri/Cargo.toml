@@ -1,6 +1,6 @@
 [package]
 name = "ledger"
-version = "2.17.0"
+version = "2.18.0"
 description = "A trading journal that keeps your data as plain files in a folder you choose."
 authors = ["Minato"]
 edition = "2021"

@@ -201,8 +201,36 @@ export function weekStats(acct, trades) {
     right: called.filter(x => x.v.dir === 'right').length, called: called.length,
     what: count(WHAT, 'what'), entry: count(ENTRY, 'entry'), grade: count(GRADE, 'grade'),
   };
-  out.capture = out.available > 0 ? out.capturedTaken / out.available : null;
+  /* The plan, the result, and what closing early left behind:
+     plannedR   every closed trade's planned R:R added up — what you would
+                have made had every one of them hit its target;
+     taken      what you made (above, losses and all);
+     leftEarly  only for trades you got out of early whose target was then
+                reached: the rest of the way to the target. */
+  const closed = rows.filter(x => x.t.status !== 'open' && x.r != null);
+  out.plannedR = closed.reduce((a, x) => a + (c.plannedR(x.t) ?? 0), 0);
+  out.plannedN = closed.filter(x => c.plannedR(x.t) != null).length;
+  out.leftEarly = closed.reduce((a, x) => a + leftOf(acct, x.t), 0);
+  out.leftEarlyN = closed.filter(x => leftOf(acct, x.t) > 0).length;
+  out.capture = out.plannedR > 0 ? out.taken / out.plannedR : null;
   return out;
+}
+
+/**
+ * What getting out early left on the table: the rest of the way to your
+ * target — only when price went on to reach it. Nothing for a trade that hit
+ * its target or its stop, or one whose target was never reached.
+ */
+export function leftOf(acct, t) {
+  const r = rOf(acct, t), target = c.plannedR(t);
+  if (r == null || target == null) return 0;
+  const kind = closedBy(t);
+  if (kind === 'tp' || kind === 'sl') return 0;
+  const held = heldOf(t);
+  if (held) return held.outcome === 'win' ? Math.max(0, held.r - r) : 0;
+  const ch = factsOf(t);
+  if (ch && ch.reachedTarget && kind !== 'manual') return Math.max(0, target - r);
+  return 0;
 }
 
 export function review(store, nav, sub) {
@@ -512,7 +540,7 @@ function fromTheTrade(t, on) {
     t.execTf ? ['TF', t.execTf, ''] : null,
     t.delivery ? ['Price', name(DELIVERY, t.delivery), t.delivery === 'good' ? 'is-good' : t.delivery === 'poor' ? 'is-bad' : ''] : null,
     t.news ? ['News', name(NEWS, t.news), t.news === 'none' ? '' : 'is-news'] : null,
-    Array.isArray(t.holidays) && t.holidays.length ? ['Holiday', t.holidays.map(holidayName).join(', '), 'is-hol'] : null,
+    Array.isArray(t.holidays) && t.holidays.length ? ['Bank holiday', t.holidays.map(holidayName).join(', '), 'is-hol'] : null,
   ].filter(Boolean);
   if (!bits.length && !m) return null;
   return el('div', { class: 'rv-from' },
@@ -589,7 +617,7 @@ function weekTab(store, acct, trades, nav, all) {
     el('span', { class: 'k' }, k), el('span', { class: 'v' }, v), el('span', { class: 's' }, s || ' '));
   const stats = el('div', { class: 'rv-stats' },
     stat('Taken', rr(S.taken), `${S.trades} trade${S.trades === 1 ? '' : 's'} this week`, S.taken > 0 ? ' is-pos' : S.taken < 0 ? ' is-neg' : ''),
-    stat('Left on the table', rr(S.left), 'available, not taken'),
+    stat('Left on the table', rr(S.leftEarly), S.leftEarlyN ? `closed early on ${S.leftEarlyN}, target then hit` : 'nothing closed early that went on'),
     stat('Stopped, but right', String(S.stopped), S.stopped ? `would have made ${rr(S.stoppedWould)}` : 'none this week'),
     stat('Plan followed', S.plan == null ? '—' : c.pct(S.plan, 0), S.planned ? `${S.planYes} of ${S.planned} trades` : 'not answered yet'));
 
@@ -654,20 +682,27 @@ function habitsCard(acct, trades) {
 
 /* ---------- how much of the move you took ----------
    One arc: the part you took, solid, and the part you left, pale. */
+/* ---------- what you took, against what you planned ----------
+   Taken: what the trades made, losses and all. Available: what getting out
+   early left behind, on trades whose target was then reached. Planned:
+   every trade's planned R:R added up — had each one hit its target. The arc
+   is taken out of planned. */
 function captureCard(S) {
   const p = S.capture == null ? 0 : Math.max(0, Math.min(1, S.capture));
-  const say = S.capture == null ? 'Add how far trades ran to see this'
-    : S.capture < 0.45 ? 'Trades ran well past your exits — targets may be close'
-    : S.capture > 0.75 ? 'You are taking most of the move' : 'You took a fair share of what was there';
+  const say = S.capture == null ? 'Log a stop and a target on your trades to see this'
+    : S.leftEarly > 0.05 ? `Getting out early left ${rr(S.leftEarly)} on ${S.leftEarlyN} trade${S.leftEarlyN === 1 ? '' : 's'} that went on to the target`
+    : S.capture < 0 ? 'Down against what the plans aimed for'
+    : S.capture < 0.35 ? 'A small share of what your plans aimed for'
+    : S.capture > 0.7 ? 'Most of what your plans aimed for' : 'A fair share of what your plans aimed for';
   return el('section', { class: 'card rv-capture' },
-    el('div', { class: 'rv-k' }, 'Of the move'),
+    el('div', { class: 'rv-k' }, 'Of the plan'),
     el('div', { class: 'rv-gauge' }, fitted((w, h) => drawGauge(p, w, h), 150),
       el('div', { class: 'rv-gauge-c' },
-        el('b', {}, S.capture == null ? '—' : c.pct(S.capture, 0)), el('span', {}, 'captured'))),
+        el('b', {}, S.capture == null ? '—' : c.pct(S.capture, 0)), el('span', {}, 'of planned'))),
     el('div', { class: 'rv-cap-row' },
-      el('span', {}, el('i', { class: 'took' }), el('b', {}, rr(S.capturedTaken)), 'taken'),
-      el('span', {}, el('i', { class: 'left' }), el('b', {}, rr(S.available - S.capturedTaken)), 'left'),
-      el('span', {}, el('b', {}, rr(S.available)), 'available')),
+      el('span', { title: 'What your trades made, losses included' }, el('i', { class: 'took' }), el('b', {}, rr(S.taken)), 'taken'),
+      el('span', { title: 'Left by getting out early, on trades that then reached the target' }, el('i', { class: 'left' }), el('b', {}, rr(S.leftEarly)), 'available'),
+      el('span', { title: 'Every trade’s planned R:R added up — had each hit its target' }, el('b', {}, rr(S.plannedR)), 'planned')),
     el('p', { class: 'rv-say' }, say));
 }
 
@@ -853,7 +888,7 @@ function trendCard(acct, all) {
   }
   const lines = [
     ['R taken', w => w.S?.taken ?? null, v => rr(v)],
-    ['Captured', w => w.S?.capture ?? null, v => c.pct(v, 0)],
+    ['Of planned', w => w.S?.capture ?? null, v => c.pct(v, 0)],
     ['Plan followed', w => w.S?.plan ?? null, v => c.pct(v, 0)],
   ];
   return el('section', { class: 'card rv-trend' },
@@ -940,7 +975,7 @@ function monthTab(store, acct, trades, nav) {
     stat('Win rate', closed.length ? c.pct(wins / closed.length, 0) : '—', closed.length ? `${wins} of ${closed.length}` : 'nothing closed'),
     stat('Plan followed', S.plan == null ? '—' : c.pct(S.plan, 0), S.planned ? `${S.planYes} of ${S.planned} trades` : 'not answered yet'),
     stat('Early entries', String(S.entry.early), S.reviewed ? `of ${S.reviewed} reviewed` : 'none reviewed yet', S.entry.early ? ' is-warn' : ''),
-    stat('Left on the table', rr(S.left), 'could have made, not taken'),
+    stat('Left on the table', rr(S.leftEarly), S.leftEarlyN ? `closed early on ${S.leftEarlyN}, target then hit` : 'nothing closed early that went on'),
     stat('Reviewed', `${S.reviewed} / ${S.trades}`, S.reviewed === S.trades ? 'every trade' : `${S.trades - S.reviewed} to go`));
 
   /* ---------- the weeks against each other ---------- */
