@@ -4,6 +4,10 @@ import { todayISO, tradeShotsOf, newShotId } from '../store.js';
 import { prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
 import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS, holidayFromCurrency, heldAsked, heldOf } from '../questions.js';
 import { heldEditor } from './held.js';
+import { guessAssetClass } from '../broker.js';
+
+/** The category, from the instrument as typed — no picker to forget. */
+export const classOf = pair => { const p = String(pair || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return p ? guessAssetClass(p) : null; };
 
 const ASSET_CLASSES = ['Forex', 'Futures', 'Commodities', 'Indices'];
 
@@ -210,6 +214,11 @@ export function addTrade(store, nav, existingId = null) {
   function paintMode() {
     [...modeWrap.children].forEach((b, i) => b.classList.toggle('is-on', (i === 0) === (f.mode === 'live')));
     if (out.riskRow) { paintResultRow(); recompute(); }
+    /* A forward test has no size: nothing was traded. */
+    if (out.sizeCell) {
+      out.sizeCell.hidden = isForward();
+      out.timingGrid.style.gridTemplateColumns = isForward() ? 'repeat(3,minmax(0,1fr))' : 'repeat(4,minmax(0,1fr))';
+    }
   }
 
   function paintStatus() {
@@ -225,6 +234,15 @@ export function addTrade(store, nav, existingId = null) {
       node.disabled = open;
       node.style.opacity = open ? '.38' : '';
     }
+    /* Mistakes and how price was delivered are questions about a finished
+       trade; a running one does not get asked them yet. */
+    if (out.execSec) { out.execSec.hidden = open; renumber(); }
+  }
+  /* The sections count 01, 02… down the page; one put away closes the gap. */
+  function renumber() {
+    if (!out.wrapEl) return;
+    let n = 0;
+    for (const i of out.wrapEl.querySelectorAll('.sec:not([hidden]) > .sec-h > i')) i.textContent = String(++n).padStart(2, '0');
   }
 
 
@@ -524,7 +542,7 @@ export function addTrade(store, nav, existingId = null) {
 
   async function save() {
     const payload = {
-      accountId: acct.id, assetClass: f.assetClass, pair: f.pair.trim().toUpperCase(), side: f.side,
+      accountId: acct.id, assetClass: classOf(f.pair) || f.assetClass || null, pair: f.pair.trim().toUpperCase(), side: f.side,
       setupId: f.setupId || null, sessionId: f.sessionId || null, sessionAuto: !!f.sessionAuto,
       date: f.date, timeOpen: f.timeOpen || null, timeClose: f.timeClose || null,
       entryPrice: numOrNull(f.entryPrice), stopLoss: numOrNull(f.stopLoss),
@@ -538,8 +556,8 @@ export function addTrade(store, nav, existingId = null) {
       exitReason: f.exitReason ?? null,
       emotionAfter: f.emotionAfter ?? null,
       execTf: f.execTf ?? null,
-      mistakes: MISTAKES.map(([k]) => k).filter(k => f.mistakes.includes(k)),
-      delivery: f.delivery ?? null,
+      mistakes: isOpen() ? null : MISTAKES.map(([k]) => k).filter(k => f.mistakes.includes(k)),
+      delivery: isOpen() ? null : f.delivery ?? null,
       /* What it would have made if held — only kept while the question
          stands: change the exit or the mistakes so it no longer applies and
          the answer goes with it. */
@@ -550,6 +568,8 @@ export function addTrade(store, nav, existingId = null) {
     if (!isOpen() && heldAsked({ ...f, status: 'closed' }) && f.held && f.held.r != null) {
       payload.heldOutcome = f.held.outcome;
       payload.heldR = f.held.r;
+      /* still the chart's answer if you left it as the chart read it */
+      payload.heldAuto = !!(editing?.heldAuto && editing.heldOutcome === f.held.outcome && editing.heldR === f.held.r);
     }
     /* A running trade carries no result, no exit and no closing time — not a
        zero, not an empty string. Anything that reads this trade later has to
@@ -669,9 +689,9 @@ export function addTrade(store, nav, existingId = null) {
   const band = (...kids) => el('div', { class: 'band' }, ...kids);
   const grid = (cols, ...kids) => el('div', { style: { display: 'grid', gridTemplateColumns: cols, gap: '14px' } }, ...kids);
 
-  const classSelect = el('select', { class: 'field',
-    onChange: e => { f.assetClass = e.target.value; } },
-    ...ASSET_CLASSES.map(a => el('option', { value: a, selected: f.assetClass === a, style: { background: '#363636' } }, a)));
+  const classHint = el('span', { class: 'pair-class' });
+  const paintClass = () => { const k = classOf(f.pair); classHint.textContent = k || ''; classHint.hidden = !k; };
+  paintClass();
 
   const direction = el('div', { style: { display: 'flex', gap: '5px' } },
     ...[['buy', '▲ Long', 'var(--profit)'], ['sell', '▼ Short', 'var(--loss)']].map(([v, label, col]) =>
@@ -869,9 +889,8 @@ export function addTrade(store, nav, existingId = null) {
     el('div', { class: 'sec-h' }, el('i', {}, String(++secN).padStart(2, '0')), el('span', {}, title)), ...kids);
 
   const colLeft = el('div', { class: 'col' },
-    sec('The trade', grid('minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.3fr)',
-      labelled('Instrument', field({ placeholder: 'XAUUSD', ...bind('pair') })),
-      labelled('Class', classSelect),
+    sec('The trade', grid('minmax(0,1.5fr) minmax(0,1.3fr)',
+      labelled('Instrument', el('div', { class: 'pair-wrap' }, field({ placeholder: 'XAUUSD', ...bind('pair', { onSet: paintClass }) }), classHint)),
       labelled('Direction', direction))),
 
     sec('Prices', grid('repeat(4,minmax(0,1fr))',
@@ -880,11 +899,11 @@ export function addTrade(store, nav, existingId = null) {
       labelled('Target', field({ inputmode: 'decimal', ...bind('takeProfit', { onSet: fromPrices }) })),
       labelled('Exit', out.exitField = field({ inputmode: 'decimal', ...bind('exitPrice', { onSet: fromPrices }) })))),
 
-    sec('Timing & size', grid('repeat(4,minmax(0,1fr))',
+    sec('Timing & size', out.timingGrid = grid('repeat(4,minmax(0,1fr))',
       labelled('Date', field({ type: 'date', ...bind('date', { onSet: () => out.paintDay?.() }) })),
       labelled('Opened', field({ type: 'time', ...bind('timeOpen') })),
       labelled('Closed', out.closeField = field({ type: 'time', ...bind('timeClose') })),
-      labelled('Size', field({ inputmode: 'decimal', ...bind('size') })))),
+      out.sizeCell = labelled('Size', field({ inputmode: 'decimal', ...bind('size') })))),
 
     /* Whether it is finished and whether it was real are two questions about
        the same trade, and both decide what the row underneath asks for — so
@@ -906,7 +925,7 @@ export function addTrade(store, nav, existingId = null) {
      went wrong, how price behaved, and the labels you give it. */
   const colRight = el('div', { class: 'col' },
     sec('Mindset', confBlock, out.afterBlock),
-    sec('Execution', labelled('Mistakes', mistakesWrap), labelled('Price delivery', deliveryWrap)),
+    out.execSec = sec('Execution', labelled('Mistakes', mistakesWrap), labelled('Price delivery', deliveryWrap)),
     sec('News', labelled('Timing', el('div', { class: 'news-row' }, newsWrap, newsNote)),
       labelled('Bank holiday', holWrap), dayNote),
     sec('Tags', tagWrap),
@@ -930,6 +949,7 @@ export function addTrade(store, nav, existingId = null) {
      handed over, so an edit opens showing what the trade already came to
      rather than a row of dashes. */
   paintStatus();
+  paintMode();
   recompute();
 
   /* The paste is listened for on the whole document, not on this view. Adding
@@ -939,6 +959,7 @@ export function addTrade(store, nav, existingId = null) {
      Ctrl+V that did nothing. The listener retires itself once this view has
      been replaced, so a paste on another page is never taken here. */
   const view = el('div', { class: 'view' }, head, strip, form);
+  out.wrapEl = form; renumber();
   const onDocPaste = e => {
     if (!view.isConnected) { document.removeEventListener('paste', onDocPaste); return; }
     onPaste(e);

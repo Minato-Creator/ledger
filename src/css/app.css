@@ -2725,7 +2725,7 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .ex-hol.is-thin .nm, .ex-hol.is-thin b, .ex-hol.is-thin .tr { opacity:.5; }
 
 /* ---------- Review · pictures in two rows, answers the trade already gave ---------- */
-.rv-shotgroups { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:18px; }
+.rv-shotgroups { display:grid; grid-template-columns:minmax(0, 1fr); gap:18px; }
 .rv-shotgroup { display:flex; flex-direction:column; gap:8px; min-width:0; }
 .rv-shotgroup + .rv-shotgroup { padding-left:18px; box-shadow:inset 1px 0 0 var(--grey-9); }
 .rv-shotgroup .rv-shots { grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); }
@@ -3013,3 +3013,53 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .tc-rwhen { font:400 10.5px var(--mono); color:var(--ink-3); white-space:nowrap; padding:0 8px; }
 .tc-rend { font:400 10.5px var(--mono); color:var(--ink-2); padding:6px 12px; border-radius:var(--r-pill); }
 .tc-rend:hover { color:var(--ink); background:var(--inset-2); }
+/* sessions / news switches in the chart's footer */
+.tc-togs { display:flex; gap:4px; flex:none; }
+.tc-tog { display:inline-flex; align-items:center; gap:6px; font:400 10px var(--mono); color:var(--ink-5); padding:3px 9px; border-radius:var(--r-pill); }
+.tc-tog i { width:6px; height:6px; border-radius:50%; box-shadow:inset 0 0 0 1px currentColor; }
+.tc-tog:hover { color:var(--ink-3); }
+.tc-tog.is-on { color:var(--ink-2); background:var(--inset); }
+.tc-tog.is-on i { background:currentColor; box-shadow:none; }
+.tc-tog[data-show="news"].is-on i { background:var(--loss); }
+.tc-pickhint { font:400 10.5px var(--mono); color:var(--ink-2); padding:0 10px; }
+.tc-select { color:var(--ink-3); }
+/* full screen: the chart card takes the window */
+.tc.is-full { position:fixed; inset:12px; z-index:900; display:flex; flex-direction:column; box-shadow:0 0 0 100vmax rgba(0,0,0,.6); }
+.tc.is-full .tc-plot { flex:1 1 auto; height:auto !important; min-height:200px; }
+
+/* ---------- review: read off the chart ---------- */
+.rv-facts { display:flex; flex-direction:column; gap:12px; padding:16px 18px; border-radius:var(--r-inset); background:var(--inset); }
+.rv-facts-h { display:flex; align-items:center; gap:12px; }
+.rv-facts-h .k { font:400 9.5px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink-4); }
+.rv-facts-h .spacer { flex:1; }
+.rv-facts-src { font:400 10.5px var(--mono); color:var(--ink-5); }
+.rv-facts-edit, .rv-facts-reset { font:400 10.5px var(--mono); color:var(--ink-2); padding:5px 12px; border-radius:var(--r-pill); background:var(--inset-2); }
+.rv-facts-edit:hover, .rv-facts-reset:hover { color:var(--ink); }
+.rv-facts-edit.is-on { background:var(--grey-1); color:var(--grey-8); }
+.rv-facts-reset { background:none; color:var(--ink-4); }
+.rv-facts-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px 18px; }
+.rv-fact { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.rv-fact .k { font:400 9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
+.rv-fact b { font:400 15px var(--sans); color:var(--ink); font-variant-numeric:tabular-nums; }
+.rv-fact.is-pos b { color:var(--profit); } .rv-fact.is-neg b { color:var(--loss); }
+.rv-fact small { font:400 10.5px var(--mono); color:var(--ink-4); line-height:1.4; }
+.rv-facts-edit-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px 18px; }
+.rv-facts .rv-held { margin-top:2px; }
+.band.sec[hidden], .lbl-wrap[hidden] { display:none; }
+.pair-wrap { position:relative; }
+.pair-wrap .field { width:100%; padding-right:110px; }
+.pair-class { position:absolute; right:12px; top:50%; transform:translateY(-50%); font:400 10px var(--mono); letter-spacing:.04em;
+              color:var(--ink-3); background:var(--inset-2); border-radius:var(--r-pill); padding:3px 9px; pointer-events:none; }
+.pair-class[hidden] { display:none; }
+/* replay's step and speed controls, up beside the timeframes */
+.tc-rtop { display:flex; align-items:center; gap:6px; flex:none; }
+.tc-rtop[hidden] { display:none; }
+.tc-steps { display:flex; align-items:center; gap:1px; background:var(--inset); border-radius:var(--r-pill); padding:2px; }
+.tc-rtop .tc-speeds { background:var(--inset); border-radius:var(--r-pill); padding:2px; margin:0; }
+.tc.is-replaying .tc-tool { display:none; }
+.tc.is-replaying .tc-sub { display:none; }
+.tc-rplay { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:82px; font:400 11px var(--mono);
+            color:var(--grey-8); background:var(--grey-1); border-radius:var(--r-pill); padding:7px 14px; }
+.tc-rplay:active { transform:scale(.96); }
+.tc-rplay i.is-play { width:0; height:0; border-left:7px solid currentColor; border-top:4.5px solid transparent; border-bottom:4.5px solid transparent; }
+.tc-rplay i.is-pause { width:8px; height:9px; border-left:2.5px solid currentColor; border-right:2.5px solid currentColor; }

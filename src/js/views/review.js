@@ -19,13 +19,14 @@
 import { el, svg, icon, toast, lightbox, fitted } from '../ui.js';
 import * as c from '../calc.js';
 import * as P from '../periods.js';
-import { tradeShotsOf, reviewShotsOf } from '../store.js';
-import { prepare, imageOnClipboard, imageOnDrop } from '../shots.js';
+import { tradeShotsOf } from '../store.js';
 import { tipLayer } from './chartkit.js';
 import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName, heldOf, heldText } from '../questions.js';
 import { heldEditor } from './held.js';
 import { fromPricesOf } from './addtrade.js';
 import { tradeChart } from './tradechart.js';
+import * as cd from '../candles.js';
+import { measure, inPips } from '../tradeplay.js';
 
 let week = null;           // '2026-W38'
 let picked = null;         // the trade being reviewed
@@ -45,6 +46,59 @@ const GRADE = [['A', 'A'], ['B', 'B'], ['C', 'C']];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export const isReviewed = t => !!t?.review?.what;
+
+/* ============================================================
+   Read off the chart
+
+   The candles answer what the review used to ask: how close the trade came
+   to your stop, how far it ran, and — closed by hand — what holding to the
+   target would have made. Read once, kept on the trade's review as
+   `review.chart`, and read again only if the trade changes or the prices
+   did not yet reach a day past the exit.
+   ============================================================ */
+export const factsKey = t => [t.date, t.timeOpen, t.timeClose, t.entryPrice, t.stopLoss, t.takeProfit, t.exitPrice, t.side, t.status].join('|');
+export const factsOf = t => (t?.review?.chart && t.review.chart.key === factsKey(t) ? t.review.chart : null);
+const busy = new Map(), trouble = new Map();
+/** Resolves true when there is something new to show. */
+export function ensureFacts(store, t) {
+  if (!t || t.status === 'open' || !t.timeOpen || !cd.oandaInstrument(t.pair)) return Promise.resolve(false);
+  const have = factsOf(t);
+  if (have && have.covered) return Promise.resolve(false);
+  if (busy.has(t.id)) return busy.get(t.id);
+  const job = (async () => {
+    try {
+      const cred = await cd.getKey();
+      if (!cred) { const was = trouble.get(t.id); trouble.set(t.id, 'nokey'); return was !== 'nokey'; }
+      const inst = cd.oandaInstrument(t.pair);
+      const res = await cd.candlesFor(store, t, cred);
+      const kind = closedBy(t);
+      const m = measure(t, res.rows, cd.tradeWindow(t), kind);
+      if (!m) { trouble.set(t.id, 'none'); return !!have; }
+      trouble.delete(t.id);
+      const pips = inPips(m.toStop, inst);
+      const chart = { v: 1, key: factsKey(t), heatR: m.heatR, toStop: pips.n, unit: pips.unit, availR: m.availR,
+        held: m.held, reachedTarget: m.reachedTarget, reachedAt: m.reachedAt, covered: m.covered };
+      const same = have && JSON.stringify({ ...have, at: 0 }) === JSON.stringify({ ...chart, at: 0 });
+      if (!same) await store.setTradeReview(t.id, { chart: { ...chart, at: new Date().toISOString() } });
+      /* Closed by hand: what holding would have made goes on the trade itself,
+         where Ghost and the analytics read it — unless you answered it. */
+      let held = false;
+      if (kind === 'manual' && m.held && (t.heldOutcome == null || t.heldAuto)
+          && (t.heldOutcome !== m.held.outcome || t.heldR !== m.held.r)) {
+        await store.updateTrade(t.id, { heldOutcome: m.held.outcome, heldR: m.held.r, heldAuto: true });
+        held = true;
+      }
+      return !same || held;
+    } catch (e) {
+      trouble.set(t.id, cd.explain(e));
+      return true;
+    } finally { busy.delete(t.id); }
+  })();
+  busy.set(t.id, job);
+  return job;
+}
+/** Ticked open with "Edit" — which trades show their numbers as boxes. */
+const editingFacts = new Set();
 
 /**
  * How a trade ended, for the review: the exit reason you logged, or what
@@ -73,6 +127,13 @@ export function reviewOf(acct, t) {
   const kind = closedBy(t);
   const r = rOf(acct, t);
   const fill = (k, val) => { if (v[k] == null && val != null) { v[k] = val; auto.add(k); } };
+  /* What the candles said, when they have been read (see ensureFacts). */
+  const ch = factsOf(t);
+  if (ch) {
+    if (kind === 'sl') { if (ch.reachedTarget) fill('dir', 'right'); fill('avail', ch.availR); }
+    else { fill('heat', ch.heatR); fill('avail', ch.availR); }
+  }
+  if (r != null && r > 0) fill('dir', 'right');
   if (kind === 'tp') { fill('dir', 'right'); if (r != null && r > 0) fill('avail', +r.toFixed(2)); }
   if (Array.isArray(t?.mistakes) && t.mistakes.includes('early_entry')) fill('entry', 'early');
   if (kind === 'sl' && v.dir === 'right') fill('heat', 1);
@@ -91,7 +152,8 @@ export function suggestWhat(acct, t) {
   const m = Array.isArray(t?.mistakes) ? t.mistakes : [];
   if (kind === 'tp') return 'target';
   if (kind === 'sl') return v.dir === 'right' ? 'stopped' : v.dir === 'wrong' ? 'wrong' : null;
-  if (kind === 'be') return v.dir === 'wrong' ? 'wrong' : 'be';
+  const ch = factsOf(t);
+  if (kind === 'be') return v.dir === 'wrong' ? 'wrong' : ch && !ch.reachedTarget ? null : 'be';
   if (kind === 'manual') return m.includes('closed_early') || (t.heldOutcome === 'win') ? 'early' : null;
   return null;
 }
@@ -237,28 +299,9 @@ function tradesTab(store, acct, trades, nav, paintProg) {
     wrap.scrollTop = keep;
   }
 
-  /* A screenshot of what price did after goes onto the trade being reviewed,
-     wherever focus is — the same as on New trade. */
   const wrap = el('div', { class: 'rv-trades' }, chartSlot, el('div', { class: 'rv-row' }, rail, main));
-  const onPaste = async e => {
-    if (!wrap.isConnected) { document.removeEventListener('paste', onPaste); return; }
-    const file = imageOnClipboard(e);
-    if (!file || !trade()) return;
-    e.preventDefault();
-    await addAfter(store, trade(), file);
-    paintMain();
-  };
-  document.addEventListener('paste', onPaste);
   paintRail(); paintMain();
   return wrap;
-}
-
-async function addAfter(store, t, file) {
-  try {
-    const out = await prepare(file);
-    await store.putReviewShot(t.id, out.blob);
-    toast('Added what price did after');
-  } catch (e) { toast(e.message, 'bad'); }
 }
 
 /* The trade, at the size of a page. */
@@ -271,35 +314,20 @@ function reviewCard(store, acct, t, pb, on) {
   const session = t.sessionId ? c.sessionLabel(pb, t.sessionId) : null;
 
   /* ---------- the pictures ---------- */
-  const entry = tradeShotsOf(t), after = reviewShotsOf(t);
-  const items = [...entry.map(n => ({ label: 'Entry', name: n })), ...after.map(n => ({ label: 'After', name: n }))];
-  const shot = (name, label, i) => {
+  /* Only the pictures you took the trade with. What price did afterwards
+     is on the chart at the top, so there is no "after" picture to add. */
+  const entry = tradeShotsOf(t);
+  const items = entry.map(n => ({ label: 'Entry', name: n }));
+  const shot = (name, i) => {
     const tile = el('button', { class: 'rv-shot is-loading', title: 'View full size',
-      onClick: () => lightbox({ items, urlFor: n => store.shotUrl(n), at: i }) },
-      el('span', { class: 'tag' }, label),
-      label === 'After' ? el('span', { class: 'x', title: 'Remove', role: 'button',
-        onClick: async e => { e.stopPropagation(); await store.dropReviewShot(t, name); on.repaint(); } }, icon('close', 10, '#fff', 2.4)) : null);
+      onClick: () => lightbox({ items, urlFor: n => store.shotUrl(n), at: i }) });
     store.shotUrl(name).then(url => { tile.classList.remove('is-loading'); if (url) tile.style.backgroundImage = `url("${url}")`; });
     return tile;
   };
-  const picker = el('input', { type: 'file', accept: 'image/*', hidden: true,
-    onChange: async e => { const f = e.target.files[0]; e.target.value = ''; if (f) { await addAfter(store, t, f); on.repaint(); } } });
-  /* Two rows: the charts you logged the trade with, and what price did
-     after — kept apart so the before and the after read as such. */
-  const shots = el('div', { class: 'rv-shotgroups' },
+  const shots = entry.length ? el('div', { class: 'rv-shotgroups' },
     el('div', { class: 'rv-shotgroup' },
-      el('span', { class: 'rv-sk' }, 'When you took it', el('small', {}, entry.length ? String(entry.length) : '')),
-      el('div', { class: 'rv-shots' }, ...(entry.length ? entry.map((n, i) => shot(n, 'Entry', i))
-        : [el('div', { class: 'rv-shot is-none' }, el('small', {}, 'no charts logged with the trade'))]))),
-    el('div', { class: 'rv-shotgroup is-after' },
-      el('span', { class: 'rv-sk' }, 'After', el('small', {}, after.length ? String(after.length) : '')),
-      el('div', { class: 'rv-shots' },
-        ...after.map((n, i) => shot(n, 'After', entry.length + i)),
-        el('button', { class: 'rv-shot is-add', onClick: () => picker.click(),
-          onDragOver: e => e.preventDefault(),
-          onDrop: async e => { e.preventDefault(); const f = imageOnDrop(e); if (f) { await addAfter(store, t, f); on.repaint(); } } },
-          icon('image', 18, 'var(--ink-4)', 1.6), el('span', {}, 'Paste or drop'), el('small', {}, 'what price did after')),
-        picker)));
+      el('span', { class: 'rv-sk' }, 'Screenshots', el('small', {}, String(entry.length))),
+      el('div', { class: 'rv-shots' }, ...entry.map((n, i) => shot(n, i))))) : null;
 
   /* ---------- the ruler: your stop, your result, how far it ran ---------- */
   const ruler = el('div', { class: 'rv-ruler' });
@@ -328,6 +356,71 @@ function reviewCard(store, acct, t, pb, on) {
     ...opts.map(([k, label]) => el('button', { class: (v[key] === k ? 'is-on ' + (tone[k] || '') : ''),
       onClick: () => set({ [key]: v[key] === k && !v.auto.has(key) ? null : k, ...extra(k) }) }, label)));
   const autoNote = (key, text) => v.auto.has(key) ? el('span', { class: 'hint rv-autonote' }, text) : null;
+  /* Right or wrong is a question about a loss: a winner was right. */
+  const loser = kind === 'sl' || (r != null && r < 0);
+
+  /* ---------- read off the chart ----------
+     Shown as information, not questions. One Edit at the right of the box
+     turns every number in it into a box you can type in; typed numbers win
+     over the chart's, and "Use the chart" gives them back. */
+  const ch = factsOf(t);
+  if (!ch && t.status !== 'open' && (!trouble.has(t.id) || trouble.get(t.id) === 'nokey'))
+    ensureFacts(store, t).then(changed => { if (changed && document.body.contains(ruler)) on.repaint(); });
+  const why = trouble.get(t.id);
+  const pending = !ch && busy.has(t.id) && why !== 'nokey';
+  const noChart = !ch && !pending;
+  const editing = editingFacts.has(t.id) || noChart;
+  function factsBox() {
+    const unit = ch?.unit || 'pips';
+    const typed = k => t.review && t.review[k] != null;
+    const fact = (k, label, value, tone = '', note = '') => el('div', { class: 'rv-fact ' + tone, 'data-fact': k },
+      el('span', { class: 'k' }, label), el('b', {}, value), note ? el('small', {}, note) : null);
+    const when = s => { const d = new Date(s * 1000); return `${DAYS[d.getDay()]} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+    const facts = [];
+    if (kind === 'sl') {
+      facts.push(fact('heat', 'Stopped out', '−1.0R', 'is-neg'));
+      facts.push(fact('avail', 'After the stop', v.avail != null ? rr(v.avail) + ' your way' : '—', v.avail > 0 ? 'is-pos' : '',
+        ch ? (ch.reachedTarget ? `reached your target ${when(ch.reachedAt)}` : 'never reached your target') : ''));
+    } else {
+      const heatTxt = v.heat == null ? '—' : v.heat < 0.005 ? 'never against you' : rr(-v.heat);
+      facts.push(fact('heat', 'Heat', heatTxt, v.heat >= 0.8 ? 'is-neg' : '',
+        typed('heat') ? 'typed by you' : ch && v.heat >= 0.005 ? `came within ${ch.toStop} ${unit} of your stop` : ''));
+      facts.push(fact('avail', 'Ran your way', v.avail != null ? rr(v.avail) : '—', v.avail > 0 ? 'is-pos' : '',
+        typed('avail') ? 'typed by you' : kind === 'tp' && r != null && v.avail > r + 0.05 ? `${rr(v.avail - r)} past your target` : ch ? 'until your stop, or a day after you got out' : ''));
+      if (kind === 'manual') {
+        const held = heldOf(t);
+        facts.push(fact('held', 'Held to target', held ? heldText(held) : ch && !ch.held ? 'neither yet' : '—',
+          held ? (held.outcome === 'win' ? 'is-pos' : held.outcome === 'loss' ? 'is-neg' : '') : '',
+          held && t.heldAuto && ch?.held ? `${ch.held.outcome === 'win' ? 'target' : 'stop'} hit ${when(ch.held.at)}`
+            : held ? 'your answer' : ch && !ch.held ? 'target and stop both untouched in the prices so far' : ''));
+      }
+      if (kind === 'be' && ch) facts.push(fact('after', 'After break-even', ch.reachedTarget ? 'went on to your target' : 'never reached your target',
+        ch.reachedTarget ? 'is-pos' : ''));
+    }
+    const head = el('div', { class: 'rv-facts-h' },
+      el('span', { class: 'k' }, 'From the chart'),
+      el('span', { class: 'rv-facts-src' }, pending ? 'reading the prices…'
+        : why === 'nokey' ? 'add your OANDA key in Settings and these fill themselves'
+        : why === 'none' ? 'no prices for this trade — fill these in by hand'
+        : why ? why : ch ? 'OANDA prices' : ''),
+      why && why !== 'nokey' && why !== 'none' ? el('button', { class: 'rv-facts-reset', onClick: () => { trouble.delete(t.id); on.repaint(); } }, 'Try again') : null,
+      el('div', { class: 'spacer' }),
+      editing && ch
+        ? el('button', { class: 'rv-facts-reset', onClick: () => set({ heat: null, avail: null }) }, 'Use the chart') : null,
+      noChart ? null : el('button', { class: 'rv-facts-edit' + (editing ? ' is-on' : ''),
+        onClick: () => { editing ? editingFacts.delete(t.id) : editingFacts.add(t.id); on.repaint(); } }, editing ? 'Done' : 'Edit'));
+    if (!editing) return el('div', { class: 'rv-facts' }, head, el('div', { class: 'rv-facts-row' }, ...facts));
+    /* typing them in: the old questions, filled with what the chart said */
+    const boxes = [];
+    if (kind === 'sl') { if (v.dir === 'right') boxes.push(num('heat', 'Heat', 'how far it went against you — 1R is your stop', { neg: true }), num('avail', 'Ran after', 'how far it went your way once it turned')); }
+    else {
+      boxes.push(num('avail', kind === 'be' ? 'Ran after BE' : 'Available', 'how far it ran your way'));
+      if (v.dir !== 'wrong') boxes.push(num('heat', 'Heat', 'how close it came to your stop', { neg: true }));
+    }
+    return el('div', { class: 'rv-facts is-editing' }, head,
+      el('div', { class: 'rv-facts-edit-row' }, ...boxes),
+      kind === 'manual' ? heldBox(store, t) : null);
+  }
   const sug = suggestWhat(acct, t);
   const lessonBox = el('textarea', { class: 'rv-lesson', rows: 2, placeholder: 'One line you want to remember', 'aria-label': 'Lesson' }, v.lesson || '');
   let timer = null;
@@ -340,54 +433,34 @@ function reviewCard(store, acct, t, pb, on) {
       el('div', { class: 'p' }, el('b', {}, t.pair || '—'),
         el('span', {}, [`${dayOf(t.date)} ${c.shortDate(t.date)}`, t.timeOpen, setup, t.side === 'sell' ? 'short' : 'long', session].filter(Boolean).join(' · '))),
       el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2))),
-    shots,
     fromTheTrade(t, on),
     ruler,
+    factsBox(),
+    /* What a reviewer decides. The rest is read off the chart, above. */
     el('div', { class: 'rv-form' },
       el('div', { class: 'rv-col' },
-        el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Direction'),
+        loser ? el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Direction'),
           seg('dir', [['right', 'Right'], ['wrong', 'Wrong']], { right: 'is-good', wrong: 'is-bad' }, k => (k === 'wrong' ? { heat: null } : {})),
-          autoNote('dir', 'hit TP'), kind === 'sl' && !v.dir ? el('span', { class: 'hint rv-ask' }, 'answer this first') : null),
-        ...questionsFor(kind, v, num)),
+          autoNote('dir', 'it reached your target after the stop'), kind === 'sl' && !v.dir ? el('span', { class: 'hint rv-ask' }, 'was the idea right?') : null) : null,
+        kind === 'tp' ? num('better', 'Better exit', 'what a better exit would have made') : null,
+        el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Entry'), seg('entry', ENTRY), autoNote('entry', 'from your mistakes'))),
       el('div', { class: 'rv-col' },
-        el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Entry'), seg('entry', ENTRY), autoNote('entry', 'from your mistakes')),
         el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Plan followed'), seg('plan', PLAN, { yes: 'is-good' })),
         el('div', { class: 'rv-f' }, el('span', { class: 'k' }, 'Grade'), seg('grade', GRADE)))),
-    kind === 'manual' ? heldBox(store, t) : null,
     el('div', { class: 'rv-f is-top' }, el('span', { class: 'k' }, 'What happened'),
       el('div', { class: 'rv-chips' }, ...WHAT.map(([k, label]) => el('button', {
         class: (v.what === k ? 'is-on' : '') + (!v.what && sug === k ? ' is-sug' : ''),
         title: !v.what && sug === k ? 'Suggested from how the trade closed — click to confirm' : null,
         onClick: () => set({ what: v.what === k ? null : k }) }, label)))),
     el('div', { class: 'rv-f is-top' }, el('span', { class: 'k' }, 'Lesson'), lessonBox),
+    /* the pictures last: the chart above already shows the trade, so the
+       answers come first and the screenshots sit underneath them */
+    shots,
     el('div', { class: 'rv-actions' },
       el('span', { class: 'rv-saved' }, isReviewed(t) ? 'Reviewed · saved as you go' : 'Pick what happened to mark it reviewed'),
       el('div', { class: 'spacer' }),
       el('button', { class: 'btn btn-quiet', onClick: on.prev }, icon('chevleft', 12, 'currentColor', 2.2), 'Previous'),
       el('button', { class: 'btn btn-primary', onClick: on.next }, 'Next to review', icon('chevright', 12, '#fff', 2.2))));
-}
-
-/* The numbers a trade is asked for, by how it ended.
-   • Take profit: how far it ran (at least what you took), how close it came
-     to your stop, and whether a better exit was there.
-   • Stop loss: nothing until you say whether the idea was right. Right —
-     how far it went against you (from 1R, your stop) and how far it ran
-     after. Wrong — nothing more to measure.
-   • Break-even: how far it ran after, and how far against you.
-   • Closed by hand, or not logged: how far it ran and how far against you.
-   Heat is never asked of a trade read the wrong way. */
-function questionsFor(kind, v, num) {
-  const wrong = v.dir === 'wrong';
-  const heat = hint => wrong ? null : num('heat', 'Heat', hint, { neg: true });
-  if (kind === 'tp') return [
-    num('avail', 'Available', v.auto.has('avail') ? 'at least what you took — more if it kept going' : 'how far it ran your way'),
-    heat('how close it came to your stop'),
-    num('better', 'Better exit', 'what a better exit would have made')].filter(Boolean);
-  if (kind === 'sl') return v.dir === 'right' ? [
-    num('heat', 'Heat', 'how far it went against you — 1R is your stop', { neg: true }),
-    num('avail', 'Ran after', 'how far it went your way once it turned')] : [];
-  if (kind === 'be') return [num('avail', 'Ran after BE', 'how far it went after break-even'), heat('how far it went against you')].filter(Boolean);
-  return [num('avail', 'Available', 'how far it ran your way'), heat('how far it went against you')].filter(Boolean);
 }
 
 /* What you said about the trade when you logged it, read back so the review
@@ -428,7 +501,7 @@ function heldBox(store, t) {
       clearTimeout(timer);
       timer = setTimeout(async () => {
         const whole = val && val.r != null;
-        await store.updateTrade(t.id, { heldOutcome: whole ? val.outcome : null, heldR: whole ? val.r : null });
+        await store.updateTrade(t.id, { heldOutcome: whole ? val.outcome : null, heldR: whole ? val.r : null, heldAuto: false });
         note.textContent = whole ? `saved · ${heldText(heldOf(t))}` : val ? 'how many R?' : 'what it would have made had you left it alone';
       }, 350);
     }),

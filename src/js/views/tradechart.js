@@ -23,10 +23,11 @@
 import { el, icon, toast } from '../ui.js';
 import * as cd from '../candles.js';
 
-export const CHART_TFS = [['1m', 1], ['5m', 5], ['15m', 15], ['1H', 60], ['4H', 240], ['D', 1440]];
+export const CHART_TFS = [['1m', 1], ['3m', 3], ['5m', 5], ['15m', 15], ['30m', 30], ['1H', 60], ['4H', 240], ['D', 1440]];
 export const SPEEDS = [['1×', 250], ['2×', 125], ['5×', 50], ['10×', 25]];
 export const QUICK_LABELS = ['BOS', 'CHoCH', 'x', 'Protected high', 'Protected low', 'Liquidity'];
 const TF_KEY = 'quire:chartTf', SPEED_KEY = 'quire:replaySpeed', FOLLOW_KEY = 'quire:replayFollow';
+const SESS_KEY = 'quire:chartSessions', NEWS_KEY = 'quire:chartNews';
 const DAY = 86400;
 const FOOT = 'for viewing only · prices can differ slightly from your broker’s';
 
@@ -105,7 +106,13 @@ export function tradeChart(store, nav, t, opts = {}) {
     /* drawing: off, armed, or a line being drawn; and the line picked */
     let drawMode = false, sketch = null, picked = null, hot = null;
     let lastGroups = [];
-    let loadingMore = false;
+    let loadingMore = false, monthFailed = false;
+    /* what is shown: the killzones and the news can each be switched off */
+    let showSessions = recall(SESS_KEY) !== '0', showNews = recall(NEWS_KEY) !== '0';
+    /* choosing where a replay starts, TradingView's way: a line follows the
+       pointer and everything after it is dimmed; a click starts there */
+    let picking = false, pickPrev = null;
+    let full = false;
 
     /* where a moment sits, in bars — gaps (weekends) take no room */
     function idxAt(T) {
@@ -202,33 +209,61 @@ export function tradeChart(store, nav, t, opts = {}) {
     const seg = el('div', { class: 'seg tc-seg' });
     const lineBtn = el('button', { class: 'tc-tool', title: 'Draw a dotted line', onClick: () => { setDraw(!drawMode); } },
       el('i', { class: 'tc-dash' }), 'Line');
-    const replayBtn = el('button', { class: 'tc-play', onClick: () => { if (replay) { endReplay(); draw(); } else startReplay(); } }, el('i'), 'Replay');
-    const resetBtn = el('button', { class: 'tc-reset', title: 'Back to the trade', onClick: () => { endReplay(); fit(); draw(); } },
+    const replayBtn = el('button', { class: 'tc-play', onClick: () => { if (replay || picking) { cancelPick(true); endReplay(); draw(); } else startReplay(); } }, el('i'), 'Replay');
+    const fullBtn = el('button', { class: 'tc-reset tc-full', title: 'Full screen (Esc to leave)', onClick: () => setFull(!full) },
+      icon('expand', 12, 'currentColor', 1.9));
+    const resetBtn = el('button', { class: 'tc-reset', title: 'Back to the trade', onClick: () => { cancelPick(true); endReplay(); fit(); paintHead(); draw(); } },
       icon('refresh', 13, 'currentColor', 1.9));
     /* Replay's controls sit under the chart while it runs, the way
        TradingView's bar does, so the header never has to make room. */
     const rbar = el('div', { class: 'tc-rbar', hidden: true });
+    const rtop = el('div', { class: 'tc-rtop', hidden: true });
     function paintHead() {
       seg.replaceChildren(...CHART_TFS.map(([label, m]) =>
         el('button', { class: m === tf ? 'is-on' : '', 'data-tf': label, onClick: () => setTf(m) }, label)));
       lineBtn.classList.toggle('is-on', drawMode);
-      replayBtn.classList.toggle('is-on', !!replay);
+      replayBtn.classList.toggle('is-on', !!replay || picking);
       autoBtn.classList.toggle('is-on', yr.auto);
-      rbar.hidden = !replay;
+      sessBtn.classList.toggle('is-on', showSessions);
+      newsBtn.classList.toggle('is-on', showNews);
+      fullBtn.replaceChildren(icon(full ? 'close' : 'expand', full ? 11 : 12, 'currentColor', 1.9));
+      fullBtn.title = full ? 'Leave full screen (Esc)' : 'Full screen';
+      plot.classList.toggle('is-picking', picking);
+      rbar.hidden = !replay && !picking;
+      rtop.hidden = !replay;
+      card.classList.toggle('is-replaying', !!replay);
+      if (!replay) rtop.replaceChildren();
+      if (picking) {
+        rbar.replaceChildren(
+          el('span', { class: 'tc-pickhint' }, 'Click on the chart where the replay should start'),
+          el('div', { class: 'spacer' }),
+          timed ? el('button', { class: 'tc-rend tc-entrypick', onClick: () => pickAt(beforeEntry()) }, 'Just before the entry') : null,
+          el('button', { class: 'tc-rend tc-cancelpick', onClick: () => { cancelPick(); draw(); } }, 'Cancel'));
+        return;
+      }
       if (!replay) { rbar.replaceChildren(); return; }
-      rbar.replaceChildren(
-        el('button', { class: 'tc-rb tc-pp', title: replay.playing ? 'Pause (space)' : 'Play (space)', onClick: togglePlay },
-          el('i', { class: replay.playing ? 'is-pause' : 'is-play' })),
-        el('button', { class: 'tc-rb tc-back', title: 'One candle back (←)', onClick: () => stepReplay(-1) }, icon('chevleft', 12, 'currentColor', 2.2)),
-        el('button', { class: 'tc-rb tc-fwd', title: 'One candle forward (→)', onClick: () => stepReplay(1) }, icon('chevright', 12, 'currentColor', 2.2)),
+      /* Up top, beside the timeframes: one candle back, pause, one candle
+         forward, and the speed. Underneath, on the left: play and how the
+         chart follows; on the right: when it is, choose again, and end. */
+      const pp = cls => el('button', { class: 'tc-rb tc-pp ' + cls, title: replay.playing ? 'Pause (space)' : 'Play (space)', onClick: togglePlay },
+        el('i', { class: replay.playing ? 'is-pause' : 'is-play' }));
+      rtop.replaceChildren(
+        el('div', { class: 'tc-steps' },
+          el('button', { class: 'tc-rb tc-back', title: 'One candle back (←)', onClick: () => stepReplay(-1) }, icon('chevleft', 12, 'currentColor', 2.2)),
+          pp('is-top'),
+          el('button', { class: 'tc-rb tc-fwd', title: 'One candle forward (→)', onClick: () => stepReplay(1) }, icon('chevright', 12, 'currentColor', 2.2))),
         el('div', { class: 'tc-speeds' }, ...SPEEDS.map(([k], i) =>
-          el('button', { class: i === speed ? 'is-on' : '', 'data-speed': k, onClick: () => setSpeed(i) }, k))),
+          el('button', { class: i === speed ? 'is-on' : '', 'data-speed': k, onClick: () => setSpeed(i) }, k))));
+      rbar.replaceChildren(
+        el('button', { class: 'tc-rplay' + (replay.playing ? ' is-playing' : ''), onClick: togglePlay },
+          el('i', { class: replay.playing ? 'is-pause' : 'is-play' }), replay.playing ? 'Pause' : 'Play'),
         el('div', { class: 'tc-speeds tc-follow' },
           el('button', { class: follow ? 'is-on' : '', 'data-follow': '1', title: 'The chart moves with the newest candle', onClick: () => setFollow(true) }, 'Follow price'),
           el('button', { class: follow ? '' : 'is-on', 'data-follow': '0', title: 'The chart stays where you put it', onClick: () => setFollow(false) }, 'Free view')),
         el('div', { class: 'spacer' }),
         el('span', { class: 'tc-rwhen' }, replayWhen()),
-        el('button', { class: 'tc-rend', onClick: () => { endReplay(); draw(); } }, 'End replay'));
+        el('button', { class: 'tc-rend tc-select', title: 'Choose another starting point', onClick: () => startReplay() }, 'Select bar'),
+        el('button', { class: 'tc-rend tc-endr', onClick: () => { endReplay(); draw(); } }, 'End replay'));
     }
     const replayWhen = () => {
       if (!replay) return '';
@@ -241,22 +276,69 @@ export function tradeChart(store, nav, t, opts = {}) {
     const autoBtn = el('button', { class: 'tc-auto' + (yr.auto ? ' is-on' : ''), title: 'Fit the price scale to the candles',
       onClick: () => { yr.auto = !yr.auto; paintHead(); draw(); } }, 'auto');
     const plot = el('div', { class: 'tc-plot', style: { height: height + 'px' } }, canvas, editor, autoBtn);
-    const footL = el('span', { class: 'tc-read' }, FOOT), footR = el('span', {}, 'drag to move · scroll to zoom');
+    const footL = el('span', { class: 'tc-read' }, FOOT);
+    const sessBtn = el('button', { class: 'tc-tog' + (showSessions ? ' is-on' : ''), 'data-show': 'sessions',
+      onClick: () => { showSessions = !showSessions; remember(SESS_KEY, showSessions ? '1' : '0'); paintHead(); draw(); } }, el('i'), 'Sessions');
+    const newsBtn = el('button', { class: 'tc-tog' + (showNews ? ' is-on' : ''), 'data-show': 'news',
+      onClick: () => { showNews = !showNews; remember(NEWS_KEY, showNews ? '1' : '0'); paintHead(); draw(); } }, el('i'), 'News');
+    const footR = el('span', { class: 'tc-togs' }, sessBtn, newsBtn);
     card.replaceChildren(
-      el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }), seg, lineBtn, replayBtn, resetBtn),
+      el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }), seg, rtop, lineBtn, replayBtn, resetBtn, fullBtn),
       plot, rbar,
       el('div', { class: 'tc-foot' }, footL, footR));
+    const hint = () => drawMode ? 'drag across to draw · Esc to stop'
+      : picking ? 'click where the replay should start · Esc to cancel'
+      : monthFailed ? 'the rest of the month could not be loaded' : FOOT;
+    /* Full screen: the card takes the whole window, Esc gives it back. */
+    /* The card is lifted out to the page itself while it is full screen, so
+       nothing it sits in (a scrolling column, glass, an animation) can hold
+       it back; a placeholder keeps its place for the way back. */
+    let holder = null;
+    function setFull(on) {
+      if (on === full) return;
+      full = on;
+      if (on) {
+        holder = document.createComment('chart');
+        card.replaceWith(holder);
+        document.body.append(card);
+        window.addEventListener('hashchange', leaveOnNav);
+      } else {
+        window.removeEventListener('hashchange', leaveOnNav);
+        if (holder?.isConnected) holder.replaceWith(card); else card.remove();
+        holder = null;
+      }
+      card.classList.toggle('is-full', on);
+      paintHead(); draw();
+    }
+    function leaveOnNav() { setFull(false); }
     const monthLabel = () => { const d = new Date((res.month.mid) * 1000); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
     const paintSub = () => { sub.textContent = `OANDA · mid · ${monthLabel()}${loadingMore ? ' · loading the month…' : ''}`; };
 
     /* ---------- replay ---------- */
     function startReplay() {
       endDraw();
+      if (timer) clearInterval(timer);
+      timer = null;
+      pickPrev = replay; replay = null; picking = true;
+      paintHead(); draw();
+    }
+    function beforeEntry() {
       const a = Math.floor(idxAt(timed ? res.entry : bars[0][0]));
-      const upto = Math.max(1, Math.min(bars.length - 1, a - Math.max(3, Math.round(view.count * 0.35))));
-      replay = { upto, playing: true };
-      view.start = upto - view.count * 0.65; clamp();
-      run(); paintHead(); draw();
+      return a - Math.max(3, Math.round(view.count * 0.35));
+    }
+    /* the replay starts on this candle: it and everything before it shows */
+    function pickAt(i) {
+      const upto = Math.max(1, Math.min(bars.length - 1, Math.round(i)));
+      picking = false; pickPrev = null;
+      replay = { upto, playing: false };
+      if (upto < view.start || upto > view.start + view.count) { view.start = upto - view.count * 0.65; clamp(); }
+      paintHead(); draw();
+    }
+    function cancelPick(drop) {
+      if (!picking) return;
+      picking = false;
+      replay = drop ? null : pickPrev; pickPrev = null;
+      paintHead();
     }
     function run() {
       if (timer) clearInterval(timer);
@@ -308,9 +390,8 @@ export function tradeChart(store, nav, t, opts = {}) {
     const lines = () => store.drawingsFor(inst);
     function setDraw(on) {
       drawMode = on; sketch = null;
-      if (on) { closeEditor(); if (replay && replay.playing) togglePlay(); }
+      if (on) { closeEditor(); cancelPick(); if (replay && replay.playing) togglePlay(); }
       plot.classList.toggle('is-drawing', on);
-      footR.textContent = on ? 'drag across to draw · Esc to stop' : 'drag to move · scroll to zoom';
       paintHead(); draw();
     }
     function endDraw() { if (drawMode) setDraw(false); }
@@ -386,7 +467,7 @@ export function tradeChart(store, nav, t, opts = {}) {
       }
       if (!editor.hidden) closeEditor();
       drag = { zone, x: e.clientX, y: e.clientY, start: view.start, count: view.count, lo: G.lo, hi: G.hi, ph: G.ph, pw: G.pw,
-               moved: false, vertical: false, line: zone === 'pane' ? lineAt(x, y, G) : null };
+               moved: false, vertical: false, line: zone === 'pane' && !picking ? lineAt(x, y, G) : null };
       canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener('pointermove', e => {
@@ -441,7 +522,10 @@ export function tradeChart(store, nav, t, opts = {}) {
         } else draw();
         return;
       }
-      if (drag && !drag.moved && drag.line) openEditor(drag.line);
+      if (picking && drag && !drag.moved && drag.zone === 'pane') {
+        const r = canvas.getBoundingClientRect(), G = geom();
+        pickAt(Math.floor(view.start + (e.clientX - r.left) / G.bw));
+      } else if (drag && !drag.moved && drag.line) openEditor(drag.line);
       drag = null; plot.classList.remove('is-dragging');
     };
     canvas.addEventListener('pointerup', up);
@@ -477,12 +561,14 @@ export function tradeChart(store, nav, t, opts = {}) {
       const zone = zoneOf(e.clientX - r.left, e.clientY - r.top, G);
       if (zone === 'price') { yr.auto = true; paintHead(); draw(); return; }
       if (zone === 'time') { const keep = { ...yr }; endReplay(); fit(); Object.assign(yr, keep); paintHead(); draw(); return; }
-      endReplay(); fit(); paintHead(); draw();
+      cancelPick(true); endReplay(); fit(); paintHead(); draw();
     });
     const onKey = e => {
       if (!card.isConnected) { document.removeEventListener('keydown', onKey); return; }
       if (e.target.closest?.('input, textarea')) return;
       if (e.key === 'Escape' && drawMode) { setDraw(false); return; }
+      if (e.key === 'Escape' && picking) { cancelPick(); draw(); return; }
+      if (e.key === 'Escape' && full) { setFull(false); return; }
       if (!over || !replay) return;
       if (e.key === ' ') { e.preventDefault(); togglePlay(); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); stepReplay(1); }
@@ -539,11 +625,10 @@ export function tradeChart(store, nav, t, opts = {}) {
         g.textAlign = 'left';
       };
 
+      /* killzones — their names in the band along the top */
       g.save();
-      g.beginPath(); g.rect(0, 0, pw, H); g.clip();
-
-      /* killzones */
-      if (sessions.length && bars.length && tf < 1440) {
+      g.beginPath(); g.rect(0, 0, pw, PAD_T + ph); g.clip();
+      if (showSessions && sessions.length && bars.length && tf < 1440) {
         const tA = timeAtIdx(view.start) - DAY, tZ = timeAtIdx(view.start + view.count) + DAY;
         g.font = font(9.5); g.textBaseline = 'alphabetic';
         for (let d = tA; d <= tZ + DAY; d += DAY) {
@@ -565,10 +650,13 @@ export function tradeChart(store, nav, t, opts = {}) {
         }
       }
 
-      /* price grid */
+      g.restore();
+
+      /* everything else stays inside the plot: dragged up or down, candles
+         never run over the times along the bottom or the names on top */
+      g.save();
+      g.beginPath(); g.rect(0, PAD_T, pw, ph); g.clip();
       const ticks = niceTicks(lo, hi, Math.max(3, Math.round(ph / 55)));
-      g.strokeStyle = withAlpha(C.ink, 0.05); g.lineWidth = 1;
-      for (const p of ticks) { const y = Math.round(Y(p)) + 0.5; g.beginPath(); g.moveTo(0, y); g.lineTo(pw, y); g.stroke(); }
 
       /* the position */
       if (timed && Number.isFinite(entry)) {
@@ -600,7 +688,7 @@ export function tradeChart(store, nav, t, opts = {}) {
          their names stacked under it, turned to the left near the edge */
       g.font = font(9.5); g.textBaseline = 'alphabetic';
       const groups = [];
-      for (const ev of news) {
+      for (const ev of showNews ? news : []) {
         if (ev.at > replayT) continue;
         const x = Math.round(xT(ev.at)) + 0.5;
         if (x < 0 || x > pw) continue;
@@ -650,6 +738,16 @@ export function tradeChart(store, nav, t, opts = {}) {
       };
       if (timed && Number.isFinite(entry) && res.entry <= replayT) dot(xT(res.entry), Y(entry), 'Entry', 'left');
       if (timed && hasExit && res.exit <= replayT) dot(xT(res.exit), Y(exitP), 'Exit', 'right');
+
+      /* choosing the replay's start: what would be hidden is dimmed */
+      if (picking && hover && hover.x < pw) {
+        const i = Math.max(0, Math.min(bars.length - 1, Math.floor(view.start + hover.x / bw)));
+        const x = Math.round(xI(i) + bw / 2) + 0.5;
+        g.fillStyle = withAlpha(C.card, 0.72);
+        g.fillRect(x, PAD_T, pw - x, ph);
+        g.strokeStyle = C.ink2; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(x, PAD_T); g.lineTo(x, PAD_T + ph); g.stroke();
+      }
       g.restore();
 
       /* prices on the right: the axis, and a tag for each level */
@@ -663,12 +761,13 @@ export function tradeChart(store, nav, t, opts = {}) {
       for (const p of ticks) {
         const y = Y(p);
         if (y < PAD_T + 4 || y > PAD_T + ph - 4 || tagYs.some(ty => Math.abs(ty - y) < 11)) continue;
-        g.fillText(fmt(p, dp), pw + 8, y);
+        g.textAlign = 'right'; g.fillText(fmt(p, dp), W - 6, y); g.textAlign = 'left';
       }
       tags.forEach((L, k) => {
         const y = tagYs[k];
         g.fillStyle = L.bg; roundRect(g, pw + 4, y - 8, AXIS_W - 8, 16, 4); g.fill();
-        g.fillStyle = C.ink; g.fillText(`${L.label} ${fmt(L.p, dp)}`, pw + 9, y + 0.5, AXIS_W - 16);
+        g.fillStyle = C.ink; g.fillText(L.label, pw + 9, y + 0.5);
+        g.textAlign = 'right'; g.fillText(fmt(L.p, dp), W - 9, y + 0.5, AXIS_W - 16 - g.measureText(L.label + ' ').width); g.textAlign = 'left';
       });
 
       /* the time axis */
@@ -696,7 +795,7 @@ export function tradeChart(store, nav, t, opts = {}) {
       }
 
       /* the crosshair, and the candle under it read out underneath */
-      footL.textContent = FOOT;
+      footL.textContent = hint();
       if (hover && !drag && hover.x < pw && hover.y > PAD_T && hover.y < PAD_T + ph) {
         const i = Math.floor(view.start + hover.x / bw);
         if (i >= 0 && i <= last) {
@@ -706,7 +805,7 @@ export function tradeChart(store, nav, t, opts = {}) {
           g.setLineDash([]);
           const price = hi - (hover.y - PAD_T) / ph * (hi - lo);
           g.fillStyle = C.ink3; roundRect(g, pw + 4, y - 8, AXIS_W - 8, 16, 4); g.fill();
-          g.fillStyle = C.card; g.textBaseline = 'middle'; g.fillText(fmt(price, dp), pw + 9, y + 0.5);
+          g.fillStyle = C.card; g.textBaseline = 'middle'; g.textAlign = 'right'; g.fillText(fmt(price, dp), W - 9, y + 0.5); g.textAlign = 'left';
           const [bt, o, h, l, c] = bars[i];
           const d = new Date(bt * 1000);
           const tl = tf >= 1440 ? dayLabel(cd.tradingDayOf(bt)) : `${WEEKDAYS[d.getDay()]} ${clock(d)}`;
@@ -729,14 +828,15 @@ export function tradeChart(store, nav, t, opts = {}) {
       loadingMore = true; paintSub();
       cd.getKey().then(cred => cd.loadDays(store, inst, res.rest, cred, now))
         .then(more => { loadingMore = false; paintSub(); extend(more); card.dispatchEvent(new Event('tc-month')); })
-        .catch(() => { loadingMore = false; paintSub(); footR.textContent = 'the rest of the month could not be loaded'; });
+        .catch(() => { loadingMore = false; monthFailed = true; paintSub(); draw(); });
     } else paintSub();
     card.__chart = {
       get view() { return { ...view }; }, get tf() { return tf; }, get bars() { return bars.length; },
       get replaying() { return !!replay?.playing; }, get upto() { return replay ? replay.upto : null; },
       get speed() { return SPEEDS[speed][0]; }, get drawing() { return drawMode; },
       get news() { return news.map(n => n.title); }, get days() { return res.days.slice(); }, get loadingMore() { return loadingMore; },
-      get auto() { return yr.auto; }, get yRange() { return { lo: yr.lo, hi: yr.hi }; }, get follow() { return follow; },
+      get auto() { return yr.auto; }, get picking() { return picking; }, get full() { return full; },
+      get shows() { return { sessions: showSessions, news: showNews }; }, get yRange() { return { lo: yr.lo, hi: yr.hi }; }, get follow() { return follow; },
       firstBar: () => res.rows[0][0], lastBar: () => res.rows[res.rows.length - 1][0],
       barTimes: () => bars.map(b => b[0]), barAt: i => bars[i], groups: () => lastGroups, lineCount: () => lines().length, idxAt, tags: () => tagsNow(), dots: () => dotsNow(),
       xy: (T, p) => { const G = geom(); return { x: G.xT(T), y: G.Y(p) }; },
