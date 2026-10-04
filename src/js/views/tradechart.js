@@ -27,16 +27,16 @@ import { el, icon, toast } from '../ui.js';
 import * as cd from '../candles.js';
 import { createCore, CHART_TFS, TV_FONT, withAlpha, svgIcon, niceTicks, spread } from '../chart/core.js';
 import { openMenu } from '../chart/menu.js';
+import { createDrawings } from '../chart/drawings.js';
+import { paintSessions, paintSessionNames, newsFor as newsOf, paintNews } from '../chart/overlays.js';
+import { rsiFor } from '../chart/rsi.js';
 
 export { CHART_TFS, niceTicks, spread };
 export const SPEEDS = [['1×', 250], ['2×', 125], ['5×', 50], ['10×', 25]];
-export const QUICK_LABELS = ['BOS', 'CHoCH', 'x', 'Protected high', 'Protected low', 'Liquidity'];
 const TF_KEY = 'quire:chartTf', SPEED_KEY = 'quire:replaySpeed', FOLLOW_KEY = 'quire:replayFollow';
-const SESS_KEY = 'quire:chartSessions', NEWS_KEY = 'quire:chartNews';
+const SESS_KEY = 'quire:chartSessions', NEWS_KEY = 'quire:chartNews', RSI_KEY = 'quire:chartRsi';
 const DAY = 86400;
 const FOOT = 'for viewing only · prices can differ slightly from your broker’s';
-/* where the news sits: under the status line */
-const NEWS_TOP = 28;
 
 const remember = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* fine */ } };
 const recall = k => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -88,11 +88,7 @@ export function tradeChart(store, nav, t, opts = {}) {
     const hasExit = closed && Number.isFinite(exitP);
     const exitOwnTag = hasExit && !same(exitP, tp) && !same(exitP, sl) && !same(exitP, entry);
 
-    const curs = cd.currenciesOf(inst);
-    const newsFor = () => (store.data.news?.events || [])
-      .filter(ev => ev.impact === 'High' && curs.includes(ev.country))
-      .map(ev => ({ at: Date.parse(ev.at) / 1000, title: ev.title }))
-      .filter(ev => Number.isFinite(ev.at) && ev.at >= res.rows[0][0] && ev.at <= res.rows[res.rows.length - 1][0] + 60);
+    const newsFor = () => newsOf(store, inst, res.rows[0][0], res.rows[res.rows.length - 1][0] + 60);
     let news = newsFor();
     const sessions = store.playbook?.sessions || [];
 
@@ -101,36 +97,43 @@ export function tradeChart(store, nav, t, opts = {}) {
     let replay = null, timer = null;
     let speed = Math.max(0, SPEEDS.findIndex(([k]) => k === recall(SPEED_KEY)));
     let follow = recall(FOLLOW_KEY) !== '0';
-    /* drawing: off, armed, or a line being drawn; and the line picked */
-    let drawMode = false, sketch = null, picked = null, hot = null, hideLines = false;
     let lastGroups = [];
     let loadingMore = false, monthFailed = false;
     /* what is shown: the killzones and the news can each be switched off */
-    let showSessions = recall(SESS_KEY) !== '0', showNews = recall(NEWS_KEY) !== '0';
+    let showSessions = recall(SESS_KEY) !== '0', showNews = recall(NEWS_KEY) !== '0', showRsi = recall(RSI_KEY) === '1';
     /* choosing where a replay starts, TradingView's way: a line follows the
        pointer and everything after it is dimmed; a click starts there */
     let picking = false, pickPrev = null;
     let full = false;
 
     const plot = el('div', { class: 'tc-plot', style: { height: height + 'px' } });
-    const editor = el('div', { class: 'tc-edit', hidden: true });
     const core = createCore(plot, {
       store, inst, dp, symbol: inst.replace('_', '').replace('NAS100USD', 'NAS100'), source: 'OANDA',
       bars: cd.aggregate(res.rows, tf), tf,
       hooks: {
         limit: () => (replay ? replay.upto : null),
-        tags: () => tagList(),
+        tags: () => [...tagList(), ...(dr ? dr.tags() : [])],
         back: paintBack, front: paintFront,
-        claim, hover: (x, y, G) => { hot = drawMode ? null : lineAt(x, y, G)?.id || null; return hot ? 'pointer' : null; },
+        claim, hover: (x, y, G, e) => dr.hover(x, y, G, e), dbl: (x, y, G) => dr.dbl(x, y, G), leave: () => dr.leave(),
         onPan: () => { if (replay && follow) setFollow(false); },
         onReset: () => { cancelPick(true); endReplay(); fit(); paintHead(); },
         onTimeReset: () => { const keep = { ...core.yr }; endReplay(); fit(); Object.assign(core.yr, keep); paintHead(); },
         onInterval: m => setTf(m),
-        menu: drawingsMenu,
+        menu: ctx => dr.menu(ctx),
+        panes: () => (showRsi ? [rsi] : []),
       },
     });
-    plot.append(editor);
+    const rsi = rsiFor(store, core, { tf: () => tf, plot, remove: () => setShow('rsi', false) });
     const bars = () => core.bars;
+    /* the drawings: kept per instrument and per place — the trade page and
+       the weekly review share one set (the execution's markings), the
+       Outlook keeps its own (opts.lines = 'outlook') */
+    const dkey = opts.lines ? `${opts.lines}:${inst}` : inst;
+    const acct = store.activeAccount;
+    const dr = createDrawings(core, plot, { store, dkey, inst, dp, tf: () => tf, rows: () => res.rows,
+      replayT: () => (replay ? bars()[replay.upto][0] + tf * 60 : Infinity),
+      account: () => ({ balance: acct?.startingBalance, risk: acct?.defaultRiskPercent }),
+      onTool: k => { if (k) { cancelPick(); if (replay && replay.playing) togglePlay(); } paintFoot(); } });
 
     const idxAt = T => core.idxAt(T);
     function fit() {
@@ -182,8 +185,6 @@ export function tradeChart(store, nav, t, opts = {}) {
     const seg = el('div', { class: 'seg tc-seg' });
     const indBtn = el('button', { class: 'tc-tool tc-ind', title: 'Indicators', onClick: () => indicators() },
       svgIcon('M4 19l5-7 4 3 7-10', 16), el('span', { class: 'tc-tlabel' }, 'Indicators'));
-    const lineBtn = el('button', { class: 'tc-tool tc-line', title: 'Draw a dotted line', onClick: () => { setDraw(!drawMode); } },
-      el('i', { class: 'tc-dash' }), el('span', { class: 'tc-tlabel' }, 'Line'));
     const replayBtn = el('button', { class: 'tc-play', onClick: () => { if (replay || picking) { cancelPick(true); endReplay(); core.draw(); } else startReplay(); } }, el('i'), 'Replay');
     const gearBtn = el('button', { class: 'tc-reset tc-gear', title: 'Settings', onClick: () => core.openSettings() },
       svgIcon('M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM12 3l1.6 2.3 2.7-.6.6 2.7L19.2 9 18.5 12l.7 3-2.3 1.6-.6 2.7-2.7-.6L12 21l-1.6-2.3-2.7.6-.6-2.7L4.8 15l.7-3-.7-3 2.3-1.6.6-2.7 2.7.6z', 16));
@@ -199,19 +200,20 @@ export function tradeChart(store, nav, t, opts = {}) {
       const r = indBtn.getBoundingClientRect();
       openMenu([
         { head: 'Indicators' },
+        { label: 'Relative Strength Index', checked: showRsi, cls: 'tc-ind-rsi', act: () => setShow('rsi', !showRsi) },
         { label: 'Sessions', checked: showSessions, cls: 'tc-ind-sessions', act: () => setShow('sessions', !showSessions) },
         { label: 'News · red folders', checked: showNews, cls: 'tc-ind-news', act: () => setShow('news', !showNews) },
       ], r.left, r.bottom + 4, { cls: 'tc-indmenu' });
     }
     function setShow(which, on) {
       if (which === 'sessions') { showSessions = on; remember(SESS_KEY, on ? '1' : '0'); }
+      else if (which === 'rsi') { showRsi = on; remember(RSI_KEY, on ? '1' : '0'); }
       else { showNews = on; remember(NEWS_KEY, on ? '1' : '0'); }
       core.draw();
     }
     function paintHead() {
       seg.replaceChildren(...CHART_TFS.map(([label, m]) =>
         el('button', { class: m === tf ? 'is-on' : '', 'data-tf': label, onClick: () => setTf(m) }, label)));
-      lineBtn.classList.toggle('is-on', drawMode);
       replayBtn.classList.toggle('is-on', !!replay || picking);
       fullBtn.replaceChildren(icon(full ? 'close' : 'expand', full ? 11 : 12, 'currentColor', 1.9));
       fullBtn.title = full ? 'Leave full screen (Esc)' : 'Full screen';
@@ -221,11 +223,11 @@ export function tradeChart(store, nav, t, opts = {}) {
       card.classList.toggle('is-replaying', !!replay);
       if (!replay) rtop.replaceChildren();
       if (picking) {
-        rbar.replaceChildren(
+        rbar.replaceChildren(...[
           el('span', { class: 'tc-pickhint' }, 'Click on the chart where the replay should start'),
           el('div', { class: 'spacer' }),
           timed ? el('button', { class: 'tc-rend tc-entrypick', onClick: () => pickAt(beforeEntry()) }, 'Just before the entry') : null,
-          el('button', { class: 'tc-rend tc-cancelpick', onClick: () => { cancelPick(); core.draw(); } }, 'Cancel'));
+          el('button', { class: 'tc-rend tc-cancelpick', onClick: () => { cancelPick(); core.draw(); } }, 'Cancel')].filter(Boolean));
         return;
       }
       if (!replay) { rbar.replaceChildren(); return; }
@@ -257,10 +259,10 @@ export function tradeChart(store, nav, t, opts = {}) {
 
     const footL = el('span', { class: 'tc-read' }, FOOT);
     card.replaceChildren(
-      el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }), seg, rtop, indBtn, lineBtn, replayBtn, resetBtn, gearBtn, fullBtn),
-      plot, rbar,
+      el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }), seg, rtop, indBtn, replayBtn, resetBtn, gearBtn, fullBtn),
+      el('div', { class: 'tc-body' }, dr.bar, plot), rbar,
       el('div', { class: 'tc-foot' }, footL));
-    const hint = () => drawMode ? 'drag across to draw · Esc to stop'
+    const hint = () => dr?.tool ? 'click, or drag, to draw · Shift keeps a line flat · Esc to stop'
       : picking ? 'click where the replay should start · Esc to cancel'
       : monthFailed ? 'the rest of the month could not be loaded' : FOOT;
     const paintFoot = () => { const h = hint(); if (footL.textContent !== h) footL.textContent = h; };
@@ -291,7 +293,7 @@ export function tradeChart(store, nav, t, opts = {}) {
 
     /* ---------- replay ---------- */
     function startReplay() {
-      endDraw();
+      dr.setTool(null);
       if (timer) clearInterval(timer);
       timer = null;
       pickPrev = replay; replay = null; picking = true;
@@ -363,113 +365,18 @@ export function tradeChart(store, nav, t, opts = {}) {
       timer = null; replay = null; paintHead();
     }
 
-    /* ---------- your lines ----------
-       Kept per instrument and per place: the trade page and the weekly
-       review share one set (the execution's markings), the Outlook keeps its
-       own (opts.lines = 'outlook'), so gold marked up for the day ahead does
-       not clutter gold's trades, and the other way round. */
-    const dkey = opts.lines ? `${opts.lines}:${inst}` : inst;
-    const lines = () => store.drawingsFor(dkey);
-    function setDraw(on) {
-      drawMode = on; sketch = null;
-      if (on) { closeEditor(); cancelPick(); if (replay && replay.playing) togglePlay(); hideLines = false; }
-      plot.classList.toggle('is-drawing', on);
-      paintHead(); core.draw();
-    }
-    function endDraw() { if (drawMode) setDraw(false); }
-    /* A line starts on the price you point at — or on the candle's high,
-       low, open or close when you are within a few pixels of one. */
-    function priceAt(x, y, G) {
-      let p = G.P(y);
-      const i = Math.floor(G.iX(x));
-      if (i >= 0 && i < bars().length) {
-        let best = 8;
-        for (const v of bars()[i].slice(1)) { const d = Math.abs(G.Y(v) - y); if (d < best) { best = d; p = v; } }
-      }
-      return p;
-    }
-    function lineAt(x, y, G) {
-      if (hideLines) return null;
-      for (const L of lines()) {
-        const xa = G.xT(L.t1), xz = G.xT(L.t2), ly = G.Y(L.p);
-        if (x >= xa - 5 && x <= xz + 5 && Math.abs(y - ly) <= 5) return L;
-      }
-      return null;
-    }
-    /* what a press on the chart does before it becomes a drag */
-    function claim(x, y, G) {
-      if (!editor.hidden) closeEditor();
-      if (drawMode) {
-        sketch = { p: priceAt(x, y, G), t1: G.tX(x), t2: null, x0: x };
-        return { capture: true,
-          move: (mx, my, G2) => { sketch.t2 = G2.tX(Math.min(G2.pw, Math.max(0, mx))); },
-          up: async mx => {
-            const s = sketch; sketch = null;
-            if (s.t2 != null && Math.abs(mx - s.x0) >= 6) {
-              const L = { id: 'ln_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-                t1: Math.min(s.t1, s.t2), t2: Math.max(s.t1, s.t2), p: +s.p.toFixed(dp + 1), label: '', at: new Date().toISOString() };
-              await saveLine(L);
-              setDraw(false);
-              openEditor(L);
-            } else core.draw();
-          },
-          cancel: () => { sketch = null; } };
-      }
+    /* what a press on the chart does before it becomes a drag: choosing
+       the replay's start, or the drawings */
+    function claim(x, y, G, e) {
       if (picking) return { click: (cx, cy, G2) => pickAt(Math.floor(G2.iX(cx))) };
-      const L = lineAt(x, y, G);
-      if (L) return { click: () => openEditor(L) };
-      return null;
-    }
-    async function saveLine(L) {
-      try { await store.putDrawing(dkey, L); } catch (e) { toast('Could not save the line: ' + (e.message || e), 'bad'); }
-    }
-    function openEditor(L) {
-      picked = L.id;
-      const G = core.geom();
-      const x = Math.min(Math.max(8, (G.xT(L.t1) + G.xT(L.t2)) / 2 - 130), G.pw - 270);
-      const y = G.Y(L.p) > 120 ? G.Y(L.p) - 96 : G.Y(L.p) + 14;
-      const input = el('input', { class: 'tc-lab', value: L.label || '', placeholder: 'Label — BOS, x, protected high…', maxlength: 40,
-        onKeydown: e => {
-          if (e.key === 'Enter') { e.preventDefault(); commit(input.value); }
-          if (e.key === 'Escape') { e.preventDefault(); closeEditor(); }
-          e.stopPropagation();
-        } });
-      const commit = async v => {
-        const label = String(v || '').trim();
-        const cur = lines().find(x => x.id === L.id);
-        if (cur && cur.label !== label) await saveLine({ ...cur, label });
-        closeEditor();
-      };
-      editor.replaceChildren(
-        input,
-        el('div', { class: 'tc-chips' }, ...QUICK_LABELS.map(q => el('button', { onClick: () => commit(q) }, q))),
-        el('div', { class: 'tc-editrow' },
-          el('button', { class: 'tc-del', onClick: async () => { await store.dropDrawing(dkey, L.id); closeEditor(); } }, 'Delete line'),
-          el('button', { class: 'tc-ok', onClick: () => commit(input.value) }, 'Done')));
-      editor.style.left = x + 'px'; editor.style.top = Math.max(4, y) + 'px';
-      editor.hidden = false;
-      core.draw();
-      setTimeout(() => input.focus(), 0);
-    }
-    function closeEditor() { editor.hidden = true; editor.replaceChildren(); picked = null; core.draw(); }
-    /* the right-click menu's part: hide or remove the lines */
-    function drawingsMenu(ctx) {
-      const n = lines().length;
-      if (!n) return [];
-      return [{ sep: true },
-        { label: hideLines ? 'Show drawings' : 'Hide drawings', icon: 'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6zM12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z', cls: 'tc-m-hide',
-          act: () => { hideLines = !hideLines; closeEditor(); } },
-        { label: `Remove ${n} drawing${n === 1 ? '' : 's'}`, icon: 'M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13', cls: 'tc-m-remove',
-          act: () => openMenu([{ head: `Remove ${n === 1 ? 'the line' : `all ${n} lines`} on this chart?` },
-            { label: 'Remove', cls: 'tc-m-remove-yes', act: async () => { for (const L of [...lines()]) await store.dropDrawing(dkey, L.id); closeEditor(); toast('Drawings removed'); } },
-            { label: 'Cancel', cls: 'tc-m-remove-no' }], ctx.G ? plot.getBoundingClientRect().left + ctx.x : 0, plot.getBoundingClientRect().top + ctx.y) }];
+      return dr.claim(x, y, G, e);
     }
 
     /* ---------- keys: Esc, and replay's space / ← → ---------- */
     const onKey = e => {
       if (!card.isConnected) { document.removeEventListener('keydown', onKey); return; }
       if (e.target.closest?.('input, textarea, select') || document.querySelector('.tv-dialog')) return;
-      if (e.key === 'Escape' && drawMode) { setDraw(false); return; }
+      if ((core.over || core.focused) && dr.key(e)) return;
       if (e.key === 'Escape' && picking) { cancelPick(); core.draw(); return; }
       if (e.key === 'Escape' && full) { setFull(false); return; }
       if (!core.over || !replay) return;
@@ -508,22 +415,7 @@ export function tradeChart(store, nav, t, opts = {}) {
       tagC = null; FF = C.font;
       const { pw, ph, xT, Y, replayT } = G;
       /* killzones */
-      if (showSessions && sessions.length && bars().length && tf < 1440) {
-        const tA = G.tX(0) - DAY, tZ = G.tX(pw) + DAY;
-        for (let d = tA; d <= tZ + DAY; d += DAY) {
-          const day = localDay(d);
-          for (const s of sessions) {
-            if (!s.start || !s.end) continue;
-            const a = cd.localStamp(day, s.start);
-            let z = cd.localStamp(day, s.end);
-            if (z <= a) z += DAY;
-            const xa = Math.max(0, xT(a)), xz = Math.min(pw, xT(z));
-            if (xz - xa < 2) continue;
-            g.fillStyle = withAlpha(C.ink, 0.035);
-            g.fillRect(xa, 0, xz - xa, ph);
-          }
-        }
-      }
+      if (showSessions) paintSessions(g, G, C, sessions, tf);
       /* the position */
       if (timed && Number.isFinite(entry)) {
         const end = Math.min(res.exit, replayT);
@@ -544,63 +436,12 @@ export function tradeChart(store, nav, t, opts = {}) {
       const { pw, ph, xT, Y, replayT, spacing } = G;
       const say = sayOn(g, C);
       g.textBaseline = 'alphabetic';
-      /* killzone names, along the bottom of the chart */
-      if (showSessions && sessions.length && bars().length && tf < 1440) {
-        const tA = G.tX(0) - DAY, tZ = G.tX(pw) + DAY;
-        g.font = f(10);
-        for (let d = tA; d <= tZ + DAY; d += DAY) {
-          const day = localDay(d);
-          for (const s of sessions) {
-            if (!s.start || !s.end) continue;
-            const a = cd.localStamp(day, s.start);
-            let z = cd.localStamp(day, s.end);
-            if (z <= a) z += DAY;
-            const xa = Math.max(0, xT(a)), xz = Math.min(pw, xT(z));
-            if (xz - xa > 46) { g.fillStyle = C.ink4; g.fillText(String(s.name || '').toUpperCase(), xa + 6, ph - 7, xz - xa - 10); }
-          }
-        }
-      }
-      /* red-folder news — releases at the same moment share one marker,
-         their names stacked under it, turned to the left near the edge */
-      g.font = f(10.5);
-      const groups = [];
-      for (const ev of showNews ? news : []) {
-        if (ev.at > replayT) continue;
-        const x = Math.round(xT(ev.at)) + 0.5;
-        if (x < 0 || x > pw) continue;
-        const gp = groups.find(q => Math.abs(q.x - x) < 8);
-        if (gp) { if (!gp.titles.includes(ev.title)) gp.titles.push(ev.title); } else groups.push({ x, titles: [ev.title] });
-      }
-      lastGroups = groups.map(q => ({ x: q.x, titles: q.titles.slice(), left: q.x > pw - 170 }));
-      const placed = [];
-      for (const { x, titles } of groups) {
-        g.strokeStyle = withAlpha(C.loss, 0.7); g.lineWidth = 1; g.setLineDash([2, 3]);
-        g.beginPath(); g.moveTo(x, NEWS_TOP); g.lineTo(x, ph); g.stroke(); g.setLineDash([]);
-        g.fillStyle = C.loss; g.fillRect(x - 3.5, NEWS_TOP, 7, 7);
-        const shown = titles.length > 3 ? [...titles.slice(0, 2), `+${titles.length - 2} more`] : titles;
-        const left = x > pw - 170;
-        const w = Math.max(...shown.map(s => g.measureText(s).width));
-        const x0 = left ? x - 8 - w : x + 8, x1 = x0 + w;
-        let row = 0;
-        const hits = r => placed.some(b => b.x0 < x1 + 6 && x0 < b.x1 + 6 && b.r0 < r + shown.length && r < b.r1);
-        while (hits(row) && row < 12) row++;
-        placed.push({ x0, x1, r0: row, r1: row + shown.length });
-        shown.forEach((s, k) => say(s, left ? x - 8 : x + 8, NEWS_TOP + 8 + (row + k) * 13, C.loss, left ? 'right' : 'left'));
-      }
-      /* your lines */
-      g.font = f(10.5);
-      const drawn = hideLines ? [] : [...lines()];
-      if (sketch && sketch.t2 != null) drawn.push({ id: '_sketch', t1: Math.min(sketch.t1, sketch.t2), t2: Math.max(sketch.t1, sketch.t2), p: sketch.p, label: '' });
-      for (const L of drawn) {
-        if (L.t1 > replayT) continue;
-        const xa = xT(L.t1), xz = Math.min(xT(L.t2), xT(replayT)), y = Math.round(Y(L.p)) + 0.5;
-        if (xz < 0 || xa > pw || y < 0 || y > ph) continue;
-        const lit = L.id === picked || L.id === hot || L.id === '_sketch';
-        g.strokeStyle = lit ? C.ink : C.ink2; g.lineWidth = lit ? 1.5 : 1; g.setLineDash([2, 3]);
-        g.beginPath(); g.moveTo(xa, y); g.lineTo(xz, y); g.stroke(); g.setLineDash([]);
-        if (lit) { g.fillStyle = C.ink; for (const ex of [xa, xz]) { g.beginPath(); g.arc(ex, y, 2.5, 0, Math.PI * 2); g.fill(); } }
-        if (L.label) say(L.label, (xa + xz) / 2, y - 5, lit ? C.ink : C.ink2, 'center');
-      }
+      /* killzone names along the bottom; red-folder news */
+      if (showSessions) paintSessionNames(g, G, C, sessions, tf, f);
+      lastGroups = showNews ? paintNews(g, G, C, news, f) : [];
+      /* the drawings */
+      dr.paint(g, G, C);
+      g.textBaseline = 'alphabetic';
       /* where you got in and out */
       g.font = f(10);
       const dot = (x, y, label, side) => {
@@ -639,13 +480,13 @@ export function tradeChart(store, nav, t, opts = {}) {
       get view() { const v = core.getView(); return { start: round(v.start), count: round(v.count), spacing: v.spacing }; },
       get tf() { return tf; }, get bars() { return bars().length; },
       get replaying() { return !!replay?.playing; }, get upto() { return replay ? replay.upto : null; },
-      get speed() { return SPEEDS[speed][0]; }, get drawing() { return drawMode; },
+      get speed() { return SPEEDS[speed][0]; }, get drawing() { return dr.tool; }, dr,
       get news() { return news.map(n => n.title); }, get days() { return res.days.slice(); }, get loadingMore() { return loadingMore; },
       get auto() { return core.yr.auto; }, get picking() { return picking; }, get full() { return full; },
-      get shows() { return { sessions: showSessions, news: showNews }; }, get yRange() { return { lo: core.yr.lo, hi: core.yr.hi }; }, get follow() { return follow; },
-      get pw() { return core.geom().pw; }, get ph() { return core.geom().ph; }, get hidden() { return hideLines; }, core,
+      get shows() { return { sessions: showSessions, news: showNews, rsi: showRsi }; }, rsi, get yRange() { return { lo: core.yr.lo, hi: core.yr.hi }; }, get follow() { return follow; },
+      get pw() { return core.geom().pw; }, get ph() { return core.geom().ph; }, get hidden() { return dr.hidden; }, core,
       firstBar: () => res.rows[0][0], lastBar: () => res.rows[res.rows.length - 1][0],
-      barTimes: () => bars().map(b => b[0]), barAt: i => bars()[i], groups: () => lastGroups, lineCount: () => lines().length, idxAt, tags: () => tagsNow(), dots: () => dotsNow(),
+      barTimes: () => bars().map(b => b[0]), barAt: i => bars()[i], groups: () => lastGroups, lineCount: () => dr.list().length, idxAt, tags: () => tagsNow(), dots: () => dotsNow(),
       xy: (T, p) => { const G = core.geom(); return { x: G.xT(T), y: G.Y(p) }; },
       status: () => core.statusText(),
     };

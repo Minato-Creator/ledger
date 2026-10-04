@@ -17,6 +17,7 @@ const TABS = [
   ['status', 'Status line', 'M4 6h16M4 10h10M4 14h16M4 18h7'],
   ['scales', 'Scales and lines', 'M19 4v16M15 7h4M17 11h2M15 15h4M17 19h2M4 20h11'],
   ['canvas', 'Canvas', 'M4.5 4.5h15v15h-15zM4.5 15l4-4 4 4 3-3 4 4'],
+  ['trading', 'Trading', 'M4 17l5-5 4 4 7-8M15 8h5v5'],
 ];
 const icon = d => {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -28,7 +29,7 @@ const icon = d => {
 };
 let tabNow = 'symbol';
 
-export function openChartSettings(store, { tab } = {}) {
+export function openChartSettings(store, { tab, trading = false } = {}) {
   closeMenus();
   document.querySelector('.tv-dialog-wrap')?.remove();
   let draft = structuredClone(chartSettings(store));
@@ -93,6 +94,15 @@ export function openChartSettings(store, { tab } = {}) {
         row('Price and time scale', select(TEXT_SIZES.map(n => [n, String(n)]), s.textSize, (d, v) => { d.scales.textSize = +v; }, 'tv-text')),
       ];
     },
+    trading() {
+      const t = draft.trading;
+      return [
+        section('Positions and orders'),
+        row(check('Show the lines on the chart', t.lines, (d, v) => { d.trading.lines = v; }, 'tv-tr-lines')),
+        row(check('Profit and loss on the lines', t.pnl, (d, v) => { d.trading.pnl = v; }, 'tv-tr-pnl')),
+        el('p', { class: 'tv-note' }, 'Replay only — mid prices, no spread; a candle that reaches the stop and the target is a loss.'),
+      ];
+    },
     canvas() {
       const c = draft.canvas;
       return [
@@ -116,7 +126,8 @@ export function openChartSettings(store, { tab } = {}) {
     },
   };
   function paint() {
-    nav.replaceChildren(...TABS.map(([k, text, d]) => el('button', { type: 'button', class: 'tv-dtab' + (k === tabNow ? ' is-on' : ''), 'data-tab': k,
+    if (tabNow === 'trading' && !trading) tabNow = 'symbol';
+    nav.replaceChildren(...TABS.filter(([k]) => trading || k !== 'trading').map(([k, text, d]) => el('button', { type: 'button', class: 'tv-dtab' + (k === tabNow ? ' is-on' : ''), 'data-tab': k,
       onClick: () => { tabNow = k; closeColour(); paint(); } }, icon(d), el('span', {}, text))));
     const keep = body.scrollTop;
     body.replaceChildren(...pages[tabNow]().filter(Boolean));

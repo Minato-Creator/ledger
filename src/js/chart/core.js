@@ -70,7 +70,7 @@ export function createCore(plot, o) {
   let pending = null;            // a view asked for before the chart had a size
   const yr = { auto: false, lo: 0, hi: 1 };
   let hover = null, drag = null, grab = null, raf = 0, over = false, focused = false, seen = false;
-  let lastStatus = '', lastMarks = [];
+  let lastStatus = '', lastMarks = [], lastAreas = [];
 
   const unlisten = onSettings(s => {
     if (seen && !plot.isConnected) { unlisten(); return; }
@@ -135,18 +135,29 @@ export function createCore(plot, o) {
       if (r) { yr.lo = r.lo; yr.hi = r.hi; }
     }
     const aw = axisWidth(yr.lo, yr.hi);
-    const pw = Math.max(10, W - aw), ph = Math.max(10, H - tH);
+    const pw = Math.max(10, W - aw), bot = Math.max(10, H - tH);
+    /* indicator panes (the RSI…) under the candles, above the time scale */
+    const subs = (hooks.panes?.() || []).filter(q => !q.hidden?.());
+    let ph = bot;
+    const panes = [];
+    if (subs.length) {
+      const hs = subs.map(q => Math.max(q.min || 60, Math.round(bot * (q.ratio || 0.25))));
+      const total = hs.reduce((a, h) => a + h + 1, 0);
+      ph = Math.max(40, bot - total);
+      let y = ph + 1;
+      subs.forEach((q, k) => { panes.push({ q, top: y, h: hs[k] - (k === subs.length - 1 ? Math.max(0, y + hs[k] - bot) : 0) }); y += hs[k] + 1; });
+    }
     const spacing = view.spacing, count = pw / spacing, start = view.right - count;
     const last = limit();
     const i0 = Math.max(0, Math.floor(start)), i1 = Math.min(last, Math.ceil(start + count));
     const lo = yr.lo, hi = yr.hi;
-    return { W, H, pw, ph, aw, tH, fs, spacing, bw: spacing, count, start, last, i0, i1, lo, hi,
+    return { W, H, pw, ph, bot, panes, aw, tH, fs, spacing, bw: spacing, count, start, last, i0, i1, lo, hi,
       replayT: last >= 0 && last < bars.length - 1 ? bars[last][0] + tf * 60 : Infinity,
       xI: i => (i - start + 0.5) * spacing, xT: T => (idxAt(T) - start) * spacing,
       iX: x => start + x / spacing, tX: x => timeAtIdx(start + x / spacing),
       Y: p => (hi - p) / (hi - lo) * ph, P: y => hi - y / ph * (hi - lo) };
   }
-  const zoneOf = (x, y, G) => (x >= G.pw && y < G.ph ? 'price' : y >= G.ph && x < G.pw ? 'time' : x < G.pw ? 'pane' : 'corner');
+  const zoneOf = (x, y, G) => (y >= G.bot ? (x < G.pw ? 'time' : 'corner') : y >= G.ph ? (x < G.pw ? 'sub' : 'subscale') : x >= G.pw ? 'price' : 'pane');
 
   /* ---------- moving ---------- */
   function clamp(pw = geom().pw) {
@@ -232,10 +243,10 @@ export function createCore(plot, o) {
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
       if (drag.moved) {
         plot.classList.add('is-panning');
-        if (drag.zone === 'pane') {
+        if (drag.zone === 'pane' || drag.zone === 'sub') {
           view.right = drag.right - dx / drag.spacing; clamp(G.pw);
           if (Math.abs(dx) > 3) hooks.onPan?.();
-          if (Math.abs(dy) > 6 || drag.vertical) {
+          if (drag.zone === 'pane' && (Math.abs(dy) > 6 || drag.vertical)) {
             if (!drag.vertical) { drag.vertical = true; fixScale(G); drag.lo = yr.lo; drag.hi = yr.hi; drag.y = e.clientY; }
             const shift = (e.clientY - drag.y) / drag.ph * (drag.hi - drag.lo);
             yr.lo = drag.lo + shift; yr.hi = drag.hi + shift;
@@ -254,8 +265,9 @@ export function createCore(plot, o) {
       const zone = zoneOf(x, y, G);
       plot.classList.toggle('on-price', zone === 'price');
       plot.classList.toggle('on-time', zone === 'time');
-      const cur = zone === 'pane' ? hooks.hover?.(x, y, G) : null;
+      const cur = zone === 'pane' ? hooks.hover?.(x, y, G, e) : null;
       plot.classList.toggle('is-hot', cur === 'pointer');
+      plot.dataset.cursor = cur || '';
     }
     draw();
   });
@@ -271,7 +283,7 @@ export function createCore(plot, o) {
   canvas.addEventListener('pointerenter', () => { over = true; });
   canvas.addEventListener('pointerleave', () => {
     over = false;
-    if (!drag && !grab) { hover = null; plot.classList.remove('on-price', 'on-time', 'is-hot'); draw(); }
+    if (!drag && !grab) { hover = null; plot.classList.remove('on-price', 'on-time', 'is-hot'); plot.dataset.cursor = ''; hooks.leave?.(); draw(); }
   });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
@@ -318,7 +330,7 @@ export function createCore(plot, o) {
   document.addEventListener('pointerdown', offPress, true);
 
   function reset() { if (hooks.onReset) hooks.onReset(); else { toLatest(); fitPrices(); } draw(); }
-  function settings() { openChartSettings(store, { inst: o.inst }); }
+  function settings() { openChartSettings(store, { inst: o.inst, trading: !!o.trading }); }
 
   /* ---------- the keyboard: Change interval, Alt+R ---------- */
   const onKey = e => {
@@ -413,7 +425,9 @@ export function createCore(plot, o) {
     /* the scales' edges */
     g.fillStyle = C.line;
     g.fillRect(Math.round(pw), 0, 1, H);
-    g.fillRect(0, Math.round(ph), W, 1);
+    g.fillRect(0, Math.round(G.bot), W, 1);
+    for (const P of G.panes) g.fillRect(0, Math.round(P.top) - 1, W, 1);
+    const areas = paintPanes(g, G, C, font);
 
     /* prices down the right: round steps, then the tags over them */
     const tags = (hooks.tags?.() || []).map(t => ({ ...t, fg: t.fg || C.labelInk }));
@@ -444,37 +458,78 @@ export function createCore(plot, o) {
     for (const m of marks) {
       g.font = font(fs, m.bold ? 600 : 400);
       g.fillStyle = m.bold ? C.ink2 || C.ink : C.ink3;
-      g.fillText(m.text, m.x, ph + tH / 2 + 0.5);
+      g.fillText(m.text, m.x, G.bot + tH / 2 + 0.5);
     }
     g.textAlign = 'left';
 
     /* the crosshair */
     let hoverBar = null;
-    if (hover && !grab && !(drag && drag.moved) && hover.x < pw && hover.y < ph && hover.x >= 0 && hover.y >= 0) {
+    if (hover && !grab && !(drag && drag.moved) && hover.x < pw && hover.y < G.bot && hover.x >= 0 && hover.y >= 0) {
       const i = Math.floor(G.iX(hover.x));
       const x = Math.round(xI(i)) + 0.5, y = Math.round(hover.y) + 0.5;
       const ch = S.canvas.cross;
+      /* the line down crosses every pane; the line across, and its value, only the pane it is in */
+      const inSub = areas.find(A => hover.y >= A.top && hover.y < A.top + A.h);
       g.save();
-      g.beginPath(); g.rect(0, 0, pw, ph); g.clip();
+      g.beginPath(); g.rect(0, 0, pw, G.bot); g.clip();
       g.strokeStyle = ch.color; g.lineWidth = ch.width;
       g.setLineDash(ch.style === 'dotted' ? [1, 3] : ch.style === 'dashed' ? [5, 4] : []);
-      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, ph); g.moveTo(0, y); g.lineTo(pw, y); g.stroke();
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, G.bot); g.moveTo(0, y); g.lineTo(pw, y); g.stroke();
       g.restore();
       g.setLineDash([]);
       g.font = font(); g.textBaseline = 'middle';
-      g.fillStyle = C.label; roundRect(g, pw + 1, y - tagH / 2, aw - 2, tagH, 2); g.fill();
-      g.fillStyle = C.labelInk; g.fillText(fmt(G.P(hover.y)), pw + 9, y + 0.5);
+      if (hover.y < ph || inSub) {
+        g.fillStyle = C.label; roundRect(g, pw + 1, y - tagH / 2, aw - 2, tagH, 2); g.fill();
+        g.fillStyle = C.labelInk; g.fillText(inSub ? (inSub.q.fmt || fmt)(inSub.P(hover.y)) : fmt(G.P(hover.y)), pw + 9, y + 0.5);
+      }
       const T = timeAtIdx(i);
       const tl = crossTime(T);
       const tw = g.measureText(tl).width + 16, tx = Math.min(pw - tw, Math.max(0, x - tw / 2));
-      g.fillStyle = C.label; roundRect(g, tx, ph + 2, tw, tH - 4, 2); g.fill();
-      g.fillStyle = C.labelInk; g.textAlign = 'center'; g.fillText(tl, tx + tw / 2, ph + tH / 2 + 0.5); g.textAlign = 'left';
+      g.fillStyle = C.label; roundRect(g, tx, G.bot + 2, tw, tH - 4, 2); g.fill();
+      g.fillStyle = C.labelInk; g.textAlign = 'center'; g.fillText(tl, tx + tw / 2, G.bot + tH / 2 + 0.5); g.textAlign = 'left';
       if (i >= 0 && i <= last) hoverBar = i;
     }
+    const shownLegends = new Set();
+    for (const A of areas) {
+      const lg = A.q.legend?.(hoverBar);
+      if (lg) { if (lg.parentNode !== plot) plot.append(lg); lg.style.top = (A.top + 4) + 'px'; lg.hidden = false; shownLegends.add(lg); }
+    }
+    for (const lg of plot.querySelectorAll(':scope > .tv-plegend')) if (!shownLegends.has(lg)) lg.hidden = true;
     paintStatus(false, hoverBar ?? last, C);
 
     /* the corner: auto */
     autoBtn.style.width = aw + 'px'; autoBtn.style.height = tH + 'px';
+  }
+
+  /* each indicator pane: its own scale on the right, clipped to its strip */
+  function paintPanes(g, G, C, font) {
+    const out = [];
+    const fs = S.scales.textSize, tagH = fs + 7;
+    for (const { q, top, h } of G.panes) {
+      if (h < 10) continue;
+      const r = q.range(G.i0, Math.max(G.i0, G.i1));
+      const A = { q, top, h, lo: r.lo, hi: r.hi, Y: v => top + (r.hi - v) / (r.hi - r.lo) * h, P: y => r.hi - (y - top) / h * (r.hi - r.lo) };
+      g.save();
+      g.beginPath(); g.rect(0, top, G.pw, h); g.clip();
+      q.paint(g, G, A, C);
+      g.restore();
+      const f = q.fmt || fmt;
+      const tags = (q.tags?.(A) || []).map(t => ({ ...t, y: Math.min(top + h - tagH / 2, Math.max(top + tagH / 2, A.Y(t.p))) }));
+      const ys = spread(tags.map(t => t.y), tagH + 1, top + tagH / 2, top + h - tagH / 2);
+      g.font = font(); g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = C.ink3;
+      for (const v of q.ticks?.(A) || niceTicks(r.lo, r.hi, 3)) {
+        const y = A.Y(v);
+        if (y < top + fs / 2 + 2 || y > top + h - fs / 2 - 2 || ys.some(ty => Math.abs(ty - y) < tagH)) continue;
+        g.fillText(f(v), G.pw + 9, y);
+      }
+      tags.forEach((t, k) => {
+        g.fillStyle = t.bg; roundRect(g, G.pw + 1, ys[k] - tagH / 2, G.aw - 2, tagH, 2); g.fill();
+        g.fillStyle = t.fg || '#FFFFFF'; g.fillText(f(t.p), G.pw + 9, ys[k] + 0.5);
+      });
+      out.push(A);
+    }
+    lastAreas = out;
+    return out;
   }
 
   function candles(g, G, C, k) {
@@ -586,8 +641,8 @@ export function createCore(plot, o) {
     canvas, status, autoBtn, geom, draw, idxAt, timeAtIdx, fmt, dp, setView, getView, toLatest, fitPrices, setAuto, setBars, clamp, reset,
     openSettings: settings, zoneOf, yr, palette,
     get bars() { return bars; }, get tf() { return tf; }, get hover() { return hover; }, get dragging() { return !!(drag?.moved || grab); },
-    get over() { return over; }, get settings() { return S; }, limit, statusText: () => status.textContent,
-    marks: () => lastMarks.map(m => m.text), crossTime,
+    get over() { return over; }, get focused() { return focused; }, get settings() { return S; }, limit, statusText: () => status.textContent,
+    marks: () => lastMarks.map(m => m.text), crossTime, areas: () => lastAreas.map(A => ({ key: A.q.key, top: A.top, h: A.h, lo: A.lo, hi: A.hi })),
   };
 }
 

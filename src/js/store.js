@@ -14,6 +14,7 @@ import { zip, unzip, bytesOfText, textOfBytes } from './vault.js';
 import { blankSheet } from './lab.js';
 import { blankRules } from './ghost.js';
 import { KEEP_ITEMS } from './wire.js';
+import { healReplay } from './replaysessions.js';
 export { todayISO, isTauri };
 
 /* ============================================================
@@ -419,6 +420,8 @@ class Store {
 
     if (!d.replay || typeof d.replay !== 'object') { d.replay = { version: 1, weeks: {} }; note(); }
     if (!d.replay.weeks || typeof d.replay.weeks !== 'object') { d.replay.weeks = {}; note(); }
+    /* Replay's sessions, groups and settings (replaysessions.js) */
+    if (healReplay(d.replay)) note();
 
     if (!d.news || typeof d.news !== 'object') { d.news = { version: 1, fetchedAt: null, events: [] }; note(); }
     if (!Array.isArray(d.news.events)) { d.news.events = []; note(); }
@@ -464,7 +467,11 @@ class Store {
     if (!d.drawings || typeof d.drawings !== 'object') { d.drawings = { version: 1, lines: {} }; note(); }
     if (!d.drawings.lines || typeof d.drawings.lines !== 'object' || Array.isArray(d.drawings.lines)) { d.drawings.lines = {}; note(); }
     for (const [k, list] of Object.entries(d.drawings.lines)) {
-      const ok = Array.isArray(list) ? list.filter(x => x && x.id && [x.t1, x.t2, x.p].every(Number.isFinite)) : [];
+      /* a line from the old Line tool (t1, t2, p), or a drawing: a type and two points */
+      const ok = Array.isArray(list) ? list.filter(x => x && x.id && (typeof x.type === 'string'
+        ? Array.isArray(x.pts) && x.pts.length === 2 && x.pts.every(pt => pt && Number.isFinite(pt.t) && Number.isFinite(pt.p))
+          && (x.type !== 'long' && x.type !== 'short' || [x.tp, x.sl].every(Number.isFinite))
+        : [x.t1, x.t2, x.p].every(Number.isFinite))) : [];
       if (!Array.isArray(list) || ok.length !== list.length) { d.drawings.lines[k] = ok; note(); }
     }
     if (!d.review.weeks || typeof d.review.weeks !== 'object' || Array.isArray(d.review.weeks)) { d.review.weeks = {}; note(); }
