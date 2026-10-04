@@ -8,7 +8,8 @@
      no target and no size. The replay will not move on until a stop is
      set — a message says so. Its line carries TP and SL buttons: drag one
      off the line to set the target or the stop ("Drag to set target").
-     The first stop sizes the trade from the risk setting.
+     Every stop (the first and each move) sizes the trade to the risk
+     setting; a stop at or past the entry keeps the size.
    • A Long / Short position drawing, selected: a small Buy / Sell button
      at its entry. It buys or sells at market — the candle's price, not
      the drawing's entry — with the drawing's stop and target, sized so the
@@ -33,7 +34,7 @@ const rTxt = r => `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toFixed(2)}R
 export function createTrading(o) {
   const { s, inst, feed } = o;
   const trades = () => s.trades || (s.trades = []);
-  const now = () => { const i = feed.rowIdx(o.T()); return i >= 0 ? feed.rows[i][4] : NaN; };
+  const now = () => feed.priceAt(o.T());
   const qtyTxt = q => (q == null ? '—' : inst === 'NAS100_USD' ? q.toFixed(1) : Math.round(q).toLocaleString('en-US'));
   const fmt = v => Number(v).toFixed(o.dp);
   let live = null;              // a level being dragged: { id, kind, price }
@@ -78,12 +79,11 @@ export function createTrading(o) {
     const p = +price.toFixed(o.dp + 1);
     if (!rt.validLevel(t, kind, p, now())) { toast(kind === 'sl' ? 'A stop has to be on the losing side of the price' : 'A target has to be on the winning side of the price', 'bad'); return false; }
     if (kind === 'sl') {
-      const sized = t.qty != null;
+      /* every stop on the losing side sizes the trade to the risk again */
+      const was = { sl: t.sl, qty: t.qty, initSl: t.initSl, riskAmt: t.riskAmt, riskTarget: t.riskTarget };
       rt.setStop(s, inst, t, p, o.rate(o.T()));
-      if (!sized) {
-        if (!t.qty) { t.sl = null; t.qty = null; t.initSl = null; t.riskAmt = null; toast('The risk is too small for one unit at that stop', 'bad'); changed(); return false; }
-        toast(`Stop set · ${qtyTxt(t.qty)} units · risk ${money(t.riskAmt)}`);
-      }
+      if (!t.qty) { Object.assign(t, was); toast('The risk is too small for one unit at that stop', 'bad'); changed(); return false; }
+      if (t.qty !== was.qty) toast(`Stop set · ${qtyTxt(t.qty)} units · risk ${money(t.riskAmt)}`);
     } else t.tp = p;
     changed();
     return true;
@@ -99,7 +99,7 @@ export function createTrading(o) {
 
   /** The replay moved forward: fill what the candles reached. */
   function advance(fromT, toT) {
-    const done = rt.runTrades(inst, trades(), feed.rows, fromT, toT, o.rate);
+    const done = rt.runMoments(inst, trades(), feed.rows, fromT, toT, o.rate);
     for (const t of done) toast(`${t.reason === 'tp' ? 'Target' : 'Stop'} hit · ${signed(t.pnl)} (${rTxt(t.r)})`, t.pnl >= 0 ? 'ok' : 'bad');
     if (done.length) { o.changed(); o.save(); }
     return done;
@@ -108,6 +108,7 @@ export function createTrading(o) {
   function beforeBack(nextT, go) {
     const later = rt.openedAfter(trades(), nextT);
     if (!later.length) return go();
+    if (o.root.querySelector('.rt-back')) return;           // already asking: one question at a time
     const n = later.length;
     const box = el('div', { class: 'rs-modal-wrap' }, el('div', { class: 'card rs-modal rt-back' },
       el('h2', {}, `Go back before ${n === 1 ? 'a trade' : `${n} trades`}?`),
@@ -121,6 +122,14 @@ export function createTrading(o) {
           changed(); go();
         } }, n === 1 ? 'Delete the trade' : 'Delete the trades'))));
     o.root.append(box);
+  }
+
+  /** An execution arrow: its tip at (x, y), pointing up (a buy, under the candle) or down (a sell, over it). */
+  function arrow(g, x, y, up) {
+    const k = up ? 1 : -1;
+    g.beginPath();
+    g.moveTo(x, y); g.lineTo(x - 5, y + k * 6); g.lineTo(x - 1.5, y + k * 6); g.lineTo(x - 1.5, y + k * 11);
+    g.lineTo(x + 1.5, y + k * 11); g.lineTo(x + 1.5, y + k * 6); g.lineTo(x + 5, y + k * 6); g.closePath(); g.fill();
   }
 
   /* ---------- one chart's part ---------- */
@@ -142,24 +151,36 @@ export function createTrading(o) {
       }
       return out;
     }
+    let marks = [];               // the execution arrows last painted (for the tests)
     function paint(g, G0, C) {
       G = G0;
       const S = c.core.settings.trading;
-      /* closed trades: in and out, a dotted line between */
-      for (const t of trades()) {
-        if (!t.closed || t.openT > o.T()) continue;
-        const xa = G.xT(t.openT) + G.spacing / 2, xb = G.xT(t.closeT) + G.spacing / 2;
-        if (xb < 0 || xa > G.pw) continue;
-        const ya = G.Y(t.entry), yb = G.Y(t.exit);
-        g.strokeStyle = withAlpha(t.pnl >= 0 ? C.profit : C.loss, 0.9); g.lineWidth = 1; g.setLineDash([2, 3]);
-        g.beginPath(); g.moveTo(xa, ya); g.lineTo(xb, yb); g.stroke(); g.setLineDash([]);
-        for (const [x, y, up] of [[xa, ya, t.side === 'buy'], [xb, yb, t.side !== 'buy']]) {
-          g.fillStyle = up ? C.profit : C.loss;
-          g.beginPath(); if (up) { g.moveTo(x, y + 2); g.lineTo(x - 5, y + 9); g.lineTo(x + 5, y + 9); } else { g.moveTo(x, y - 2); g.lineTo(x - 5, y - 9); g.lineTo(x + 5, y - 9); }
-          g.closePath(); g.fill();
+      /* closed trades, TradingView's way: each execution an arrow — a buy under its candle pointing up
+         (green), a sell over it pointing down (red) — and a dotted line from in to out, in the trade's colour */
+      marks = [];
+      if (S.arrows !== false) {
+        const bars = c.core.bars;
+        const at = T => { const i = Math.floor(c.core.idxAt(feed.timeOf(T)) + 1e-9); return { i, b: bars[i] }; };   // a tick inside a minute belongs to that minute's candle
+        for (const t of trades()) {
+          if (!t.closed || t.openT > o.T()) continue;
+          const A = at(t.openT), B = at(t.closeT);
+          const xa = G.xI(A.i), xb = G.xI(B.i);
+          if (xb < -20 || xa > G.pw + 20) continue;
+          const col = t.side === 'buy' ? C.profit : C.loss;
+          g.strokeStyle = col; g.lineWidth = 1; g.setLineDash([2, 2]);
+          g.beginPath(); g.moveTo(xa, G.Y(t.entry)); g.lineTo(xb, G.Y(t.exit)); g.stroke(); g.setLineDash([]);
+          const buyIn = t.side === 'buy';
+          for (const [x, E, buy] of [[xa, A, buyIn], [xb, B, !buyIn]]) {
+            if (!E.b) continue;
+            g.fillStyle = buy ? C.profit : C.loss;
+            const y = buy ? G.Y(E.b[3]) + 4 : G.Y(E.b[2]) - 4;
+            arrow(g, x, y, buy);
+            marks.push({ trade: t.id, buy, x, y, low: G.Y(E.b[3]), high: G.Y(E.b[2]), colour: g.fillStyle });
+          }
         }
       }
-      if (!S.lines) { layer.replaceChildren(); nodes.clear(); return; }
+      toolButton();
+      if (!S.lines) { for (const n of nodes.values()) n.remove(); nodes.clear(); return; }
       for (const L of lines()) {
         const y = Math.round(G.Y(L.price)) + 0.5;
         g.strokeStyle = L.kind === 'e' ? C.flat : L.kind === 'tp' ? C.profit : C.loss;
@@ -176,7 +197,9 @@ export function createTrading(o) {
         keep.add(L.key);
         let node = nodes.get(L.key);
         const t = L.t;
-        const pnl = L.kind === 'e' ? rt.pnlOf(inst, t, P, o.rate(o.T())) : rt.pnlOf(inst, t, L.price, o.rate(o.T()));
+        /* while its stop is dragged, the size it would take there */
+        const tv = live?.id === t.id && live.kind === 'sl' && t.qty != null ? rt.setStop(s, inst, structuredClone(t), live.price, o.rate(o.T())) : t;
+        const pnl = L.kind === 'e' ? rt.pnlOf(inst, tv, P, o.rate(o.T())) : rt.pnlOf(inst, tv, L.price, o.rate(o.T()));
         const sig = [L.kind, t.qty, t.tp == null, t.sl == null, S.pnl].join('|');
         if (!node || node.__sig !== sig) {
           node?.remove();
@@ -185,6 +208,8 @@ export function createTrading(o) {
           nodes.set(L.key, node);
           layer.append(node);
         }
+        const qv = node.querySelector('.rt-qty');
+        if (qv && tv.qty) qv.textContent = qtyTxt(tv.qty);
         const pv = node.querySelector('.rt-pnl');
         if (pv) { pv.textContent = t.qty == null ? 'no size yet' : signed(pnl); pv.classList.toggle('is-up', pnl > 0); pv.classList.toggle('is-down', pnl < 0); }
         node.style.top = (G.Y(L.price) - 11) + 'px';
@@ -192,7 +217,6 @@ export function createTrading(o) {
         node.hidden = G.Y(L.price) < -10 || G.Y(L.price) > G.ph + 10;
       }
       for (const [k, n] of nodes) if (!keep.has(k)) { n.remove(); nodes.delete(k); }
-      toolButton();
     }
     function cluster(L, S) {
       const t = L.t;
@@ -271,12 +295,14 @@ export function createTrading(o) {
       const sh = d && (d.type === 'long' || d.type === 'short') && c.dr.shapes().find(x => x.id === id);
       go.hidden = !sh;
       if (!sh) return;
-      const h = sh.handles.find(x => x.key === 'entry');
+      /* just past the drawing's right edge, at its entry; inside the chart when the edge is off it */
+      const h = sh.handles.find(x => x.key === 'end');
       go.textContent = d.type === 'long' ? 'Buy' : 'Sell';
       go.className = 'rt-go is-' + (d.type === 'long' ? 'buy' : 'sell');
-      go.style.left = Math.max(2, h.x - 46) + 'px';
+      const w = go.offsetWidth || 50;
+      go.style.left = Math.max(2, Math.min(G.pw - w - 4, h.x + 10)) + 'px';
       go.style.top = (h.y - 12) + 'px';
-      go.onclick = e => { e.stopPropagation(); fromTool(c.dr.list().find(x => x.id === id)); };
+      go.onclick = e => { e.stopPropagation(); if (fromTool(c.dr.list().find(x => x.id === id))) c.dr.select(null); };
     }
     function menu(ctx) {
       const P = now();
@@ -290,7 +316,7 @@ export function createTrading(o) {
       const C = c.core.palette();
       return lines().map(L => ({ p: L.price, label: L.kind === 'e' ? '' : L.kind.toUpperCase(), bg: L.kind === 'e' ? C.flat : L.kind === 'tp' ? C.profit : C.loss }));
     }
-    return { paint, claim, hover, menu, tags, layer };
+    return { paint, claim, hover, menu, tags, layer, marks: () => marks.slice() };
   }
 
   /* ---------- the panel and the numbers at the top ---------- */

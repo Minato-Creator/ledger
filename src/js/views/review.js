@@ -338,12 +338,25 @@ function tradesTab(store, acct, trades, nav, paintProg) {
     const t = trade();
     if (!t || charted === t.id) return;
     charted = t.id;
-    chartSlot.replaceChildren(tradeChart(store, nav, t, { height: 440, wide: true }));
+    /* the trade's chart, swapped in once it is drawn — the old one stays until then, so nothing
+       jumps (a short message, then a tall empty box, then the chart) */
+    const next = tradeChart(store, nav, t, { height: 440, wide: true });
+    const old = chartSlot.querySelector('.tc:not(.rv-incoming)');
+    chartSlot.querySelectorAll('.rv-incoming').forEach(n => n.remove());
+    if (!old) { chartSlot.replaceChildren(next); return; }
+    next.classList.add('rv-incoming');
+    chartSlot.append(next);
+    Promise.race([next.__ready, new Promise(r => setTimeout(r, 4000))]).then(() => {
+      if (!next.isConnected) return;
+      next.classList.remove('rv-incoming');
+      for (const n of [...chartSlot.children]) if (n !== next) n.remove();
+    });
   }
   const pb = store.playbook;
   const trade = () => trades.find(t => t.id === picked);
 
   function paintRail() {
+    const kept = rail.querySelector('.rv-list')?.scrollTop || 0;   // the list stays where it was scrolled to
     rail.replaceChildren(
       el('div', { class: 'rv-k' }, 'This week'),
       el('div', { class: 'rv-list' }, ...trades.map(t => {
@@ -354,6 +367,8 @@ function tradesTab(store, acct, trades, nav, paintProg) {
           el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2)),
           el('span', { class: 'ok' + (isReviewed(t) ? ' is-done' : '') }, isReviewed(t) ? icon('check', 11, 'currentColor', 2.6) : null));
       })));
+    const list = rail.querySelector('.rv-list');
+    if (list && kept) list.scrollTop = kept;
   }
 
   function paintMain() {

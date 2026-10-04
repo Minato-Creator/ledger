@@ -120,7 +120,7 @@ export function createCore(plot, o) {
   function axisWidth(lo, hi) {
     meter.font = `400 ${S.scales.textSize}px ${FONT}`;
     const texts = [fmt(hi), fmt(lo), fmt((hi + lo) / 2)];
-    for (const tg of hooks.tags?.() || []) texts.push(`${tg.label} ${fmt(tg.p)}`);
+    for (const tg of hooks.tags?.() || []) texts.push(fmt(tg.p));   // tags are colour and price only — no "TP" / "Entry" words widening the scale (Minato)
     const w = Math.max(...texts.map(s => meter.measureText(s).width));
     return Math.max(52, Math.ceil(w + 18));
   }
@@ -157,6 +157,10 @@ export function createCore(plot, o) {
       iX: x => start + x / spacing, tX: x => timeAtIdx(start + x / spacing),
       Y: p => (hi - p) / (hi - lo) * ph, P: y => hi - y / ph * (hi - lo) };
   }
+  /* the line above an indicator pane: drag it to make the pane taller or shorter */
+  let divider = null;
+  const dividerAt = (x, y, G) => G.panes.findIndex(P => P.q.resize && Math.abs(y - (P.top - 0.5)) <= 4);
+  const paneShare = (dv, clientY) => Math.max(0.06, Math.min(0.75, (dv.h - (clientY - dv.y)) / Math.max(1, dv.bot)));
   const zoneOf = (x, y, G) => (y >= G.bot ? (x < G.pw ? 'time' : 'corner') : y >= G.ph ? (x < G.pw ? 'sub' : 'subscale') : x >= G.pw ? 'price' : 'pane');
 
   /* ---------- moving ---------- */
@@ -227,9 +231,15 @@ export function createCore(plot, o) {
     if (e.button !== 0) return;
     closeMenus();
     const { x, y } = local(e), G = geom(), zone = zoneOf(x, y, G);
+    const dk = dividerAt(x, y, G);
+    if (dk >= 0) { divider = { k: dk, y: e.clientY, h: G.panes[dk].h, bot: G.bot, q: G.panes[dk].q }; canvas.setPointerCapture(e.pointerId); return; }
     const claim = zone === 'pane' ? hooks.claim?.(x, y, G, e) || null : null;
-    if (claim?.capture) { grab = claim; canvas.setPointerCapture(e.pointerId); return; }
-    drag = { zone, x: e.clientX, y: e.clientY, right: view.right, spacing: view.spacing, lo: G.lo, hi: G.hi, ph: G.ph, pw: G.pw,
+    if (claim?.capture) {
+      grab = claim; canvas.setPointerCapture(e.pointerId);
+      if (claim.cursor) { plot.dataset.cursor = claim.cursor; plot.classList.remove('is-hot'); }
+      return;
+    }
+    drag = { zone, x: e.clientX, y: e.clientY, lx: x, right: view.right, spacing: view.spacing, lo: G.lo, hi: G.hi, ph: G.ph, pw: G.pw,
       moved: false, vertical: false, claim };
     canvas.setPointerCapture(e.pointerId);
   });
@@ -238,6 +248,7 @@ export function createCore(plot, o) {
     hover = { x, y, shift: e.shiftKey };
     const G = geom();
     if (grab) { grab.move?.(x, y, G, e); draw(); return; }
+    if (divider) { divider.r = paneShare(divider, e.clientY); divider.q.resize?.(divider.r, false); draw(); return; }
     if (drag) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
@@ -256,7 +267,10 @@ export function createCore(plot, o) {
           const k = Math.exp(dy * 0.006), mid = (drag.lo + drag.hi) / 2, half = (drag.hi - drag.lo) / 2 * k;
           yr.lo = mid - half; yr.hi = mid + half;
         } else if (drag.zone === 'time') {
-          view.spacing = drag.spacing * Math.exp(dx * 0.006);
+          /* TradingView's way: the right edge stays, and the time you grabbed follows the pointer —
+             to the left spreads the candles out, to the right squeezes them in */
+          const d0 = Math.max(1, drag.pw - drag.lx), d1 = Math.max(1, Math.min(drag.pw, drag.pw - drag.lx - dx));
+          view.spacing = drag.spacing * d1 / d0;
           view.right = drag.right; clamp(G.pw);
           view.right = drag.right;
         }
@@ -265,6 +279,7 @@ export function createCore(plot, o) {
       const zone = zoneOf(x, y, G);
       plot.classList.toggle('on-price', zone === 'price');
       plot.classList.toggle('on-time', zone === 'time');
+      plot.classList.toggle('on-divider', dividerAt(x, y, G) >= 0);
       const cur = zone === 'pane' ? hooks.hover?.(x, y, G, e) : null;
       plot.classList.toggle('is-hot', cur === 'pointer');
       plot.dataset.cursor = cur || '';
@@ -273,17 +288,18 @@ export function createCore(plot, o) {
   });
   const up = e => {
     const { x, y } = local(e);
+    if (divider) { const dv = divider; divider = null; if (dv.r != null) dv.q.resize?.(dv.r, true); draw(); return; }
     if (grab) { const g = grab; grab = null; g.up?.(x, y, geom(), e); draw(); return; }
     if (drag && !drag.moved && drag.claim?.click) drag.claim.click(x, y, geom(), e);
     drag = null; plot.classList.remove('is-panning');
     draw();
   };
   canvas.addEventListener('pointerup', up);
-  canvas.addEventListener('pointercancel', () => { grab?.cancel?.(); grab = null; drag = null; plot.classList.remove('is-panning'); draw(); });
+  canvas.addEventListener('pointercancel', () => { if (divider) { divider.q.resize?.(null, false); divider = null; } grab?.cancel?.(); grab = null; drag = null; plot.classList.remove('is-panning'); draw(); });
   canvas.addEventListener('pointerenter', () => { over = true; });
   canvas.addEventListener('pointerleave', () => {
     over = false;
-    if (!drag && !grab) { hover = null; plot.classList.remove('on-price', 'on-time', 'is-hot'); plot.dataset.cursor = ''; hooks.leave?.(); draw(); }
+    if (!drag && !grab && !divider) { hover = null; plot.classList.remove('on-price', 'on-time', 'on-divider', 'is-hot'); plot.dataset.cursor = ''; hooks.leave?.(); draw(); }
   });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
@@ -431,7 +447,7 @@ export function createCore(plot, o) {
 
     /* prices down the right: round steps, then the tags over them */
     const tags = (hooks.tags?.() || []).map(t => ({ ...t, fg: t.fg || C.labelInk }));
-    if (lastBar && S.scales.lastLabel) tags.push({ p: lastBar[4], label: '', bg: lastCol, fg: '#FFFFFF', last: true });
+    if (lastBar && S.scales.lastLabel) tags.push({ p: lastBar[4], label: '', bg: lastCol, fg: inkOn(lastCol), last: true });
     const tagH = fs + 7;
     const tagYs = spread(tags.map(t => Math.min(ph - tagH / 2, Math.max(tagH / 2, Y(t.p)))), tagH + 1, tagH / 2, ph - tagH / 2);
     g.font = font(); g.textBaseline = 'middle';
@@ -446,11 +462,8 @@ export function createCore(plot, o) {
       const y = tagYs[k];
       g.fillStyle = t.bg; roundRect(g, pw + 1, y - tagH / 2, aw - 2, tagH, 2); g.fill();
       g.fillStyle = t.fg;
-      if (t.label) { g.font = font(fs, 600); g.fillText(t.label, pw + 6, y + 0.5); }
       g.font = font();
-      g.textAlign = t.label ? 'right' : 'left';
-      g.fillText(fmt(t.p), t.label ? W - 6 : pw + 9, y + 0.5);
-      g.textAlign = 'left';
+      g.fillText(fmt(t.p), pw + 9, y + 0.5);
     });
 
     /* the time scale */
@@ -546,12 +559,21 @@ export function createCore(plot, o) {
       const yH = Math.round(Y(h) * k), yL = Math.round(Y(l) * k);
       const yO = Math.round(Y(o) * k), yC = Math.round(Y(c) * k);
       const top = Math.min(yO, yC), hgt = Math.max(1, Math.abs(yO - yC));
-      if (C.wick.on) { g.fillStyle = C.wick[side]; g.fillRect(cx - Math.floor(wickW / 2), yH, wickW, Math.max(1, yL - yH)); }
+      if (C.wick.on) {
+        g.fillStyle = C.wick[side];
+        const wx = cx - Math.floor(wickW / 2);
+        if (border && !C.body.on && hgt > 2 * border) { g.fillRect(wx, yH, wickW, Math.max(0, top - yH)); g.fillRect(wx, top + hgt, wickW, Math.max(0, yL - top - hgt)); }
+        else g.fillRect(wx, yH, wickW, Math.max(1, yL - yH));
+      }
       const left = cx - Math.floor(bodyW / 2);
       if (border) {
-        g.fillStyle = C.border[side]; g.fillRect(left, top, bodyW, hgt);
+        g.fillStyle = C.border[side];
+        if (!C.body.on && hgt > 2 * border) {
+          /* hollow: just the four sides, so the background stays behind it (no hole punched through) */
+          g.fillRect(left, top, bodyW, border); g.fillRect(left, top + hgt - border, bodyW, border);
+          g.fillRect(left, top, border, hgt); g.fillRect(left + bodyW - border, top, border, hgt);
+        } else g.fillRect(left, top, bodyW, hgt);
         if (C.body.on && hgt > 2 * border) { g.fillStyle = C.body[side]; g.fillRect(left + border, top + border, bodyW - 2 * border, hgt - 2 * border); }
-        else if (!C.body.on && hgt > 2 * border) g.clearRect(left + border, top + border, bodyW - 2 * border, hgt - 2 * border);
       } else if (C.body.on || C.border.on) {
         g.fillStyle = (C.body.on ? C.body : C.border)[side]; g.fillRect(left, top, bodyW, hgt);
       }
@@ -682,6 +704,19 @@ export function spread(ys, gap, top, bottom) {
 
 /** A colour only if it is opaque — glass themes make the insets see-through. */
 const solid = c => (/^#[0-9a-f]{6}$/i.test(c) ? c : null);
+
+/** Text that reads on a background: dark on light colours (a white candle), white on the rest. */
+export function inkOn(colour) {
+  const c = String(colour || '').trim();
+  let r, g, b, m;
+  if ((m = c.match(/^#([0-9a-f]{6})/i))) { const n = parseInt(m[1], 16); r = n >> 16; g = (n >> 8) & 255; b = n & 255; }
+  else if ((m = c.match(/^#([0-9a-f]{3})$/i))) [r, g, b] = m[1].split('').map(h => parseInt(h + h, 16));
+  else if ((m = c.match(/^rgba?\(([^)]+)\)$/))) [r, g, b] = m[1].split(',').map(Number);
+  else return '#FFFFFF';
+  const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return L > 0.4 ? '#131722' : '#FFFFFF';
+}
 
 export function withAlpha(colour, a) {
   const c = String(colour).trim();

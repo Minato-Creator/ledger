@@ -297,6 +297,9 @@ function render() {
   const arriving = wasSolo && !solo;
   wasSolo = solo;
 
+  /* the same page drawn again (a click, a filter, a row opened): every list stays scrolled where it was */
+  const scrolled = entered ? [] : scrollMarks(root);
+  const page = document.scrollingElement, pageY = entered ? 0 : page?.scrollTop || 0;
   clear(root);
   const main = el('div', { class: 'main' + (entered ? ' enter' : '') }, route());
   root.classList.toggle('is-solo', solo);
@@ -307,6 +310,9 @@ function render() {
     root.append(side, main);
   }
 
+  restoreScroll(root, scrolled);
+  if (page && pageY) page.scrollTop = pageY;
+
   /* Take the flag off once everything has played. Left on, it would animate
      anything inserted into the view later — an inline editor, a confirm box —
      which is exactly the twitchiness this gating exists to avoid. */
@@ -316,6 +322,26 @@ function render() {
   }
 }
 let enterTimer;
+
+/** Where each scrolled box is: by its place in the page (tags and positions, and its own first class). */
+const placeOf = (e, top) => {
+  const parts = [];
+  for (let n = e; n && n !== top; n = n.parentElement) parts.push(`${n.tagName}${n.classList[0] ? '.' + n.classList[0] : ''}:${Array.prototype.indexOf.call(n.parentElement?.children || [], n)}`);
+  return parts.reverse().join('>');
+};
+function scrollMarks(top) {
+  const out = [];
+  for (const e of top.querySelectorAll('*')) if (e.scrollTop > 0 || e.scrollLeft > 0) out.push({ at: placeOf(e, top), y: e.scrollTop, x: e.scrollLeft });
+  return out;
+}
+function restoreScroll(top, marks) {
+  if (!marks.length) return;
+  const byPlace = new Map(marks.map(m => [m.at, m]));
+  for (const e of top.querySelectorAll('*')) {
+    const m = byPlace.get(placeOf(e, top));
+    if (m) { e.scrollTop = m.y; e.scrollLeft = m.x; byPlace.delete(m.at); if (!byPlace.size) break; }
+  }
+}
 
 async function boot() {
   document.querySelectorAll('.gate').forEach(n => n.remove());

@@ -19,7 +19,7 @@
 import { el } from '../ui.js';
 import { swatch, closeColour } from './colour.js';
 import { closeMenus } from './menu.js';
-import { niceTicks, svgIcon } from './core.js';
+import { niceTicks, svgIcon, inkOn } from './core.js';
 
 export const RSI_DEFAULTS = Object.freeze({
   length: 14, source: 'close', maType: 'SMA', maLength: 14, bbMult: 2,
@@ -29,6 +29,7 @@ export const RSI_DEFAULTS = Object.freeze({
   fill: { on: true, color: 'rgba(126, 87, 194, 0.1)' },
   bb: { color: '#089981' },
   labels: true, values: true, hideOn: [],
+  height: 0.26,            // the pane's share of the chart — drag the line above it
 });
 export const SOURCES = [['close', 'Close'], ['open', 'Open'], ['high', 'High'], ['low', 'Low'], ['hl2', '(H + L)/2'], ['hlc3', '(H + L + C)/3'], ['ohlc4', '(O + H + L + C)/4']];
 export const MA_TYPES = ['None', 'SMA', 'SMA + Bollinger Bands', 'EMA', 'SMMA (RMA)', 'WMA'];
@@ -47,6 +48,7 @@ export function rsiSettings(raw) {
   out.maLength = Math.max(1, Math.min(500, Math.round(out.maLength)));
   if (!MA_TYPES.includes(out.maType)) out.maType = 'SMA';
   if (!SOURCES.some(([k]) => k === out.source)) out.source = 'close';
+  out.height = Math.max(0.06, Math.min(0.75, Number.isFinite(out.height) ? out.height : 0.26));
   return out;
 }
 
@@ -143,7 +145,10 @@ export function rsiPane(core, o) {
   const f2 = v => (v == null ? '—' : v.toFixed(2));
   const legend = el('div', { class: 'tv-plegend rsi-legend' });
   return {
-    key: 'rsi', ratio: 0.26, min: 70,
+    key: 'rsi', min: 36,
+    get ratio() { return o.settings().height; },
+    /* dragging the line above it: shown as it goes, kept when let go */
+    resize(r, keep) { if (r == null) { o.preview(null); return; } const d = { ...o.settings(), height: r }; if (keep) o.save(d); else o.preview(d); },
     hidden: () => o.settings().hideOn.includes(o.tf()),
     range(i0, i1) {
       const S = o.settings(), D = data();
@@ -187,8 +192,8 @@ export function rsiPane(core, o) {
       const S = o.settings(), D = data(), k = core.limit();
       if (!S.labels || k < 0) return [];
       const out = [];
-      if (S.rsi.on && D.rsi[k] != null) out.push({ p: D.rsi[k], bg: S.rsi.color });
-      if (S.ma.on && D.ma?.[k] != null) out.push({ p: D.ma[k], bg: S.ma.color, fg: '#131722' });
+      if (S.rsi.on && D.rsi[k] != null) out.push({ p: D.rsi[k], bg: S.rsi.color, fg: inkOn(S.rsi.color) });
+      if (S.ma.on && D.ma?.[k] != null) out.push({ p: D.ma[k], bg: S.ma.color, fg: inkOn(S.ma.color) });
       return out;
     },
     legend(i) {

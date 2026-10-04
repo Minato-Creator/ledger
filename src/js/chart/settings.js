@@ -23,7 +23,7 @@ export const DEFAULTS = Object.freeze({
   timezone: 'local',
   status: { symbol: true, ohlc: true, change: true },
   scales: { textSize: 12, lastLine: false, lastLabel: true },
-  trading: { lines: true, pnl: true },                       // Replay: positions and orders on the chart   // Minato: no dotted line through the chart
+  trading: { lines: true, pnl: true, arrows: true },                       // Replay: positions and orders on the chart   // Minato: no dotted line through the chart
   canvas: {
     bg: 'quire', bgColor: '#111312', bgColor2: '#1A1D1C',   // 'quire' | 'solid' | 'gradient'
     grid: { vert: false, horz: false, color: 'rgba(128, 128, 128, 0.12)' },   // Minato asked the grid gone

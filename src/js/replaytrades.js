@@ -16,7 +16,7 @@
      when they are saved (`rate`), otherwise in the quote currency.
 
    A trade: { id, side 'buy'|'sell', from 'tool'|'manual', openT, entry,
-     qty, sl, tp, initSl, riskAmt, closed, closeT, exit, reason
+     qty, sl, tp, initSl, riskAmt, riskTarget, closed, closeT, exit, reason
      'tp'|'sl'|'manual', pnl, r }
    ============================================================ */
 
@@ -59,14 +59,23 @@ export function openTrade(s, inst, { side, T, price, sl = null, tp = null, from 
   return t;
 }
 /** Set (or move) the stop. The first stop sizes the trade; after that the size stays. */
+/**
+ * Set the stop. While it is on the losing side of the entry the trade is
+ * sized (again) so that it risks exactly the setting — the first stop and
+ * every move after. The amount is fixed when the trade is first sized, so
+ * trades closing in between do not change it. Once sized, a stop moved to
+ * the entry or past it (break-even, locking in profit) keeps the size.
+ */
 export function setStop(s, inst, t, sl, rate = null) {
   t.sl = sl;
-  if (t.qty == null && sl != null) {
-    t.riskAmt = riskAmountOf(s);
-    t.qty = sizeFor(inst, t.entry, sl, t.riskAmt, rate);
-    t.initSl = sl;
-    t.riskAmt = t.qty * Math.abs(t.entry - sl) * usdPerPoint(inst, t.entry, rate);   // what it actually risks, after rounding
-  }
+  if (sl == null) return t;
+  const losing = t.side === 'buy' ? sl < t.entry : sl > t.entry;
+  if (t.qty != null && !losing) return t;
+  if (t.riskTarget == null) t.riskTarget = riskAmountOf(s);
+  const qty = sizeFor(inst, t.entry, sl, t.riskTarget, rate);
+  t.qty = qty;
+  t.initSl = sl;
+  t.riskAmt = qty * Math.abs(t.entry - sl) * usdPerPoint(inst, t.entry, rate);   // what it actually risks, after rounding
   return t;
 }
 export function closeTrade(inst, t, T, price, reason, rate = null) {
@@ -91,6 +100,57 @@ export function runTrades(inst, trades, rows, fromT, toT, rate = () => null) {
       const long = t.side === 'buy';
       if (long ? l <= t.sl : h >= t.sl) { closeTrade(inst, t, T, t.sl, 'sl', rate(T)); done.push(t); continue; }
       if (t.tp != null && (long ? h >= t.tp : l <= t.tp)) { closeTrade(inst, t, T, t.tp, 'tp', rate(T)); done.push(t); }
+    }
+  }
+  return done;
+}
+/**
+ * The 15-second ticks inside a one-minute candle — simulated, since only
+ * the minute is saved: open → low → high → close on a rising candle,
+ * open → high → low → close on a falling one (the usual way of filling a
+ * candle in). A minute's ticks are seen at r0−45, r0−30, r0−15 (the open,
+ * then each extreme) and at r0 the minute is whole, with its close.
+ */
+export const tickPath = r => (r[4] >= r[1] ? [r[1], r[3], r[2], r[4]] : [r[1], r[2], r[3], r[4]]);
+export const TICK_OFFSETS = [-45, -30, -15, 0];
+/**
+ * Move the open trades from moment M1 to M2 (either can be inside a
+ * minute, on a tick). A minute passed whole is filled as runTrades does
+ * (both in one candle → the stop); a minute passed only in part, tick by
+ * tick — each tick a straight move from the price before, which can reach
+ * the stop or the target, not both.
+ */
+export function runMoments(inst, trades, rows, M1, M2, rate = () => null) {
+  const done = [];
+  const open = trades.filter(t => !t.closed && t.qty && t.sl != null);
+  if (!open.length || !(M2 > M1)) return done;
+  const close = (t, m, p, why) => { closeTrade(inst, t, m, p, why, rate(m)); done.push(t); };
+  for (let i = lowerBound(rows, M1 + 1); i < rows.length && rows[i][0] - 45 <= M2; i++) {
+    const r = rows[i], r0 = r[0];
+    const ticks = TICK_OFFSETS.map(d => r0 + d), inside = ticks.map(m => m > M1 && m <= M2);
+    if (inside.every(Boolean)) {
+      const [, , h, l] = r;
+      for (const t of open) {
+        if (t.closed || r0 <= t.openT) continue;
+        const long = t.side === 'buy';
+        if (long ? l <= t.sl : h >= t.sl) { close(t, r0, t.sl, 'sl'); continue; }
+        if (t.tp != null && (long ? h >= t.tp : l <= t.tp)) close(t, r0, t.tp, 'tp');
+      }
+      continue;
+    }
+    const path = tickPath(r);
+    for (let k = 0; k < 4; k++) {
+      if (!inside[k]) continue;
+      const m = ticks[k], a = k ? path[k - 1] : (i > 0 ? rows[i - 1][4] : r[1]), b = path[k];
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      for (const t of open) {
+        if (t.closed || m <= t.openT) continue;
+        const long = t.side === 'buy';
+        const stop = long ? lo <= t.sl : hi >= t.sl, target = t.tp != null && (long ? hi >= t.tp : lo <= t.tp);
+        /* a straight move from inside the trade can only reach one of them */
+        if (stop) close(t, m, t.sl, 'sl');
+        else if (target) close(t, m, t.tp, 'tp');
+      }
     }
   }
   return done;

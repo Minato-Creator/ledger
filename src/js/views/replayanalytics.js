@@ -14,6 +14,8 @@
    • By day and By session (the Playbook's): R, trades and win rate.
    • On the right, the trade you pick — on its own chart with its position,
      entry, exit and the session's drawings; its numbers; and the list.
+   • What if (replaywhatif.js): the Stop loss and Risk : reward
+     simulators and Monte Carlo, on the session's saved prices.
    ============================================================ */
 import { el, svg, fitted } from '../ui.js';
 import * as cd from '../candles.js';
@@ -24,6 +26,7 @@ import { sessionFor } from '../calc.js';
 import { ticks, hoverLayer, tipLayer } from './chartkit.js';
 import { createCore, CHART_TFS } from '../chart/core.js';
 import { createDrawings } from '../chart/drawings.js';
+import { whatIf } from './replaywhatif.js';
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -146,6 +149,8 @@ export function replayAnalytics(store, nav, kind, id) {
       el('section', { class: 'card lab-chart ra-bysession' }, el('div', { class: 'lab-chart-head' }, el('h2', {}, 'By session'), el('span', { class: 'lab-sub' }, 'the Playbook’s, when it was opened')),
         fitted((w, h) => drawBars(A.bySession, w, h), 190))));
   body.append(el('div', { class: 'ra-main' }, left, right));
+  /* What if: the stop moved, the target moved, and Monte Carlo */
+  body.append(whatIf(A, inView));
 
   function paintSide() {
     const x = chosen, t = x.t, s = x.s;

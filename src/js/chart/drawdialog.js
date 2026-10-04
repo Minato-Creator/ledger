@@ -8,7 +8,10 @@ import { el } from '../ui.js';
 import { swatch, closeColour } from './colour.js';
 import { closeMenus } from './menu.js';
 import { offsetOf, wall } from './settings.js';
+import { withAlpha } from './core.js';
 
+/** Line thicknesses: from half a pixel (Minato found 1px too heavy). */
+export const WIDTHS = [0.5, 1, 2, 3, 4];
 const TFS = [[1, '1m'], [3, '3m'], [5, '5m'], [15, '15m'], [30, '30m'], [60, '1H'], [240, '4H'], [1440, 'D']];
 const NAMES = { trend: 'Trend line', rect: 'Rectangle', callout: 'Callout', long: 'Long position', short: 'Short position' };
 let lastTab = {};
@@ -62,16 +65,28 @@ export function openDrawingSettings(d, o) {
     },
     style() {
       const s = draft.style;
-      if (pos) return [
-        row('Profit zone', sw(s.profit, (dd, v) => { dd.style.profit = v; }, 'tv-s-profit')),
-        row('Stop zone', sw(s.stop, (dd, v) => { dd.style.stop = v; }, 'tv-s-stop')),
-        row('Lines', sw(s.line, (dd, v) => { dd.style.line = v; }, 'tv-s-line')),
-        row('Text', sw(s.textColor, (dd, v) => { dd.style.textColor = v; }, 'tv-s-text'),
+      if (pos) {
+        /* 'auto' = the candles' colours; picking a colour of its own unticks it */
+        const K = o.candles || { up: '#18AC65', down: '#F4624A' };
+        const auto = s.profit === 'auto' && s.stop === 'auto' && s.textColor === 'auto';
+        const box = el('input', { type: 'checkbox', checked: auto, onChange: e => change(dd => {
+          if (e.target.checked) Object.assign(dd.style, { profit: 'auto', stop: 'auto', textColor: 'auto' });
+          else Object.assign(dd.style, { profit: withAlpha(K.up, 0.2), stop: withAlpha(K.down, 0.2), textColor: '#FFFFFF' });
+        }) });
+        const own = (key, v) => dd => { dd.style[key] = v; box.checked = false; };
+        return [
+        row(el('label', { class: 'tv-check tv-s-auto' }, box, el('i'), el('span', {}, 'Candle colours'))),
+        row('Profit zone', sw(s.profit === 'auto' ? withAlpha(K.up, 0.2) : s.profit, (dd, v) => own('profit', v)(dd), 'tv-s-profit')),
+        row('Stop zone', sw(s.stop === 'auto' ? withAlpha(K.down, 0.2) : s.stop, (dd, v) => own('stop', v)(dd), 'tv-s-stop')),
+        row('Lines', sw(s.line, (dd, v) => { dd.style.line = v; }, 'tv-s-line'),
+          select(WIDTHS.map(n => [n, `${n}px`]), s.lineWidth ?? 1, (dd, v) => { dd.style.lineWidth = +v; }, 'tv-s-lwidth')),
+        row('Text', sw(s.textColor === 'auto' ? '#FFFFFF' : s.textColor, (dd, v) => own('textColor', v)(dd), 'tv-s-text'),
           select([10, 11, 12, 13, 14].map(n => [n, String(n)]), s.size, (dd, v) => { dd.style.size = +v; }, 'tv-s-size')),
         row(check('Always show stats', s.always, (dd, v) => { dd.style.always = v; }, 'tv-s-always')),
       ];
+      }
       const line = [sw(s.color, (dd, v) => { dd.style.color = v; }, 'tv-s-color'),
-        select([1, 2, 3, 4].map(n => [n, `${n}px`]), s.width, (dd, v) => { dd.style.width = +v; }, 'tv-s-width'),
+        select(WIDTHS.map(n => [n, `${n}px`]), s.width, (dd, v) => { dd.style.width = +v; }, 'tv-s-width'),
         select([['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']], s.dash, (dd, v) => { dd.style.dash = v; }, 'tv-s-dash')];
       return [
         row(d.type === 'trend' ? 'Line' : 'Border', ...line),

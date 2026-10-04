@@ -35,12 +35,23 @@ import { TV_FONT } from '../chart/core.js';
 import * as rt from '../replaytrades.js';
 import { openMenu, closeMenus } from '../chart/menu.js';
 
+/* what one step moves: the chart's timeframe, or a set time (minutes; 0.25 = 15 seconds) */
+const TICK = 0.25;
+export const RS_STEPS = [['tf', 'Chart’s timeframe', 'TF'], [TICK, '15 seconds', '15s'], [1, '1 minute', '1m'], [5, '5 minutes', '5m'], [15, '15 minutes', '15m'],
+  [30, '30 minutes', '30m'], [60, '1 hour', '1h'], [240, '4 hours', '4h']];
 export const RS_SPEEDS = [['0.5×', 2000], ['1×', 1000], ['2×', 500], ['3×', 333], ['5×', 200], ['10×', 100]];
 const LOOKBACK = 31 * 86400;
-const BAR_KEY = 'quire:rsBar', TFBAR_KEY = 'quire:rsTfBar', PANEL_KEY = 'quire:rsPanel', SPEED_KEY = 'quire:rsSpeed';
+const BAR_KEY = 'quire:rsBar', TFBAR_KEY = 'quire:rsTfBar', PANEL_KEY = 'quire:rsPanel', SPEED_KEY = 'quire:rsSpeed', STEP_KEY = 'quire:rsStep';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const pad2 = n => String(n).padStart(2, '0');
+/** The moment as shown: inside a minute (15-second steps), with its seconds. */
+const momentText = (feed, T, secs) => {
+  const st = feed.stateAt(T);
+  if (!secs && st.p < 0) return whenText(T);
+  const t = st.p >= 0 ? feed.rows[st.p][0] + st.q * 15 : T + 45;
+  return `${whenText(t)}:${pad2(new Date(t * 1000).getSeconds())}`;
+};
 export const whenText = T => { const d = new Date(T * 1000); return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} · ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const remember = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* fine */ } };
 const recall = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } };
@@ -73,18 +84,36 @@ export function makeFeed(rows) {
     const i = rowIdx(end - 1);
     return i >= 0 ? rows[i][0] : null;
   };
-  /** Bar k as it was at T: built from its 1m candles up to T. */
-  const partial = (tf, k, T) => {
-    const b = barsOf(tf)[k];
-    let i = rowIdx(b[0] - 1) + 1;
-    const z = rowIdx(T);
-    if (i > z) return b;
-    let h = -Infinity, l = Infinity;
-    const o = rows[i][1];
-    for (; i <= z; i++) { if (rows[i][2] > h) h = rows[i][2]; if (rows[i][3] < l) l = rows[i][3]; }
-    return [b[0], o, h, l, rows[z][4]];
+  /**
+   * Where a moment is. On a minute's time the minute is whole (q 3); in the
+   * 45 seconds before it, that minute is forming, a 15-second tick at a
+   * time (p, q 0–2: its open, then each extreme — rt.tickPath).
+   */
+  const stateAt = M => {
+    const i = rowIdx(M), p = i + 1;
+    if ((i < 0 || rows[i][0] < M) && p < rows.length && rows[p][0] > M && rows[p][0] - M <= 45) return { i, p, q: 3 - Math.round((rows[p][0] - M) / 15) };
+    return { i, p: -1, q: 3 };
   };
-  return { rows, rowIdx, barsOf, barIdx, lastRowIn, partial };
+  /** The price at a moment, the minute a moment is in, and the last whole minute. */
+  const priceAt = M => { const st = stateAt(M); return st.p >= 0 ? rt.tickPath(rows[st.p])[st.q] : st.i >= 0 ? rows[st.i][4] : NaN; };
+  const timeOf = M => { const st = stateAt(M); return st.p >= 0 ? rows[st.p][0] : M; };
+  const doneAt = M => { const st = stateAt(M); return st.p >= 0 ? (st.i >= 0 ? rows[st.i][0] : M) : M; };
+  /** Bar k as it was at M: built from its 1m candles up to M, and the ticks of the minute forming. */
+  const partial = (tf, k, M) => {
+    const all = barsOf(tf), b = all[k];
+    const st = stateAt(M);
+    let i = rowIdx(b[0] - 1) + 1;
+    let o = null, h = -Infinity, l = Infinity, c = null;
+    for (; i <= st.i; i++) { if (o == null) o = rows[i][1]; if (rows[i][2] > h) h = rows[i][2]; if (rows[i][3] < l) l = rows[i][3]; c = rows[i][4]; }
+    if (st.p >= 0 && rows[st.p][0] >= b[0] && (k + 1 >= all.length || rows[st.p][0] < all[k + 1][0])) {
+      const path = rt.tickPath(rows[st.p]).slice(0, st.q + 1);
+      if (o == null) o = path[0];
+      for (const v of path) { if (v > h) h = v; if (v < l) l = v; }
+      c = path[st.q];
+    }
+    return o == null ? b : [b[0], o, h, l, c];
+  };
+  return { rows, rowIdx, barsOf, barIdx, lastRowIn, partial, stateAt, priceAt, timeOf, doneAt };
 }
 
 /* ---------- the session, opened ---------- */
@@ -142,7 +171,12 @@ function build(store, nav, s, feed, root, handle) {
   const first = feed.rows[feed.rowIdx(s.from - 1) + 1]?.[0] ?? s.from;
   const lastInPeriod = feed.rows[feed.rowIdx(s.to)]?.[0] ?? s.to;
   /* the moment: never before the first candle of the period, never after its last */
-  let T = Math.min(Math.max(feed.rows[feed.rowIdx(s.at)]?.[0] ?? first, first), lastInPeriod);
+  let T = (() => {
+    const st = feed.stateAt(s.at ?? first);
+    const M = st.p >= 0 ? s.at : feed.rows[st.i]?.[0] ?? first;
+    return Math.min(Math.max(M, first), lastInPeriod);
+  })();
+  let step = RS_STEPS.some(([v]) => v === recall(STEP_KEY, 'tf')) ? recall(STEP_KEY, 'tf') : 'tf';
   let playing = false, timer = null, speed = Math.max(0, RS_SPEEDS.findIndex(([k]) => k === recall(SPEED_KEY, '1×')));
   let active = 0, bare = false, saveTimer = null, finishedShown = false;
   const charts = [];
@@ -199,7 +233,7 @@ function build(store, nav, s, feed, root, handle) {
     const pane = el('div', { class: 'rs-pane', 'data-slot': slot });
     const plot = el('div', { class: 'tc-plot rs-plot' });
     pane.append(plot);
-    const c = { slot, tf, pane, plot, shown: null, k: -1 };
+    const c = { slot, tf, pane, plot, shown: null, k: -1, follow: true };
     c.shown = feed.barsOf(tf).slice();
     c.core = createCore(plot, {
       store, inst: s.inst, dp, symbol: pairName(s.inst), source: 'OANDA', bars: c.shown, tf, trading: true,
@@ -219,10 +253,11 @@ function build(store, nav, s, feed, root, handle) {
         menu: ctx => [...c.tr.menu(ctx), ...c.dr.menu(ctx)],
         onInterval: m => setTf(c, m),
         onReset: () => { show(c, true); },
+        onPan: () => { c.follow = false; },
       },
     });
     c.dr = createDrawings(c.core, plot, { store, dkey: rs.drawKey(s.id), inst: s.inst, dp, tf: () => c.tf, rows: () => feed.rows,
-      replayT: () => T + 59, account: () => ({ balance: s.balance, risk: s.riskMode === '%' ? s.risk : (s.risk / s.balance * 100) }) });
+      replayT: () => feed.doneAt(T) + 59, hideFuture: false, account: () => ({ balance: s.balance, risk: s.riskMode === '%' ? s.risk : (s.risk / s.balance * 100) }) });
     c.tr = trading.forChart(c);
     c.rsi = rsiFor(store, c.core, { tf: () => c.tf, plot, remove: () => setInd('rsi', false) });
     c.core.setAuto(true);
@@ -232,18 +267,18 @@ function build(store, nav, s, feed, root, handle) {
   /** Bring chart c's candles to the moment; keep the newest in view if it was. */
   function sync(c) {
     const b = feed.barsOf(c.tf);
-    const k = feed.barIdx(c.tf, T);
-    const G = c.core.geom();
-    const wasInView = c.k < 0 || G.xI(c.k) <= G.pw + G.spacing;
+    const k = feed.barIdx(c.tf, feed.timeOf(T));
+    const was = c.k;
     if (c.k >= 0 && c.k !== k && c.k < b.length) c.shown[c.k] = b[c.k];
     c.k = k;
     if (k >= 0) c.shown[k] = feed.partial(c.tf, k, T);
-    const G2 = c.core.geom();
-    if (wasInView && k >= 0 && G2.xI(k) > G2.pw - G2.spacing * 2) c.core.toLatest();
+    /* following (after a reset): the view moves with the candles; moved by hand, it stays put */
+    if (c.follow && was >= 0 && k !== was) { const v = c.core.getView(); if (Number.isFinite(v.spacing)) c.core.setView(v.start + (k - was), v.count); }
     c.core.draw();
   }
   /** Place the view on the moment: about 120 candles, the newest near the right. */
   function show(c, fit) {
+    c.follow = true;
     c.core.setView(c.k + 11 - 120, 120);
     if (fit) c.core.setAuto(true);
     c.core.draw();
@@ -300,26 +335,42 @@ function build(store, nav, s, feed, root, handle) {
     T = next;
     queuePanel();
     for (const c of charts) sync(c);
-    const w = bar.querySelector('.rs-when'); if (w) w.textContent = whenText(T);
+    const w = bar.querySelector('.rs-when'); if (w) w.textContent = momentText(feed, T, step === TICK);
     queueSave();
     if (T >= lastInPeriod) finish();
     return true;
   }
+  /* a step: the chart's timeframe, or a set one — 15 seconds (ticks inside the minute) up to 4 hours */
+  const stepTf = () => (step === 'tf' ? tfNow() : step);
   function stepForward() {
-    const tf = tfNow(), k = feed.barIdx(tf, T);
+    if (step === TICK) {
+      const st = feed.stateAt(T), rows = feed.rows;
+      if (st.p >= 0) return moveTo(st.q < 2 ? T + 15 : rows[st.p][0]);
+      const n = st.i + 1;
+      return n >= rows.length || rows[n][0] > lastInPeriod ? (finish(), false) : moveTo(rows[n][0] - 45);
+    }
+    const tf = stepTf(), k = feed.barIdx(tf, feed.timeOf(T));
     const endK = feed.lastRowIn(tf, k);
     if (endK != null && T < endK) return moveTo(endK);
     const nk = feed.lastRowIn(tf, k + 1);
     return nk == null ? (finish(), false) : moveTo(nk);
   }
   function stepBack() {
-    const tf = tfNow(), k = feed.barIdx(tf, T);
-    if (k <= 0) return false;
-    const pk = feed.lastRowIn(tf, k - 1);
-    if (pk == null) return false;
+    let pk;
+    if (step === TICK) {
+      const st = feed.stateAt(T), rows = feed.rows;
+      pk = st.p >= 0 ? (st.q > 0 ? T - 15 : st.i >= 0 ? rows[st.i][0] : null) : st.i >= 0 ? rows[st.i][0] - 15 : null;
+      if (pk == null || pk < first) return false;
+    } else {
+      const tf = stepTf(), k = feed.barIdx(tf, feed.timeOf(T));
+      if (k <= 0) return false;
+      pk = feed.lastRowIn(tf, k - 1);
+      if (pk == null) return false;
+    }
     trading.beforeBack(pk, () => moveTo(pk));
     return true;
   }
+  function setStep(v) { step = v; remember(STEP_KEY, v); paintBar(); }
   function setPlaying(on) {
     if (on && T >= lastInPeriod) { finish(); return; }
     if (on && trading.blocked()) return;
@@ -382,17 +433,22 @@ function build(store, nav, s, feed, root, handle) {
     const sp = RS_SPEEDS[speed][0];
     bar.replaceChildren(
       grip(bar, BAR_KEY),
-      el('button', { class: 'rs-rb rs-back', title: 'One candle back (←)', onClick: () => { setPlaying(false); stepBack(); } }, svgIcon(ICON.back, 16)),
+      el('button', { class: 'rs-rb rs-back', title: 'One step back (←)', onClick: () => { setPlaying(false); stepBack(); } }, svgIcon(ICON.back, 16)),
       el('button', { class: 'rs-rb rs-pp' + (playing ? ' is-playing' : ''), title: playing ? 'Pause (space)' : 'Play (space)', onClick: () => setPlaying(!playing) }, svgIcon(playing ? ICON.pause : ICON.play, 16)),
-      el('button', { class: 'rs-rb rs-fwd', title: 'One candle forward (→)', onClick: () => { setPlaying(false); stepForward(); } }, svgIcon(ICON.fwd, 16)),
+      el('button', { class: 'rs-rb rs-fwd', title: 'One step forward (→)', onClick: () => { setPlaying(false); stepForward(); } }, svgIcon(ICON.fwd, 16)),
       el('span', { class: 'rs-sep' }),
-      el('button', { class: 'rs-rt rs-speed', title: 'Speed — candles a second', onClick: e => {
+      el('button', { class: 'rs-rt rs-step', title: 'Each step — the chart’s timeframe, or a set time', onClick: e => {
         const r = e.currentTarget.getBoundingClientRect();
-        openMenu([{ head: 'Candles a second' }, ...RS_SPEEDS.map(([k], i) => ({ label: k, checked: i === speed, act: () => setSpeed(i) }))], r.left, r.top - 8 - 36 * (RS_SPEEDS.length + 1));
+        openMenu([{ head: 'Each step' }, ...RS_STEPS.map(([v, label], i) => ({ label, checked: v === step, cls: 'rs-st-' + String(v).replace('.', ''), act: () => setStep(v) }))
+          .flatMap((x, i) => (i === 1 ? [{ sep: true }, x] : [x]))], r.left, r.top - 8 - 36 * (RS_STEPS.length + 1) - 9);
+      } }, RS_STEPS.find(([v]) => v === step)[2]),
+      el('button', { class: 'rs-rt rs-speed', title: 'Speed — steps a second', onClick: e => {
+        const r = e.currentTarget.getBoundingClientRect();
+        openMenu([{ head: 'Steps a second' }, ...RS_SPEEDS.map(([k], i) => ({ label: k, checked: i === speed, act: () => setSpeed(i) }))], r.left, r.top - 8 - 36 * (RS_SPEEDS.length + 1));
       } }, sp),
       el('button', { class: 'rs-rt rs-jump', onClick: e => jumpMenu(e.currentTarget) }, 'Jump to', el('i', { class: 'rs-caret' })),
       el('span', { class: 'rs-sep' }),
-      el('span', { class: 'rs-when' }, whenText(T)));
+      el('span', { class: 'rs-when' }, momentText(feed, T, step === TICK)));
     place(bar, recall(BAR_KEY, { x: 0.5, y: 0.86 }), true);
   }
   /* a grip that moves its bar over the charts; where it ends up is kept on this computer */
@@ -499,6 +555,8 @@ function build(store, nav, s, feed, root, handle) {
       return;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && charts[active]?.dr.key(e)) return;
+    /* Ctrl+Z / Ctrl+Y undo and redo the drawings, Ctrl+C / Ctrl+V copy and paste one */
+    if ((e.ctrlKey || e.metaKey) && charts[active]?.dr.key(e)) return;
     if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); setPlaying(false); stepForward(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); setPlaying(false); stepBack(); }
@@ -525,9 +583,9 @@ function build(store, nav, s, feed, root, handle) {
   ro.observe(stage);
 
   root.__session = {
-    get T() { return T; }, get playing() { return playing; }, get speed() { return RS_SPEEDS[speed][0]; }, get charts() { return charts.map(c => ({ tf: c.tf, k: c.k, bars: c.shown.length, last: c.shown[c.k], groups: c.groups || [], rsi: c.rsi.values(), areas: c.core.areas() })); }, get ind() { return { ...s.ind }; },
+    get T() { return T; }, get playing() { return playing; }, get speed() { return RS_SPEEDS[speed][0]; }, get step() { return step; }, setStep, price: () => feed.priceAt(T), get charts() { return charts.map(c => ({ tf: c.tf, k: c.k, bars: c.shown.length, last: c.shown[c.k], groups: c.groups || [], rsi: c.rsi.values(), areas: c.core.areas() })); }, get ind() { return { ...s.ind }; },
     get active() { return active; }, trading, trades: () => structuredClone(s.trades || []), get bare() { return bare; }, get panel() { return panelH; }, feed, first, last: lastInPeriod,
-    core: i => charts[i ?? active].core, dr: i => charts[i ?? active].dr,
+    core: i => charts[i ?? active].core, dr: i => charts[i ?? active].dr, marks: i => charts[i ?? active].tr.marks(),
     stepForward, stepBack, setPlaying, moveTo, jumpTo, setTf: (m, i) => setTf(charts[i ?? active], m), setLayout,
   };
   return () => {

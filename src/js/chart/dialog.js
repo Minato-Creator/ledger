@@ -100,6 +100,7 @@ export function openChartSettings(store, { tab, trading = false } = {}) {
         section('Positions and orders'),
         row(check('Show the lines on the chart', t.lines, (d, v) => { d.trading.lines = v; }, 'tv-tr-lines')),
         row(check('Profit and loss on the lines', t.pnl, (d, v) => { d.trading.pnl = v; }, 'tv-tr-pnl')),
+        row(check('Execution arrows — buys under the candle, sells over it', t.arrows, (d, v) => { d.trading.arrows = v; }, 'tv-tr-arrows')),
         el('p', { class: 'tv-note' }, 'Replay only — mid prices, no spread; a candle that reaches the stop and the target is a loss.'),
       ];
     },

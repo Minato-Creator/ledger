@@ -3476,13 +3476,14 @@ html.rs-open, html.rs-open body { overflow:hidden; }
 .rt-cl { position:absolute; display:flex; align-items:stretch; height:22px; border-radius:3px; overflow:hidden; pointer-events:auto;
          background:var(--card); box-shadow:0 0 0 1px var(--inset-2), 0 2px 8px rgba(0,0,0,.35); font:400 11px var(--mono); user-select:none; }
 .rt-cl[hidden] { display:none; }
+.rt-cl { z-index:5; }
 .rt-cl.is-tp, .rt-cl.is-sl { cursor:ns-resize; }
 .rt-cl > * { display:flex; align-items:center; padding:0 7px; white-space:nowrap; }
 .rt-qty { color:#fff; background:#2962FF; }
 .rt-qty.is-tp { background:var(--profit); }
 .rt-qty.is-sl { background:var(--loss); }
 .rt-pnl { color:var(--ink-2); }
-.rt-pnl.is-up { color:var(--profit); } .rt-pnl.is-down { color:var(--loss); }
+.rt-pnl.is-up { color:#fff; background:var(--profit); } .rt-pnl.is-down { color:#fff; background:var(--loss); }
 .rt-x { color:var(--ink-3); border-left:1px solid var(--inset-2); font-size:14px; cursor:pointer; }
 .rt-x:hover { color:var(--ink); background:var(--inset); }
 .rt-off { color:var(--ink-2); border-right:1px solid var(--inset-2); cursor:ns-resize; touch-action:none; }
@@ -3560,3 +3561,52 @@ button.ra-li:hover { background:var(--inset); }
 .tv-pbtn { width:20px; height:20px; border-radius:4px; display:flex; align-items:center; justify-content:center; color:var(--ink-3); font-size:14px; }
 .tv-pbtn:hover { background:var(--inset); color:var(--ink); }
 .rs-ind { padding-left:8px; }
+/* the strong magnet: a heavier icon */
+.tv-lb[data-tool="magnet"].is-strong.is-on svg { stroke-width:2.2; }
+.tc-plot.on-divider .tc-canvas { cursor:row-resize; }
+/* Replay session dialogs (go back before a trade, finished, jump to a date): in the middle of the page */
+.rs-modal-wrap { position:fixed; inset:0; z-index:1200; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; }
+.rs-modal { display:flex; flex-direction:column; gap:14px; padding:26px 28px; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+.rs-modal h2 { margin:0; }
+.rs-modal p { margin:0; }
+.rs-modal-row { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; flex-wrap:wrap; }
+/* the review's next chart, drawn out of sight until it is ready, then swapped in */
+.rv-tchart { position:relative; }
+.rv-tchart > .rv-incoming { position:absolute; left:0; right:0; top:0; visibility:hidden; pointer-events:none; }
+.tc-plot.is-loading.is-wait > span { opacity:0; }
+/* Replay analytics → What if: Stop loss, Risk : reward, Monte Carlo */
+.ra-whatif { flex:none; display:flex; flex-direction:column; gap:14px; padding:20px 22px; }
+.ra-wi-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.ra-wi-body > div { display:flex; flex-direction:column; gap:14px; }
+.ra-wi-tiles { grid-template-columns:repeat(5, minmax(0, 1fr)); }
+.ra-wi-tile.is-up .rp-tv { color:var(--profit); } .ra-wi-tile.is-down .rp-tv { color:var(--loss); }
+.ra-wi-note { margin:0; font:400 11px var(--mono); color:var(--ink-4); }
+.ra-wi-steps { flex-wrap:wrap; align-self:flex-start; }
+.ra-wi-steps button.is-best:not(.is-on) { color:var(--profit); }
+.ra-sweep-line { stroke:var(--ink-3); stroke-width:1.5; }
+.ra-sweep-dot { fill:var(--ink-3); stroke:var(--card); stroke-width:2; }
+.ra-sweep-dot.is-up { fill:var(--profit); } .ra-sweep-dot.is-down { fill:var(--loss); }
+.ra-sweep-dot.is-on { stroke:var(--ink); }
+.ra-rr { display:flex; flex-direction:column; gap:3px; }
+.ra-rr-row { display:grid; grid-template-columns:90px repeat(7, minmax(0, 1fr)); gap:3px; }
+.ra-rr-row.is-head span { font:400 9.5px var(--mono); letter-spacing:.06em; color:var(--ink-4); text-align:center; padding:2px 0; }
+.ra-rr-lab { font:400 10.5px var(--mono); color:var(--ink-3); display:flex; align-items:center; text-align:left !important; }
+.ra-rr-cell { height:34px; border-radius:4px; font:500 11.5px var(--mono); color:var(--ink); border:1px solid transparent; cursor:pointer; }
+.ra-rr-cell:hover { border-color:var(--ink-4); }
+.ra-rr-cell.is-best { box-shadow:inset 0 0 0 1px var(--profit); }
+.ra-rr-cell.is-on { border-color:var(--ink); }
+.ra-mc-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; flex-direction:row !important; }
+.ra-fan-90 { fill:rgba(var(--profit-rgb), .08); }
+.ra-fan-50 { fill:rgba(var(--profit-rgb), .16); }
+.ra-fan-run { fill:none; stroke:var(--ink-5); stroke-width:1; opacity:.5; }
+.ra-fan-median { stroke:var(--profit); stroke-width:2; }
+.ra-fan-mine { fill:none; stroke:var(--ink); stroke-width:1.5; stroke-dasharray:3 3; }
+.ra-fan { position:relative; }
+.ra-fan-key { position:absolute; left:60px; top:6px; display:flex; gap:14px; font:400 10px var(--mono); color:var(--ink-3); }
+.ra-fan-key span { display:flex; align-items:center; gap:6px; }
+.ra-fan-key i { width:14px; height:8px; border-radius:2px; display:inline-block; }
+.ra-fan-key i.is-median { height:2px; background:var(--profit); }
+.ra-fan-key i.is-50 { background:rgba(var(--profit-rgb), .3); }
+.ra-fan-key i.is-90 { background:rgba(var(--profit-rgb), .14); }
+.ra-fan-key i.is-mine { height:0; border-top:1.5px dashed var(--ink); }
+@media (max-width:1100px) { .ra-wi-tiles { grid-template-columns:repeat(2, minmax(0, 1fr)); } }

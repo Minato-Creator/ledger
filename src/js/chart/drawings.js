@@ -24,8 +24,8 @@
 import { el, toast } from '../ui.js';
 import { openMenu } from './menu.js';
 import { swatch, closeColour } from './colour.js';
-import { svgIcon, roundRect, withAlpha } from './core.js';
-import { openDrawingSettings } from './drawdialog.js';
+import { svgIcon, roundRect, withAlpha, inkOn } from './core.js';
+import { openDrawingSettings, WIDTHS } from './drawdialog.js';
 
 /* ---------- the tools ---------- */
 export const ICONS = {
@@ -62,7 +62,8 @@ export function defaultsOf(type) {
     case 'rect': return { style: { color: '#9C27B0', width: 1, dash: 'solid', fill: 'rgba(156, 39, 176, 0.2)', extL: false, extR: false, middle: false }, text: TEXT('#9C27B0', { v: 'top', h: 'left' }) };
     case 'callout': return { style: { color: '#2962FF', width: 1, dash: 'solid', fill: 'rgba(41, 98, 255, 0.85)' }, text: TEXT('#FFFFFF', { value: 'Text', v: 'middle', h: 'left' }) };
     case 'long':
-    case 'short': return { style: { profit: 'rgba(8, 153, 129, 0.2)', stop: 'rgba(242, 54, 69, 0.2)', line: '#787878', textColor: '#FFFFFF', size: 11, always: false }, text: TEXT('#FFFFFF') };
+    /* 'auto': the zones and labels take the candles' colours, the text whatever reads on them */
+    case 'short': return { style: { profit: 'auto', stop: 'auto', line: '#787878', lineWidth: 1, textColor: 'auto', size: 11, always: false }, text: TEXT('#FFFFFF') };
     default: return { style: {}, text: TEXT('#FFFFFF') };
   }
 }
@@ -78,9 +79,18 @@ export function normalize(raw) {
       text: { ...d.text, value: raw.label || '', color: LEGACY_GREY, size: 11 }, hideOn: [], locked: false, at: raw.at };
   }
   const d = defaultsOf(raw.type);
-  return { ...raw, style: { ...d.style, ...(raw.style || {}) }, text: { ...d.text, ...(raw.text || {}) },
+  const style = { ...d.style, ...(raw.style || {}) };
+  if (raw.type === 'long' || raw.type === 'short') {
+    /* the old fixed defaults become the candles' colours */
+    if (style.profit === 'rgba(8, 153, 129, 0.2)') style.profit = 'auto';
+    if (style.stop === 'rgba(242, 54, 69, 0.2)') style.stop = 'auto';
+    if (style.textColor === '#FFFFFF') style.textColor = 'auto';
+  }
+  return { ...raw, style, text: { ...d.text, ...(raw.text || {}) },
     hideOn: Array.isArray(raw.hideOn) ? raw.hideOn : [], locked: !!raw.locked };
 }
+/** What Ctrl+C took: shared by every chart, so a drawing can be pasted on another one. */
+let clip = null;
 const serialize = d => { const { legacy, ...rest } = d; return structuredClone(rest); };
 
 /* ---------- the position tool's numbers ---------- */
@@ -129,7 +139,7 @@ export function positionOutcome(rows, d, until = Infinity) {
 /**
  * @param core   the chart (chart/core.js)
  * @param plot   its element
- * @param o      { store, dkey, inst, dp, tf(), rows(), replayT(), account() }
+ * @param o      { store, dkey, inst, dp, tf(), rows(), replayT(), hideFuture (default true), account() }
  */
 export function createDrawings(core, plot, o) {
   const store = o.store;
@@ -149,14 +159,46 @@ export function createDrawings(core, plot, o) {
   const byId = id => (live && live.id === id ? live : list().find(d => d.id === id));
   const tick = 10 ** -o.dp;
 
+  /* ---------- undo / redo (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z): every change, as it was before and after ---------- */
+  const undos = [], redos = [];
+  const stored = id => { const r = store.drawingsFor(o.dkey).find(x => x.id === id); return r ? structuredClone(r) : null; };
+  function record(ops) { if (!ops.length) return; undos.push(ops); if (undos.length > 100) undos.shift(); redos.length = 0; }
+  async function apply(ops, way) {
+    for (const op of way === 'undo' ? [...ops].reverse() : ops) {
+      const x = way === 'undo' ? op.before : op.after;
+      if (x) await store.putDrawing(o.dkey, structuredClone(x)); else { await store.dropDrawing(o.dkey, op.id); if (sel === op.id) select(null); }
+    }
+    core.draw(); paintFtb();
+  }
+  async function undo() { const ops = undos.pop(); if (!ops) return false; redos.push(ops); await apply(ops, 'undo'); return true; }
+  async function redo() { const ops = redos.pop(); if (!ops) return false; undos.push(ops); await apply(ops, 'redo'); return true; }
+
   async function save(d) {
-    try { await store.putDrawing(o.dkey, serialize(d)); } catch (e) { toast('Could not save the drawing: ' + (e.message || e), 'bad'); }
+    const after = serialize(d), before = stored(d.id);
+    try { await store.putDrawing(o.dkey, after); record([{ id: d.id, before, after: structuredClone(after) }]); } catch (e) { toast('Could not save the drawing: ' + (e.message || e), 'bad'); }
     core.draw();
   }
   async function drop(id) {
+    const before = stored(id);
     await store.dropDrawing(o.dkey, id);
+    if (before) record([{ id, before, after: null }]);
     if (sel === id) select(null);
     core.draw();
+  }
+  async function dropAll() {
+    const all = store.drawingsFor(o.dkey).map(r => structuredClone(r));
+    for (const d of all) await store.dropDrawing(o.dkey, d.id);
+    record(all.map(d => ({ id: d.id, before: d, after: null })));
+    select(null); core.draw(); toast('Drawings removed');
+  }
+  /* ---------- copy and paste (Ctrl+C, Ctrl+V): a copy in the same place, selected ---------- */
+  function copy() { const d = sel && byId(sel); if (!d) return false; clip = serialize(d); return true; }
+  async function paste() {
+    if (!clip) return false;
+    const d = { ...structuredClone(clip), id: 'dr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString(), locked: false };
+    await save(d);
+    select(d.id);
+    return true;
   }
   /** Change a drawing; the style it ends up with is what the next one of its kind starts from. */
   async function update(d, patch = {}) {
@@ -176,7 +218,8 @@ export function createDrawings(core, plot, o) {
     let p = G.P(y);
     const bars = core.bars;
     if (magnet && i >= 0 && i < bars.length) {
-      let best = 10;
+      /* weak: only within 10px of the open, high, low or close; strong: always the nearest of them */
+      let best = tools().magnetMode === 'strong' ? Infinity : 10;
       for (const v of bars[i].slice(1)) { const dd = Math.abs(G.Y(v) - y); if (dd < best) { best = dd; p = v; } }
     }
     return { t, p: +p.toFixed(o.dp + 2) };
@@ -194,12 +237,14 @@ export function createDrawings(core, plot, o) {
       ...TOOLS.map(([k, name]) => btn(k, name, () => setTool(tool === k ? null : k),
         { onContextmenu: e => { e.preventDefault(); favMenu(k, e.clientX, e.clientY); } })),
       el('div', { class: 'tv-lsep' }),
-      btn('magnet', 'Magnet — snaps to a candle’s open, high, low or close when near', () => { t.magnet = !t.magnet; saveTools(); paintBar(); }),
+      btn('magnet', `${t.magnetMode === 'strong' ? 'Strong' : 'Weak'} magnet — snaps to a candle’s open, high, low or close${t.magnetMode === 'strong' ? '' : ' when near'} (right-click: weak or strong)`,
+        () => { t.magnet = !t.magnet; saveTools(); paintBar(); }, { onContextmenu: e => { e.preventDefault(); magnetMenu(e.clientX, e.clientY); } }),
       btn(hidden ? 'eyeOff' : 'eye', hidden ? 'Show all drawings' : 'Hide all drawings', () => setHidden(!hidden)),
       btn('trash', 'Remove drawings', e => removeAllMenu(e.currentTarget)));
     for (const b of bar.querySelectorAll('.tv-lb')) {
       const k = b.dataset.tool;
       b.classList.toggle('is-on', k === 'cursor' ? !tool : k === 'magnet' ? !!t.magnet : k === 'eyeOff' ? true : k === tool);
+      if (k === 'magnet') b.classList.toggle('is-strong', t.magnetMode === 'strong');
       if (t.favourites.includes(k)) b.classList.add('is-fav');
     }
     paintFav();
@@ -212,6 +257,12 @@ export function createDrawings(core, plot, o) {
     o.onTool?.(k);
   }
   function setHidden(on) { hidden = on; if (on) select(null); paintBar(); core.draw(); }
+  function magnetMenu(x, y) {
+    const t = tools();
+    const pick = m => () => { t.magnet = true; t.magnetMode = m; saveTools(); paintBar(); };
+    openMenu([{ label: 'Weak magnet', hint: 'when near', checked: t.magnet && t.magnetMode !== 'strong', cls: 'tv-m-weak', act: pick('weak') },
+      { label: 'Strong magnet', hint: 'always', checked: t.magnet && t.magnetMode === 'strong', cls: 'tv-m-strong', act: pick('strong') }], x, y);
+  }
   function favMenu(k, x, y) {
     const t = tools(), on = t.favourites.includes(k);
     openMenu([{ label: on ? 'Remove from favorites' : 'Add to favorites', icon: ICONS.star, cls: 'tv-m-fav',
@@ -222,7 +273,7 @@ export function createDrawings(core, plot, o) {
     const r = anchor.getBoundingClientRect();
     if (!n) return openMenu([{ head: 'No drawings on this chart' }], r.right + 6, r.top);
     openMenu([{ head: `Remove ${n === 1 ? 'the drawing' : `all ${n} drawings`} on this chart?` },
-      { label: 'Remove', cls: 'tv-m-remove-yes', act: async () => { for (const d of list()) await store.dropDrawing(o.dkey, d.id); select(null); core.draw(); toast('Drawings removed'); } },
+      { label: 'Remove', cls: 'tv-m-remove-yes', act: () => dropAll() },
       { label: 'Cancel', cls: 'tv-m-remove-no' }], r.right + 6, r.top);
   }
 
@@ -274,7 +325,7 @@ export function createDrawings(core, plot, o) {
     const lineMenu = (e, what) => {
       const r = e.currentTarget.getBoundingClientRect();
       const items = what === 'width'
-        ? [1, 2, 3, 4].map(w => ({ label: `${w}px`, checked: d.style.width === w, act: () => update(d, { style: { width: w } }) }))
+        ? WIDTHS.map(w => ({ label: `${w}px`, checked: d.style.width === w, act: () => update(d, { style: { width: w } }) }))
         : [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']].map(([v, n]) => ({ label: n, checked: d.style.dash === v, act: () => update(d, { style: { dash: v } }) }));
       openMenu(items, r.left, r.bottom + 4, { cls: 'tv-ftb-menu' });
     };
@@ -284,7 +335,7 @@ export function createDrawings(core, plot, o) {
       pos ? null : swatch(d.style.color, v => update(byId(d.id), { style: { color: v } }), { cls: 'tv-f-color', title: 'Line colour' }),
       d.type === 'rect' || d.type === 'callout' ? swatch(d.style.fill, v => update(byId(d.id), { style: { fill: v } }), { cls: 'tv-f-fill', title: 'Background' }) : null,
       pos ? null : ib('text', 'Text', () => openSettings(d, 'text'), 'tv-f-text'),
-      pos ? null : el('button', { type: 'button', class: 'tv-fbtn tv-f-width', title: 'Thickness', onClick: e => lineMenu(e, 'width') }, el('i', { class: 'tv-wline', style: { height: d.style.width + 'px' } }), `${d.style.width}px`),
+      pos ? null : el('button', { type: 'button', class: 'tv-fbtn tv-f-width', title: 'Thickness', onClick: e => lineMenu(e, 'width') }, el('i', { class: 'tv-wline', style: { height: Math.max(1, d.style.width) + 'px', opacity: d.style.width < 1 ? 0.6 : 1 } }), `${d.style.width}px`),
       pos ? null : el('button', { type: 'button', class: 'tv-fbtn tv-f-dash', title: 'Line style', onClick: e => lineMenu(e, 'dash') }, el('i', { class: 'tv-dline is-' + d.style.dash })),
       ib('gear', 'Settings', () => openSettings(d), 'tv-f-settings'),
       ib('eye', 'Visibility on timeframes', () => openSettings(d, 'visibility'), 'tv-f-vis'),
@@ -332,7 +383,8 @@ export function createDrawings(core, plot, o) {
     input.focus();
   }
   function openSettings(d, tab) {
-    openDrawingSettings(d, { tab, inst: o.inst, dp: o.dp, tz: core.settings.timezone,
+    const P = core.palette();
+    openDrawingSettings(d, { tab, inst: o.inst, dp: o.dp, tz: core.settings.timezone, candles: { up: P.up, down: P.down },
       preview: draft => { live = draft; core.draw(); },
       done: async next => { live = null; if (next) await update(byId(d.id) || d, next); else core.draw(); paintFtb(); } });
   }
@@ -406,12 +458,14 @@ export function createDrawings(core, plot, o) {
     if (d0.locked) return { capture: true, up: () => {} };
     const i0 = G.iX(x), p0 = G.P(y);
     let moved = false;
-    return { capture: true,
+    /* moving a drawing: the plain crosshair pointer (TradingView), the dotted crosshair lines still across */
+    return { capture: true, cursor: 'crosshair',
       move: (mx, my, G2, e2) => {
         moved = true;
         live = reshape(d0, hit.handle, { i: G2.iX(mx) - i0, dp: G2.P(my) - p0 }, pointAt(mx, my, G2), e2.shiftKey);
+        live.__handle = hit.handle;
       },
-      up: async () => { if (moved && live) { const d = live; live = null; await update(d0, d); } live = null; core.draw(); },
+      up: async () => { if (moved && live) { const { __handle, ...d } = live; live = null; await update(d0, d); } live = null; core.draw(); },
       cancel: () => { live = null; } };
   }
   const constrain = (type, a, b, shift) => (shift && type === 'trend' ? { t: b.t, p: a.p } : b);
@@ -486,7 +540,7 @@ export function createDrawings(core, plot, o) {
       { label: hidden ? 'Show drawings' : 'Hide drawings', icon: ICONS.eye, cls: 'tc-m-hide', act: () => setHidden(!hidden) },
       { label: `Remove ${n} drawing${n === 1 ? '' : 's'}`, icon: ICONS.trash, cls: 'tc-m-remove',
         act: () => openMenu([{ head: `Remove ${n === 1 ? 'the drawing' : `all ${n} drawings`} on this chart?` },
-          { label: 'Remove', cls: 'tc-m-remove-yes', act: async () => { for (const dd of list()) await store.dropDrawing(o.dkey, dd.id); select(null); core.draw(); toast('Drawings removed'); } },
+          { label: 'Remove', cls: 'tc-m-remove-yes', act: () => dropAll() },
           { label: 'Cancel', cls: 'tc-m-remove-no' }], plot.getBoundingClientRect().left + ctx.x, plot.getBoundingClientRect().top + ctx.y) });
     return items;
   }
@@ -498,6 +552,13 @@ export function createDrawings(core, plot, o) {
       return false;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); drop(sel); return true; }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return true; }
+      if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); return true; }
+      if (k === 'c' && sel) { e.preventDefault(); copy(); return true; }
+      if (k === 'v' && clip) { e.preventDefault(); paste(); return true; }
+    }
     return false;
   }
 
@@ -510,7 +571,8 @@ export function createDrawings(core, plot, o) {
     if (pending) all.push(make(pending.type, pending.a, pending.b));
     for (const d of all) {
       if (d.hideOn.includes(tf)) continue;
-      if (Math.min(...d.pts.map(p => p.t)) > until) continue;
+      /* the trade chart's replay keeps later drawings back; Replay sessions never do (a tool dragged past now stays) */
+      if (o.hideFuture !== false && d !== live && d.id !== sel && Math.min(...d.pts.map(p => p.t)) > until) continue;
       const lit = d.id === sel || d.id === hot || !d.at;
       g.save();
       try {
@@ -521,8 +583,23 @@ export function createDrawings(core, plot, o) {
       } finally { g.restore(); }
       if (d.id === sel) handles(g, C, shapes.get(d.id)?.handles || []);
     }
+    const gd = guide(C);
+    if (gd) {
+      const y = Math.round(G.Y(gd.p)) + 0.5;
+      g.save(); g.strokeStyle = gd.bg; g.lineWidth = 1; g.setLineDash([2, 2]);
+      g.beginPath(); g.moveTo(0, y); g.lineTo(G.pw, y); g.stroke(); g.restore();
+    }
   }
-  const dashOf = (s, w) => (s === 'dashed' ? [6 * Math.max(1, w * 0.7), 4 * Math.max(1, w * 0.7)] : s === 'dotted' ? [Math.max(1, w), 2.5 * Math.max(1, w)] : []);
+  /** While a position's target, stop or entry is dragged: a dotted line right across, and its price on the scale. */
+  function guide(C) {
+    const h = live?.__handle;
+    if (!h || !(live.type === 'long' || live.type === 'short') || !['tp', 'sl', 'entry'].includes(h)) return null;
+    const Z = zonesOf(live.style, C);
+    const p = h === 'tp' ? live.tp : h === 'sl' ? live.sl : live.pts[0].p;
+    const bg = h === 'tp' ? Z.win : h === 'sl' ? Z.lose : live.style.line;
+    return { p, bg, fg: inkOn(bg), label: '' };
+  }
+  const dashOf = (s, w) => (s === 'dashed' ? [6 * Math.max(1, w * 0.7), 4 * Math.max(1, w * 0.7)] : s === 'dotted' ? [Math.max(1, w), Math.max(2, 1.6 * w)] : []);
   const font = (C, t) => `${t.italic ? 'italic ' : ''}${t.bold ? 600 : 400} ${t.size}px ${C.font}`;
   function handles(g, C, hs) {
     for (const h of hs) {
@@ -552,15 +629,30 @@ export function createDrawings(core, plot, o) {
         if (left === 'a') { [xa, ya] = L; [xb, yb] = R; } else { [xb, yb] = L; [xa, ya] = R; }
       }
     }
-    g.strokeStyle = s.color; g.lineWidth = s.width + (lit ? 0.5 : 0); g.setLineDash(dashOf(s.dash, s.width)); g.lineCap = 'round';
+    /* text in the middle of the line: the line breaks around it (TradingView) — nothing painted behind it */
+    const t0 = d.text;
+    let gap = null;
+    if (t0.value && t0.v === 'middle') {
+      const [P, Q] = a.x <= b.x ? [a, b] : [b, a];
+      const ang = Math.atan2(Q.y - P.y, Q.x - P.x), fx = t0.h === 'left' ? 0 : t0.h === 'right' ? 1 : 0.5;
+      g.font = font(C, t0);
+      const w = g.measureText(t0.value).width, pad = t0.h === 'left' ? 4 : t0.h === 'right' ? -4 : 0;
+      const x0 = (t0.h === 'left' ? 0 : t0.h === 'right' ? -w : -w / 2) + pad - 4, x1 = x0 + w + 8, h2 = t0.size / 2 + 2;
+      const ox = P.x + (Q.x - P.x) * fx, oy = P.y + (Q.y - P.y) * fx, c = Math.cos(ang), sn = Math.sin(ang);
+      gap = [[x0, -h2], [x1, -h2], [x1, h2], [x0, h2]].map(([u, v]) => [ox + u * c - v * sn, oy + u * sn + v * c]);
+    }
+    g.save();
+    if (gap) { g.beginPath(); g.rect(-1e4, -1e4, 3e4, 3e4); g.moveTo(...gap[0]); for (const q of gap.slice(1)) g.lineTo(...q); g.closePath(); g.clip('evenodd'); }
+    g.strokeStyle = s.color; g.lineWidth = s.width + (lit ? 0.5 : 0); g.setLineDash(dashOf(s.dash, s.width)); g.lineCap = s.dash === 'solid' ? 'round' : 'butt';
     g.beginPath(); g.moveTo(xa, ya); g.lineTo(xb, yb); g.stroke(); g.setLineDash([]);
+    g.restore();
     if (s.middle) { g.fillStyle = s.color; g.beginPath(); g.arc((a.x + b.x) / 2, (a.y + b.y) / 2, Math.max(2.5, s.width + 1), 0, Math.PI * 2); g.fill(); }
     if (s.labels) {
       g.font = `400 10.5px ${C.font}`;
       for (const pt of [a, b]) {
         const p = G.P(pt.y), txt = core.fmt(p), w = g.measureText(txt).width + 8;
         g.fillStyle = s.color; roundRect(g, pt.x - w / 2, pt.y + 7, w, 15, 2); g.fill();
-        g.fillStyle = '#FFFFFF'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, pt.x, pt.y + 15);
+        g.fillStyle = inkOn(s.color); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, pt.x, pt.y + 15);
       }
     }
     /* the text runs along the line, left to right */
@@ -576,7 +668,6 @@ export function createDrawings(core, plot, o) {
       g.textBaseline = t.v === 'top' ? 'bottom' : t.v === 'bottom' ? 'top' : 'middle';
       const off = t.v === 'top' ? -(s.width / 2 + 3) : t.v === 'bottom' ? s.width / 2 + 3 : 0;
       const pad = t.h === 'left' ? 4 : t.h === 'right' ? -4 : 0;
-      if (t.v === 'middle') { const w = g.measureText(t.value).width; const x0 = t.h === 'left' ? 0 : t.h === 'right' ? -w : -w / 2; g.clearRect(x0 + pad - 3, -t.size / 2 - 1, w + 6, t.size + 2); }
       g.fillText(t.value, pad, off);
       g.restore();
     }
@@ -629,24 +720,29 @@ export function createDrawings(core, plot, o) {
     shapes.set(d.id, { hit: (x, y) => (x >= bx && x <= bx + w && y >= by && y <= by + h) || segDist(x, y, tip.x, tip.y, cx, cy) <= 5,
       handles: [{ key: 'a', x: tip.x, y: tip.y }, { key: 'b', x: bx, y: by + h / 2 }] });
   }
+  /** The position's colours: its own, or (auto) the candles'. */
+  const zonesOf = (s, C) => ({
+    profit: s.profit === 'auto' ? withAlpha(C.up, 0.2) : s.profit, stop: s.stop === 'auto' ? withAlpha(C.down, 0.2) : s.stop,
+    win: s.profit === 'auto' ? C.up : withAlpha(s.profit, 1), lose: s.stop === 'auto' ? C.down : withAlpha(s.stop, 1),
+  });
   function position(g, G, C, d, lit, until) {
     const N = positionNumbers(o.inst, d);
     const x0 = X(d.pts[0].t, G), x1 = Math.max(X(d.pts[1].t, G), x0 + 4);
     const ye = G.Y(N.entry), yt = G.Y(d.tp), ys = G.Y(d.sl);
-    const s = d.style;
-    g.fillStyle = s.profit; g.fillRect(x0, Math.min(ye, yt), x1 - x0, Math.abs(yt - ye));
-    g.fillStyle = s.stop; g.fillRect(x0, Math.min(ye, ys), x1 - x0, Math.abs(ys - ye));
+    const s = d.style, Z = zonesOf(s, C);
+    g.fillStyle = Z.profit; g.fillRect(x0, Math.min(ye, yt), x1 - x0, Math.abs(yt - ye));
+    g.fillStyle = Z.stop; g.fillRect(x0, Math.min(ye, ys), x1 - x0, Math.abs(ys - ye));
     /* what price did: the stretch from the entry to now (or to the stop / target) a shade deeper, a dotted line to it */
     const out = positionOutcome(o.rows(), d, until);
     if (out) {
       const xo = Math.min(x1, X(out.t, G)), yo = G.Y(out.p);
       const win = N.pnl(out.p) >= 0;
-      g.fillStyle = win ? s.profit : s.stop;
+      g.fillStyle = win ? Z.profit : Z.stop;
       g.fillRect(x0, Math.min(ye, yo), xo - x0, Math.abs(yo - ye));
-      g.strokeStyle = s.line; g.lineWidth = 1; g.setLineDash([2, 3]);
+      g.strokeStyle = s.line; g.lineWidth = s.lineWidth; g.setLineDash([2, 3]);
       g.beginPath(); g.moveTo(x0, ye); g.lineTo(xo, yo); g.stroke(); g.setLineDash([]);
     }
-    g.strokeStyle = s.line; g.lineWidth = 1;
+    g.strokeStyle = s.line; g.lineWidth = s.lineWidth;
     g.beginPath(); g.moveTo(x0, Math.round(ye) + 0.5); g.lineTo(x1, Math.round(ye) + 0.5); g.stroke();
     /* TradingView's small labels: target above, entry in the middle, stop below */
     if (lit || s.always) {
@@ -660,13 +756,13 @@ export function createDrawings(core, plot, o) {
         const w = Math.max(...lines.map(l => g.measureText(l).width)) + 12, h = lines.length * (s.size + 3) + 6;
         const lx = Math.max(2, Math.min(G.pw - w - 2, cx - w / 2)), ly = above ? y - h - 4 : y + 4;
         g.fillStyle = bg; roundRect(g, lx, ly, w, h, 3); g.fill();
-        g.fillStyle = s.textColor; g.textAlign = 'left'; g.textBaseline = 'top';
+        g.fillStyle = s.textColor === 'auto' ? inkOn(bg) : s.textColor; g.textAlign = 'left'; g.textBaseline = 'top';
         lines.forEach((l, k) => g.fillText(l, lx + 6, ly + 4 + k * (s.size + 3)));
       };
       const cx = (x0 + x1) / 2, up = N.long;
-      label([`Target: ${core.fmt(N.targetDist)} (${pct(N.targetDist)}%) ${ticks(N.targetDist)}, Amount: ${amt(N.targetAmt)}`], cx, up ? Math.min(yt, ye) : Math.max(yt, ye), '#089981', up);
-      label([`${out && out.state !== 'open' ? 'Closed' : 'Open'} P&L: ${amt(pnl)}, Qty: ${qty}`, `Risk/Reward Ratio: ${N.rr.toFixed(2)}`], cx, ye - (s.size * 2 + 12) / 2 - 4, pnl >= 0 ? '#089981' : '#F23645', false);
-      label([`Stop: ${core.fmt(N.stopDist)} (${pct(N.stopDist)}%) ${ticks(N.stopDist)}, Amount: ${amt(N.stopAmt)}`], cx, up ? Math.max(ys, ye) : Math.min(ys, ye), '#F23645', !up);
+      label([`Target: ${core.fmt(N.targetDist)} (${pct(N.targetDist)}%) ${ticks(N.targetDist)}, Amount: ${amt(N.targetAmt)}`], cx, up ? Math.min(yt, ye) : Math.max(yt, ye), Z.win, up);
+      label([`${out && out.state !== 'open' ? 'Closed' : 'Open'} P&L: ${amt(pnl)}, Qty: ${qty}`, `Risk/Reward Ratio: ${N.rr.toFixed(2)}`], cx, ye - (s.size * 2 + 12) / 2 - 4, pnl >= 0 ? Z.win : Z.lose, false);
+      label([`Stop: ${core.fmt(N.stopDist)} (${pct(N.stopDist)}%) ${ticks(N.stopDist)}, Amount: ${amt(N.stopAmt)}`], cx, up ? Math.max(ys, ye) : Math.min(ys, ye), Z.lose, !up);
     }
     const top = Math.min(yt, ys), bot = Math.max(yt, ys);
     shapes.set(d.id, { hit: (x, y) => x >= x0 - 3 && x <= x1 + 3 && y >= top - 3 && y <= bot + 3,
@@ -676,7 +772,9 @@ export function createDrawings(core, plot, o) {
   function tags() {
     if (hidden) return [];
     const out = [];
-    for (const d of list()) if (d.type === 'trend' && d.style.labels && !d.hideOn.includes(o.tf())) for (const pt of d.pts) out.push({ p: pt.p, label: '', bg: d.style.color });
+    for (const d of list()) if (d.type === 'trend' && d.style.labels && !d.hideOn.includes(o.tf())) for (const pt of d.pts) out.push({ p: pt.p, label: '', bg: d.style.color, fg: inkOn(d.style.color) });
+    const gd = guide(core.palette());
+    if (gd) out.push(gd);
     return out;
   }
 
@@ -684,7 +782,7 @@ export function createDrawings(core, plot, o) {
   new ResizeObserver(() => { paintFav(); if (!ftb.hidden) place(ftb, tools().ftbPos || { x: 0.3, y: 0.1 }); }).observe(plot);
 
   return {
-    bar, paint, claim, hover, dbl, menu, key, tags, setTool, setHidden, select, list,
+    bar, paint, claim, hover, dbl, menu, key, tags, setTool, setHidden, select, list, undo, redo,
     get tool() { return tool; }, get selected() { return sel; }, get hidden() { return hidden; }, get pending() { return !!pending; },
     leave: () => { if (hot) { hot = null; core.draw(); } },
     shapes: () => [...shapes.entries()].map(([id, s]) => ({ id, handles: s.handles })),

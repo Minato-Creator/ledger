@@ -51,9 +51,13 @@ export function tradeChart(store, nav, t, opts = {}) {
   const title = el('h3', {}, t.pair || 'Chart', sub);
   const headOnly = () => el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }));
 
+  /* ready: once it shows what it is going to show — a message, or the chart drawn */
+  let ready;
+  card.__ready = new Promise(r => { ready = r; });
   const message = (text, ...actions) => {
     card.classList.add('is-quiet');
     card.replaceChildren(headOnly(), el('div', { class: 'tc-msg' }, el('span', {}, text), ...actions));
+    ready();
   };
 
   async function start() {
@@ -62,8 +66,10 @@ export function tradeChart(store, nav, t, opts = {}) {
     if (!cred) return message('Add your OANDA key in Settings to see the chart here.',
       el('button', { class: 'tc-btn', onClick: () => nav.go('#/settings') }, 'Open Settings'));
     card.classList.remove('is-quiet');
-    card.replaceChildren(headOnly(), el('div', { class: 'tc-plot is-loading', style: { height: height + 'px' } },
-      el('span', {}, 'Getting the prices…')));
+    /* "Getting the prices…" only if it takes a while — prices from the vault come at once, and a flash of it is the glitch */
+    const wait = el('div', { class: 'tc-plot is-loading is-wait', style: { height: height + 'px' } }, el('span', {}, 'Getting the prices…'));
+    card.replaceChildren(headOnly(), wait);
+    setTimeout(() => wait.classList.remove('is-wait'), 400);
     let res;
     try { res = await cd.candlesFor(store, t, cred, now); }
     catch (e) {
@@ -72,6 +78,7 @@ export function tradeChart(store, nav, t, opts = {}) {
     if (!res.rows.length) return message('OANDA has no prices for this time — the market may have been closed.');
     card.classList.remove('is-quiet');
     chart(res);
+    requestAnimationFrame(() => requestAnimationFrame(ready));
   }
 
   /* ---------------- the chart itself ---------------- */
