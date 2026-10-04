@@ -61,6 +61,12 @@ export const isReviewed = t => !!t?.review?.what;
    ============================================================ */
 export const factsKey = t => [t.date, t.timeOpen, t.timeClose, t.entryPrice, t.stopLoss, t.takeProfit, t.exitPrice, t.side, t.status].join('|');
 export const FACTS_V = 3;
+/** A stop-out or break-even that had run this far your way first is the
+    trap of aiming at a level that never goes: up and given back. */
+export const RAN_ENOUGH = 1;
+/** Ended at a loss or break-even — the trades "ran before stopped out" is
+    asked of. */
+export const gaveBack = (kind, r, t) => kind === 'sl' || kind === 'be' || (t?.status !== 'open' && r != null && r <= 0);
 /** A stop taken by this much or less (pips, or points) before price went on to
     the target is a stop that was only just too tight. Further is not counted. */
 export const NEAR_STOP = 5;
@@ -141,6 +147,8 @@ export function reviewOf(acct, t) {
     /* "could have made" is your target if price got there, never more */
     if (kind === 'sl') { if (ch.reachedTarget) fill('dir', 'right'); fill('avail', ch.couldR); }
     else { fill('heat', ch.heatR); fill('avail', ch.couldR); }
+    /* up, then given back: the best it got your way while you were in */
+    if (gaveBack(kind, r, t) && ch.duringR != null) fill('ran', ch.duringR);
   }
   if (r != null && r > 0) fill('dir', 'right');
   if (kind === 'tp') { fill('dir', 'right'); if (r != null && r > 0) fill('avail', +r.toFixed(2)); }
@@ -222,6 +230,11 @@ export function weekStats(acct, trades) {
   out.pastStops = rows.filter(x => closedBy(x.t) === 'sl' && factsOf(x.t)?.pastStop != null)
     .map(x => ({ id: x.t.id, pair: x.t.pair, n: factsOf(x.t).pastStop, unit: factsOf(x.t).unit }));
   out.nearStop = out.pastStops.filter(p => p.n <= NEAR_STOP);
+  /* Up, then given back: trades that ended at a loss or break-even after
+     running RAN_ENOUGH or more your way. */
+  out.ranBack = rows.filter(x => gaveBack(x.v.kind, x.r, x.t) && x.v.ran != null && x.v.ran >= RAN_ENOUGH)
+    .map(x => ({ id: x.t.id, pair: x.t.pair, ran: x.v.ran, r: x.r })).sort((a, b) => b.ran - a.ran);
+  out.ranBackR = out.ranBack.reduce((a, x) => a + x.ran, 0);
   return out;
 }
 
@@ -443,7 +456,7 @@ function reviewCard(store, acct, t, pb, on) {
     const facts = [];
     if (kind === 'sl') {
       /* a stop is a loss, said plainly — not "−1R of heat" */
-      facts.push(fact('heat', 'Heat', 'Trade lost', 'is-neg'));
+      facts.push(fact('heat', 'Drawdown', 'Trade lost', 'is-neg'));
       facts.push(fact('avail', 'Could have made', v.avail != null ? rr(v.avail) : '—', v.avail > 0 ? 'is-pos' : '',
         typed('avail') ? 'typed by you' : ch ? (ch.reachedTarget ? `price reached your target after the stop · ${when(ch.reachedAt)}` : 'the best it got after the stop — it never reached your target') : ''));
       /* the idea was right and price went on to the target: how far past
@@ -455,7 +468,7 @@ function reviewCard(store, acct, t, pb, on) {
       }
     } else {
       const heatTxt = v.heat == null ? '—' : v.heat < 0.005 ? 'never against you' : rr(-v.heat);
-      facts.push(fact('heat', 'Heat', heatTxt, v.heat >= 0.8 ? 'is-neg' : '',
+      facts.push(fact('heat', 'Drawdown', heatTxt, v.heat >= 0.8 ? 'is-neg' : '',
         typed('heat') ? 'typed by you' : ch && v.heat >= 0.005 ? `came within ${ch.toStop} ${unit} of your stop` : ''));
       /* what it could have made — your target if price got there, never
          more: how far it ran past the target is not this trade's business.
@@ -473,6 +486,12 @@ function reviewCard(store, acct, t, pb, on) {
       if (kind === 'be' && ch) facts.push(fact('after', 'After break-even', ch.reachedTarget ? 'went on to your target' : 'never reached your target',
         ch.reachedTarget ? 'is-pos' : ''));
     }
+    /* how far it ran your way before it came back to break-even or the stop */
+    if (gaveBack(kind, r, t)) {
+      const up = v.ran;
+      facts.push(fact('ran', 'Ran before stopped out', up == null ? '—' : up < 0.05 ? 'never your way' : rr(up), up >= RAN_ENOUGH ? 'is-warn' : '',
+        typed('ran') ? 'typed by you' : up >= 0.05 ? `while you were in, then ${kind === 'be' ? 'back to break-even' : kind === 'sl' ? 'stopped out' : 'closed at a loss'}` : ''));
+    }
     const head = el('div', { class: 'rv-facts-h' },
       el('span', { class: 'k' }, 'From the chart'),
       el('span', { class: 'rv-facts-src' }, pending ? 'reading the prices…'
@@ -482,7 +501,7 @@ function reviewCard(store, acct, t, pb, on) {
       why && why !== 'nokey' && why !== 'none' ? el('button', { class: 'rv-facts-reset', onClick: () => { trouble.delete(t.id); on.repaint(); } }, 'Try again') : null,
       el('div', { class: 'spacer' }),
       editing && ch
-        ? el('button', { class: 'rv-facts-reset', onClick: () => set({ heat: null, avail: null }) }, 'Use the chart') : null,
+        ? el('button', { class: 'rv-facts-reset', onClick: () => set({ heat: null, avail: null, ran: null }) }, 'Use the chart') : null,
       noChart ? null : el('button', { class: 'rv-facts-edit' + (editing ? ' is-on' : ''),
         onClick: () => { editing ? editingFacts.delete(t.id) : editingFacts.add(t.id); on.repaint(); } }, editing ? 'Done' : 'Edit'));
     if (!editing) return el('div', { class: 'rv-facts' }, head, el('div', { class: 'rv-facts-row' }, ...facts));
@@ -492,8 +511,9 @@ function reviewCard(store, acct, t, pb, on) {
     if (kind === 'sl') { if (v.dir === 'right') boxes.push(could()); }
     else {
       boxes.push(could());
-      if (v.dir !== 'wrong') boxes.push(num('heat', 'Heat', 'how close it came to your stop', { neg: true }));
+      if (v.dir !== 'wrong') boxes.push(num('heat', 'Drawdown', 'how close it came to your stop', { neg: true }));
     }
+    if (gaveBack(kind, r, t)) boxes.push(num('ran', 'Ran before stopped out', 'how far it went your way while you were in'));
     return el('div', { class: 'rv-facts is-editing' }, head,
       el('div', { class: 'rv-facts-edit-row' }, ...boxes),
       kind === 'manual' ? heldBox(store, t) : null);
@@ -608,7 +628,7 @@ function rulerOf(r, v, big) {
       r != null ? el('span', { class: 'you', style: { left: X(r) + '%' }, title: `You took ${rr(r, 2)}` }) : null),
     big ? el('div', { class: 'lbls' }, ...marks.map(k => el('span', { style: { left: X(k) + '%' } }, k === 0 ? '0' : rr(k, 0)))) : null,
     big ? el('div', { class: 'key' },
-      el('span', {}, el('i', { class: 'heat' }), v.kind === 'sl' ? 'trade lost' : `heat ${v.heat != null ? rr(-v.heat) : '—'}`),
+      el('span', {}, el('i', { class: 'heat' }), v.kind === 'sl' ? 'trade lost' : `drawdown ${v.heat != null ? rr(-v.heat) : '—'}`),
       el('span', {}, el('i', { class: 'avail' }), `could have made ${rr(v.avail)}`),
       el('span', {}, el('i', { class: 'you' }), `you ${rr(r, 2)}`),
       v.better != null ? el('span', {}, el('i', { class: 'bx' }), `better exit ${rr(v.better)}`) : null) : null);
@@ -635,7 +655,8 @@ function weekTab(store, acct, trades, nav, all) {
     stat('Left on the table', rr(S.leftEarly), S.leftEarlyN ? `closed early on ${S.leftEarlyN}, target then hit` : 'nothing closed early that went on'),
     stat('Stopped, but right', String(S.stopped), S.stopped ? `would have made ${rr(S.stoppedWould)}` : 'none this week'),
     stat('Plan followed', S.plan == null ? '—' : c.pct(S.plan, 0), S.planned ? `${S.planYes} of ${S.planned} trades` : 'not answered yet'),
-    nearStopStat(S, stat, ' is-wide'));
+    nearStopStat(S, stat),
+    ranBackStat(S, stat));
 
   const main = el('div', { class: 'rv-wleft' },
     el('div', { class: 'rv-hero' }, captureCard(S), stats),
@@ -655,6 +676,15 @@ function nearStopStat(S, stat, cls = '') {
     near.length ? `of ${all.length} stop${all.length === 1 ? '' : 's'} that went on to target · ${list}`
       : all.length ? `${all.length} stopped then hit target — each more than ${NEAR_STOP} past` : 'no stop went on to your target',
     (near.length ? ' is-warn' : '') + cls);
+}
+
+/* Up and given back: how many trades ran RAN_ENOUGH or more your way, then
+   ended at break-even or a loss — the level aimed at that never went. */
+function ranBackStat(S, stat) {
+  const n = S.ranBack.length, top = S.ranBack[0];
+  return stat('Ran before stopped out', String(n),
+    n ? `${n === 1 ? 'was' : 'were'} up ${rr(S.ranBackR)} between them, then BE or a loss · most ${rr(top.ran)} ${top.pair}`
+      : `no trade was up ${RAN_ENOUGH}R or more before a BE or a loss`, n ? ' is-warn' : '');
 }
 
 /* ---------- what you logged, added up ----------
@@ -792,7 +822,7 @@ function drawTrades(acct, trades, W, H) {
       el('div', { class: 'h' }, `${x.t.pair || ''} · ${dayOf(x.t.date)} ${c.shortDate(x.t.date)} ${x.t.timeOpen || ''}`),
       el('div', { class: 'r' }, el('i', { class: x.r > 0 ? 'is-pass' : 'is-fail' }), el('b', {}, rr(x.r, 2)), el('span', {}, 'taken')),
       el('div', { class: 'r' }, el('b', {}, rr(x.v.avail)), el('span', {}, 'available')),
-      el('div', { class: 'r' }, el('b', {}, x.v.heat != null ? rr(-x.v.heat) : '—'), el('span', {}, 'heat')),
+      el('div', { class: 'r' }, el('b', {}, x.v.heat != null ? rr(-x.v.heat) : '—'), el('span', {}, 'drawdown')),
       el('div', { class: 'r' }, el('span', {}, x.v.what ? WHAT.find(w => w[0] === x.v.what)?.[1] : 'not reviewed yet'))]));
     hit.addEventListener('pointerleave', () => tip.hide());
     g.append(hit);
@@ -809,12 +839,12 @@ function drawTrades(acct, trades, W, H) {
 function scatterCard(acct, trades, S) {
   const pts = trades.filter(t => isReviewed(t) && reviewOf(acct, t).heat != null && reviewOf(acct, t).avail != null);
   const say = S.heatOnWinners == null ? null
-    : S.heatOnWinners < 0.5 ? `Winners took only ${rr(-S.heatOnWinners)} of heat — your stop has room`
-    : S.heatOnWinners > 0.8 ? `Winners took ${rr(-S.heatOnWinners)} of heat — your stop may be tight`
+    : S.heatOnWinners < 0.5 ? `Winners drew down only ${rr(-S.heatOnWinners)} — your stop has room`
+    : S.heatOnWinners > 0.8 ? `Winners drew down ${rr(-S.heatOnWinners)} — your stop may be tight`
     : `Winners used about half your stop`;
   const card = el('section', { class: 'card lab-chart rv-scatter' },
-    el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Stop & target'), el('span', { class: 'lab-sub' }, 'heat across, room to run up')));
-  if (pts.length < 2) { card.append(el('p', { class: 'lab-empty' }, 'Fill in heat and available on a few trades to see this.')); return card; }
+    el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Stop & target'), el('span', { class: 'lab-sub' }, 'drawdown across, room to run up')));
+  if (pts.length < 2) { card.append(el('p', { class: 'lab-empty' }, 'Fill in drawdown and could have made on a few trades to see this.')); return card; }
   card.append(fitted((w, h) => drawScatter(acct, pts, S, w, h), 230), say ? el('p', { class: 'rv-say' }, say) : null);
   return card;
 }
@@ -848,7 +878,7 @@ function drawScatter(acct, pts, S, W, H) {
     const dot = svg('circle', { class: 'rv-pt ' + cls, cx: X(x.v.heat), cy: Y(x.v.avail), r: 6.5 });
     dot.addEventListener('pointerenter', () => tip.show(X(x.v.heat), Y(x.v.avail), [
       el('div', { class: 'h' }, `${x.t.pair || ''} · ${dayOf(x.t.date)} ${c.shortDate(x.t.date)}`),
-      el('div', { class: 'r' }, el('b', {}, rr(-x.v.heat)), el('span', {}, 'heat')),
+      el('div', { class: 'r' }, el('b', {}, rr(-x.v.heat)), el('span', {}, 'drawdown')),
       el('div', { class: 'r' }, el('b', {}, rr(x.v.avail)), el('span', {}, 'available')),
       el('div', { class: 'r' }, el('b', {}, rr(x.r, 2)), el('span', {}, 'taken'))]));
     dot.addEventListener('pointerleave', () => tip.hide());
@@ -1005,6 +1035,7 @@ function monthTab(store, acct, trades, nav) {
     stat('Left on the table', rr(S.leftEarly), S.leftEarlyN ? `closed early on ${S.leftEarlyN}, target then hit` : 'nothing closed early that went on'),
     stat('Stopped, but right', String(S.stopped), S.stopped ? `would have made ${rr(S.stoppedWould)}` : 'none this month'),
     nearStopStat(S, stat),
+    ranBackStat(S, stat),
     stat('Reviewed', `${S.reviewed} / ${S.trades}`, S.reviewed === S.trades ? 'every trade' : `${S.trades - S.reviewed} to go`));
 
   /* ---------- the weeks against each other ---------- */

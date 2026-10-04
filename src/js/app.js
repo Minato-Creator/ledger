@@ -109,7 +109,7 @@ function gate({ mode }) {
     el('p', {}, 'Pick an empty folder — anywhere you like. Quire writes your accounts, trades and playbook into it as plain files you can open, copy and back up yourself.'),
     el('p', {}, 'Nothing is uploaded anywhere. To move to another machine, copy the folder.'),
     el('div', { class: 'fs' },
-      'Quire\\\n  accounts.json      your accounts\n  trades.json        every trade\n  playbook.json      setups, tags, sessions\n  screenshots\\\n  replay\\            your FX Replay exports'),
+      'Quire\\\n  accounts.json      your accounts\n  trades.json        every trade\n  playbook.json      setups, tags, sessions\n  screenshots\\\n  replay\\            Replay sessions and prices'),
     el('div', { class: 'gate-actions' },
       el('button', { class: 'btn btn-primary', onClick: async () => {
         try { if (await store.connect()) boot(); }

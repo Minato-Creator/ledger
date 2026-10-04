@@ -68,7 +68,7 @@ export async function setKey(key, live = false) {
 /* The desktop app asks its own shell, which only ever calls OANDA. In a
    browser the page asks OANDA directly — which works only where OANDA lets
    a web page call it. */
-async function call(path, cred) {
+export async function call(path, cred) {
   if (isTauri()) return window.__TAURI__.core.invoke('fetch_oanda', { path, token: cred.key, live: !!cred.live });
   const host = cred.live ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
   const res = await fetch(host + path, { headers: { Authorization: `Bearer ${cred.key}`, 'Accept-Datetime-Format': 'UNIX' } });
