@@ -23,7 +23,7 @@
    screen: which months each pair has, their size, when they were saved.
    ============================================================ */
 import { fs } from './fs.js';
-import { call, parseCandles, explain } from './candles.js';
+import { call, parseCandles, explain, useLocalPrices } from './candles.js';
 
 export const ROOT = 'replay/prices';
 export const MONTHS_BACK = 24;                   // two years, plus the month we are in
@@ -128,14 +128,8 @@ export function chunksOf(month, now = Date.now() / 1000) {
   return out;
 }
 
-/** One month, fetched and saved. */
-export async function fetchMonth(inst, month, cred, { now = Date.now() / 1000, signal } = {}) {
-  const rows = [];
-  for (const [from, to] of chunksOf(month, now)) {
-    if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
-    const got = parseCandles(await call(`/v3/instruments/${inst}/candles?granularity=M1&price=M&from=${from}&to=${to}`, cred));
-    for (const r of got) if (r[0] >= from && r[0] < to && (!rows.length || r[0] > rows[rows.length - 1][0])) rows.push(r);
-  }
+/** A month's rows written to its file and the index. */
+async function saveMonth(inst, month, rows, now) {
   const complete = monthEnd(month) <= now - 120;
   const bytes = await pack(encodeMonth(inst, month, rows, complete));
   await fs.writeImage(fileOf(inst, month), new Blob([bytes], { type: 'application/octet-stream' }));
@@ -144,11 +138,43 @@ export async function fetchMonth(inst, month, cred, { now = Date.now() / 1000, s
   p.months[month] = { n: rows.length, bytes: bytes.length, complete, at: new Date(now * 1000).toISOString() };
   await writeIndex();
   memo.delete(inst + '/' + month);
+}
+/** The candles OANDA has for a stretch of a month, in chunks it will serve. */
+async function fetchSpan(inst, month, cred, from0, { now, signal }) {
+  const rows = [];
+  for (let [from, to] of chunksOf(month, now)) {
+    if (to <= from0) continue;
+    from = Math.max(from, from0);
+    if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
+    const got = parseCandles(await call(`/v3/instruments/${inst}/candles?granularity=M1&price=M&from=${from}&to=${to}`, cred));
+    for (const r of got) if (r[0] >= from && r[0] < to && (!rows.length || r[0] > rows[rows.length - 1][0])) rows.push(r);
+  }
+  return rows;
+}
+
+/** One month, fetched whole and saved. */
+export async function fetchMonth(inst, month, cred, { now = Date.now() / 1000, signal } = {}) {
+  const rows = await fetchSpan(inst, month, cred, monthStart(month), { now, signal });
+  await saveMonth(inst, month, rows, now);
   return rows.length;
 }
 
 /**
- * Bring a pair up to date: every missing month, and this month again if it
+ * One month brought up to now: what is saved stays, and only the candles
+ * after its last one are asked for and added — the file grows, it is never
+ * fetched twice. A month not saved yet is fetched whole.
+ */
+export async function growMonth(inst, month, cred, { now = Date.now() / 1000, signal } = {}) {
+  const old = (await readMonth(inst, month)) || [];
+  const from0 = old.length ? old[old.length - 1][0] + MIN : monthStart(month);
+  const add = await fetchSpan(inst, month, cred, from0, { now, signal });
+  const rows = old.concat(add.filter(r => !old.length || r[0] > old[old.length - 1][0]));
+  await saveMonth(inst, month, rows, now);
+  return add.length;
+}
+
+/**
+ * Bring a pair up to date: every missing month, and this month grown if it
  * was saved more than a day ago. Months already complete are never fetched
  * twice. `onProgress({ month, done, total })` after each month.
  */
@@ -159,7 +185,7 @@ export async function downloadPair(inst, cred, { now = Date.now() / 1000, signal
   if (!st.have[cur] || st.stale) { if (!todo.includes(cur)) todo.push(cur); }
   let done = 0;
   for (const m of todo) {
-    await fetchMonth(inst, m, cred, { now, signal });
+    await growMonth(inst, m, cred, { now, signal });
     onProgress?.({ month: m, done: ++done, total: todo.length });
   }
   return todo.length;
@@ -189,6 +215,56 @@ export async function readMonth(inst, month) {
   if (memo.size > 6) memo.delete(memo.keys().next().value);  // a few months in memory, no more
   return rows;
 }
+
+/**
+ * One UTC day from the download, when it holds all of it — a finished month,
+ * or this month saved after that day ended. null otherwise, and the charts
+ * go to OANDA for it as before. Every chart in the app reads through this
+ * (candles.js `loadDay`), so a pair downloaded here is kept once, in one
+ * growing set of month files (growFor below).
+ */
+export async function dayFromDownload(inst, day, now = Date.now() / 1000) {
+  const meta = (await readIndex()).pairs[inst]?.months?.[day.slice(0, 7)];
+  if (!meta) return null;
+  const from = Date.parse(day + 'T00:00:00Z') / 1000, to = from + DAY;
+  if (to > now - 120) return null;                                   // today: always from OANDA
+  if (!meta.complete && !(to <= Date.parse(meta.at) / 1000 - 120)) return null;
+  const rows = await readMonth(inst, day.slice(0, 7));
+  if (!rows) return null;
+  let lo = 0, hi = rows.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (rows[m][0] < from) lo = m + 1; else hi = m; }
+  const out = [];
+  for (let i = lo; i < rows.length && rows[i][0] < to; i++) out.push(rows[i]);
+  return out;
+}
+/**
+ * A chart wants a finished day of a downloaded pair that the download does
+ * not hold yet (it was last updated before that day): the download grows
+ * to now — its missing months, and the month we are in from its last
+ * candle — so the day is read from it. One run at a time per pair.
+ * false when the pair is not downloaded or the day is outside its two years.
+ */
+const growing = new Map();
+export function growFor(inst, day, cred, now = Date.now() / 1000) {
+  const run = (growing.get(inst) || Promise.resolve()).then(async () => {
+    const ix = await readIndex();
+    const have = ix.pairs[inst]?.months;
+    if (!have || !Object.keys(have).length) return false;
+    const want = monthsWanted(now), dayM = day.slice(0, 7);
+    if (!want.includes(dayM)) return false;
+    const dayEnd = Date.parse(day + 'T00:00:00Z') / 1000 + DAY;
+    for (const m of want) {
+      if (m > dayM) break;
+      const meta = have[m];
+      const covered = meta && (meta.complete || Date.parse(meta.at) / 1000 - 120 >= Math.min(monthEnd(m), dayEnd));
+      if (!covered) await growMonth(inst, m, cred, { now });
+    }
+    return true;
+  });
+  growing.set(inst, run.catch(() => {}));
+  return run;
+}
+useLocalPrices({ read: dayFromDownload, grow: growFor });
 
 /** Every saved candle between two moments, in order. */
 export async function candlesBetween(inst, from, to) {

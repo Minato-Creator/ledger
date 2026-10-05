@@ -153,6 +153,9 @@ export function replayAnalytics(store, nav, kind, id) {
   body.append(whatIf(A, inView));
 
   function paintSide() {
+    /* picking a trade redraws this side: the list (and the page) stay scrolled where they were */
+    const listY = right.querySelector('.ra-list')?.scrollTop || 0;
+    const page = body, pageY = body.scrollTop || 0, docY = document.scrollingElement?.scrollTop || 0;
     const x = chosen, t = x.t, s = x.s;
     const held = t.closeT - t.openT;
     const heldTxt = held >= 86400 ? `${Math.floor(held / 86400)}d ${Math.floor(held % 86400 / 3600)}h` : held >= 3600 ? `${Math.floor(held / 3600)}h ${Math.round(held % 3600 / 60)}m` : `${Math.round(held / 60)}m`;
@@ -172,6 +175,10 @@ export function replayAnalytics(store, nav, kind, id) {
         ...[...A.rows].reverse().map(y => el('button', { class: 'ra-li' + (y === chosen ? ' is-on' : ''), 'data-trade': y.t.id, onClick: () => choose(y) },
           el('i', { class: y.t.side === 'buy' ? 'is-long' : 'is-short' }), el('span', {}, when(y.t.openT)), el('span', {}, pairName(y.s.inst)),
           el('span', { class: y.r > 0 ? 'is-up' : y.r < 0 ? 'is-down' : '' }, rT(y.r))))));
+    const list = right.querySelector('.ra-list');
+    if (list && listY) list.scrollTop = listY;
+    if (pageY) page.scrollTop = pageY;
+    if (docY) document.scrollingElement.scrollTop = docY;
   }
   paintSide();
   return view;

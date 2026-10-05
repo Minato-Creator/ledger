@@ -2,7 +2,8 @@ import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import * as c from '../calc.js';
 import { tradeShotsOf } from '../store.js';
 import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName } from '../questions.js';
-import { newsText, holidayText } from '../newsday.js';
+import { newsText, holidayText, dayRedFolders } from '../newsday.js';
+import { newsLabel, localTime } from '../news.js';
 import { heldAsked, heldOf, heldText } from '../questions.js';
 import { tradeChart } from './tradechart.js';
 
@@ -184,7 +185,7 @@ export function howItWent(t, news = null) {
   const name = (list, v) => (list.find(([k]) => k === v) || [])[1];
   const scale = (list, v) => v == null ? el('b', { class: 'is-none' }, '—')
     : el('b', {}, el('span', { class: 'td-pips is-' + v }, ...[1, 2, 3, 4, 5].map(i => el('i', { class: i <= v ? 'on' : '' }))), `${v} · ${name(list, v)}`);
-  const cell = (k, v, cls = '') => el('div', { class: 'td-cell' + cls }, el('span', { class: 'k' }, k), v);
+  const cell = (k, v, cls = '', extra = {}) => el('div', { class: 'td-cell' + cls, ...extra }, el('span', { class: 'k' }, k), v);
   const plain = v => v == null ? el('b', { class: 'is-none' }, '—') : el('b', {}, v);
   const heldTone = held ? (held.outcome === 'win' ? ' is-pos' : held.outcome === 'loss' ? ' is-neg' : '') : '';
   return el('div', { class: 'card td-how', style: { flex: 'none' } },
@@ -198,11 +199,29 @@ export function howItWent(t, news = null) {
       open ? null : cell('Price delivery', plain(name(DELIVERY, t.delivery) ?? null), t.delivery ? ' is-dl-' + t.delivery : ''),
       cell('News timing', plain(name(NEWS, t.news) ?? null), t.news && t.news !== 'none' ? ' is-news' : ''),
       /* from the calendar where it was read for that day, else as saved */
-      cell('News', plain(newsText(t, news) ?? 'N/A'), newsText(t, news) ? ' is-rf' : ' is-na'),
+      newsCell(t, news, cell, plain),
       cell('Bank holiday', plain(holidayText(t, news) ?? 'N/A'), holidayText(t, news) ? ' is-hol' : ' is-na')),
     open ? null : el('div', { class: 'td-mist' },
       el('span', { class: 'k' }, 'Mistakes'),
       mistakes == null ? el('span', { class: 'td-none' }, 'not asked')
         : mistakes.length ? el('span', { class: 'td-chips' }, ...MISTAKES.filter(([k]) => mistakes.includes(k)).map(([, n]) => el('span', { class: 'td-chip' }, n)))
         : el('span', { class: 'td-clean' }, 'None — a clean trade')));
+}
+
+/* The day's red folders, short: "USD - NFP". More than one → "+2 more",
+   and a click opens them all, each with its time and full title. */
+function newsCell(t, news, cell, plain) {
+  const evs = dayRedFolders(t, news);
+  if (!evs.length) return cell('News', plain(newsText(t, news) ?? 'N/A'), newsText(t, news) ? ' is-rf' : ' is-na');
+  const full = e => [e.at ? localTime(e.at) : null, e.country, e.title].filter(Boolean).join(' · ');
+  if (evs.length === 1) return cell('News', el('b', { title: full(evs[0]) }, newsLabel(evs[0])), ' is-rf');
+  const list = el('div', { class: 'td-news-all', hidden: true },
+    ...evs.map(e => el('div', { class: 'td-news-ev', title: full(e) }, el('span', { class: 't' }, e.at ? localTime(e.at) : ''), el('span', {}, newsLabel(e)))));
+  const more = el('span', { class: 'td-news-more' }, `+${evs.length - 1} more`);
+  const box = cell('News', el('b', {}, el('span', { class: 'td-news-one' }, newsLabel(evs[0])), more), ' is-rf is-many', {
+    role: 'button', tabindex: 0, title: 'Every red folder that day',
+    onClick: () => { list.hidden = !list.hidden; more.textContent = list.hidden ? `+${evs.length - 1} more` : 'less'; box.classList.toggle('is-open', !list.hidden); },
+    onKeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); box.click(); } } });
+  box.append(list);
+  return box;
 }

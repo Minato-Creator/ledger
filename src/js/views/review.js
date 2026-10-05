@@ -361,7 +361,7 @@ function tradesTab(store, acct, trades, nav, paintProg) {
       el('div', { class: 'rv-k' }, 'This week'),
       el('div', { class: 'rv-list' }, ...trades.map(t => {
         const r = rOf(acct, t);
-        return el('button', { class: 'rv-item' + (t.id === picked ? ' is-on' : ''), onClick: () => { const moved = picked !== t.id; picked = t.id; paintRail(); paintMain(); if (moved) wrap.scrollTop = 0; } },
+        return el('button', { class: 'rv-item' + (t.id === picked ? ' is-on' : ''), onClick: () => { picked = t.id; paintRail(); paintMain(); } },   // the page stays where it is scrolled (Minato)
           el('span', { class: 'dot ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }),
           el('span', { class: 'p' }, t.pair || '—', el('small', {}, `${dayOf(t.date)} ${Number(t.date.slice(8))} · ${t.timeOpen || '—'}`)),
           el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2)),
@@ -384,9 +384,9 @@ function tradesTab(store, acct, trades, nav, paintProg) {
         const after = [...trades.slice(i + 1), ...trades.slice(0, i)].find(x => !isReviewed(x));
         const to = after || trades[(i + 1) % trades.length];
         if (!after) toast('Every trade this week is reviewed — the Week tab has what it adds up to');
-        picked = to.id; paintRail(); paintMain(); wrap.scrollTop = 0;
+        picked = to.id; paintRail(); paintMain();
       },
-      prev: () => { const i = trades.indexOf(t); picked = trades[(i - 1 + trades.length) % trades.length].id; paintRail(); paintMain(); wrap.scrollTop = 0; },
+      prev: () => { const i = trades.indexOf(t); picked = trades[(i - 1 + trades.length) % trades.length].id; paintRail(); paintMain(); },
     }));
     wrap.scrollTop = keep;
   }

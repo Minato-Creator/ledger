@@ -142,3 +142,42 @@ export async function ensureNews(store, { force = false } = {}) {
     throw e;
   }
 }
+
+/* ---------- short names ----------
+   A red folder by the name traders use for it — "CPI", "NFP", "Rate",
+   "Powell" — with its currency in front: "USD - NFP". The full title still
+   shows on hover and in the add-trade form. Forex Factory's high-impact
+   releases come from a few dozen recurring families (inflation, jobs,
+   growth, PMIs, central banks and their speakers, sentiment); anything not
+   in the table keeps its own title, trimmed. */
+const SHORT = [
+  [/\bADP\b/i, 'ADP'], [/non-?farm|\bNFP\b/i, 'NFP'], [/average hourly earnings/i, 'AHE'], [/average earnings index/i, 'Earnings'],
+  [/employment cost index/i, 'ECI'], [/wage price index/i, 'WPI'],
+  [/unemployment claims|jobless claims/i, 'Claims'], [/unemployment (rate|change)/i, 'Unemployment'], [/claimant count/i, 'Claimant'],
+  [/JOLTS/i, 'JOLTS'], [/employment change/i, 'Jobs'],
+  [/core PCE/i, 'Core PCE'], [/\bPCE\b/i, 'PCE'], [/trimmed mean CPI/i, 'Trimmed CPI'], [/core CPI/i, 'Core CPI'], [/\bCPI\b/i, 'CPI'],
+  [/core PPI/i, 'Core PPI'], [/\bPPI\b/i, 'PPI'],
+  [/core retail sales/i, 'Core Retail'], [/retail sales/i, 'Retail Sales'], [/\bGDP\b/i, 'GDP'],
+  [/ISM manufacturing/i, 'ISM Mfg'], [/ISM services|ISM non-manufacturing/i, 'ISM Services'], [/manufacturing PMI/i, 'Mfg PMI'], [/services PMI/i, 'Services PMI'],
+  [/meeting minutes|\bminutes\b/i, 'Minutes'], [/press conference/i, 'Press Conf'], [/monetary policy (statement|report|summary)/i, 'Policy'],
+  [/rate statement/i, 'Rate Stmt'],
+  [/FOMC statement|funds rate|refinancing rate|bank rate|cash rate|overnight rate|policy rate|interest rate|deposit rate/i, 'Rate'],
+  [/^(?:\w+ )?(?:chair|gov(?:ernor)?|president) (\w+) speaks/i, m => m[1]], [/^(\w+) speaks/i, m => m[1]],
+  [/consumer confidence/i, 'Confidence'], [/consumer sentiment/i, 'Sentiment'], [/empire state/i, 'Empire'], [/philly fed/i, 'Philly Fed'],
+  [/trade balance/i, 'Trade Bal'], [/industrial production/i, 'Ind Prod'], [/durable goods/i, 'Durables'], [/tankan/i, 'Tankan'],
+  [/housing starts/i, 'Housing'], [/building permits/i, 'Permits'], [/(existing|new|pending) home sales/i, 'Home Sales'],
+];
+const PLACES = /^(German|French|Italian|Spanish|Tokyo|Chinese|Swiss)\b/i;
+/** "Core CPI m/m" → "Core CPI"; "Fed Chair Powell Speaks" → "Powell". */
+export function shortNews(title) {
+  const t = String(title || '');
+  const place = (t.match(PLACES) || [])[1];
+  for (const [re, out] of SHORT) {
+    const m = t.match(re);
+    if (m) { const s = typeof out === 'function' ? out(m) : out; return place && !/speaks/i.test(t) ? `${place} ${s}` : s; }
+  }
+  const bare = t.replace(/\b(m\/m|y\/y|q\/q|prelim|flash|advance|final|revised)\b/gi, '').replace(/\s+/g, ' ').trim();
+  return bare.length > 16 ? bare.slice(0, 15).trim() + '…' : bare;
+}
+/** A release as it is shown: its currency, then its short name — "USD - NFP". */
+export const newsLabel = ev => `${ev.country ? ev.country + ' - ' : ''}${shortNews(ev.title)}`;

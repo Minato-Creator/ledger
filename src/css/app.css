@@ -3528,7 +3528,7 @@ path.ra-col.is-up { fill:var(--profit); } path.ra-col.is-down { fill:var(--loss)
 .ra-side-head { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
 .ra-side-head h2 { margin:0; }
 .ra-chart { position:relative; display:flex; flex-direction:column; gap:6px; }
-.ra-tfs { display:flex; }
+.ra-tfs { display:flex; min-height:22px; }   /* the same height before its buttons arrive — nothing below it jumps */
 .ra-tfs button { font:400 11.5px var(--mono); color:var(--ink-4); padding:3px 6px; }
 .ra-tfs button:hover { color:var(--ink-2); } .ra-tfs button.is-on { color:var(--ink); }
 .ra-plot { height:300px; margin:0; }
@@ -3610,3 +3610,47 @@ button.ra-li:hover { background:var(--inset); }
 .ra-fan-key i.is-90 { background:rgba(var(--profit-rgb), .14); }
 .ra-fan-key i.is-mine { height:0; border-top:1.5px dashed var(--ink); }
 @media (max-width:1100px) { .ra-wi-tiles { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+/* the morning's bias joined to the day and the trades (outlookedge.js) */
+.ob-grade { display:flex; align-items:center; gap:13px; margin-top:12px; }
+.ob-grade .bar { width:3px; align-self:stretch; min-height:18px; border-radius:2px; background:var(--grey-6); }
+.ob-grade .txt { font:400 12.5px var(--sans); line-height:1.6; color:var(--ink-3); }
+.ob-grade .txt b { font-weight:500; color:var(--ink-2); }
+.ob-grade.is-right .bar { background:var(--profit); } .ob-grade.is-right .txt b { color:var(--profit); }
+.ob-grade.is-wrong .bar { background:var(--loss); } .ob-grade.is-wrong .txt b { color:var(--loss); }
+.ob-with { color:var(--profit); }
+.ao-strip { display:flex; align-items:center; gap:22px; flex:none; width:100%; text-align:left; padding:12px 18px; margin-bottom:8px;
+  border-radius:var(--r-card, 16px); background:var(--card); border:1px solid var(--inset-2); cursor:pointer; }
+.ao-strip:hover { border-color:var(--ink-5); }
+.ao-sk { font:400 9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
+.ao-sf { display:flex; align-items:baseline; gap:7px; }
+.ao-sf i { font:400 10.5px var(--mono); font-style:normal; color:var(--ink-4); }
+.ao-sf b { font:500 13px var(--mono); color:var(--ink-2); }
+.ao-sf.is-pos b { color:var(--profit); } .ao-sf.is-neg b { color:var(--loss); }
+.ao-sgo { margin-left:auto; color:var(--ink-4); font:400 14px var(--mono); }
+.ao-body { gap:var(--s-8); }
+.ao-tiles { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:var(--s-8); flex:none; }
+.ao-tile.is-neg .v { color:var(--loss); }
+.ao-tile.is-wait .v { color:var(--ink-4); }
+.ao-calls { padding:20px 22px; gap:10px; flex:none; }
+.ao-row { display:grid; grid-template-columns:110px 90px 70px 90px 70px minmax(0, 1fr) 80px 28px; gap:10px; align-items:center; padding:7px 4px;
+  border-top:1px solid var(--grey-9); font:400 12px var(--mono); color:var(--ink-2); }
+.ao-row.is-head { border-top:0; font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
+.ao-bias.is-long { color:var(--green); } .ao-bias.is-short { color:var(--orange); }
+.ao-move.is-pos { color:var(--profit); } .ao-move.is-neg { color:var(--loss); }
+.ao-grade.is-right { color:var(--profit); } .ao-grade.is-wrong { color:var(--loss); }
+.ao-trades { color:var(--ink-3); }
+.ao-r { text-align:right; } .ao-r.is-pos { color:var(--profit); } .ao-r.is-neg { color:var(--loss); }
+.ao-open { color:var(--ink-4); font:400 15px var(--mono); }
+.ao-open:hover { color:var(--ink); }
+.ao-empty { margin:6px 0 0; font:400 12px var(--mono); color:var(--ink-4); }
+.ao-why { color:var(--yellow); }
+@media (max-width:1100px) { .ao-tiles { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+/* the trade's red folders: short names, the rest one click away */
+.td-cell.is-many { cursor:pointer; }
+.td-cell.is-many:hover { background:var(--grey-6, var(--inset-2)); }
+.td-news-one { overflow:hidden; text-overflow:ellipsis; }
+.td-news-more { font:400 10.5px var(--mono); color:var(--ink-4); flex:none; }
+.td-news-all { display:flex; flex-direction:column; gap:4px; margin-top:2px; }
+.td-news-all[hidden] { display:none; }
+.td-news-ev { display:flex; gap:10px; font:400 11.5px var(--mono); color:var(--ink-2); }
+.td-news-ev .t { color:var(--ink-4); min-width:38px; }

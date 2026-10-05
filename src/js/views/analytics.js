@@ -4,8 +4,9 @@ import { weeklyTab, weeklyControls } from './weekly.js';
 import { overviewTab } from './an-overview.js';
 import { timingTab } from './an-timing.js';
 import { executionTab } from './an-execution.js';
+import { outlookTab, takeWantedTab } from './an-outlook.js';
 
-let tab = 'overview';       // overview | weekly | tags | timing | execution | discipline | year
+let tab = 'overview';       // overview | weekly | tags | timing | execution | discipline | outlook | year
 let year = null;            // resolved on first paint to the latest year traded
 let period = '30D';
 const DAYS = { '7D': 7, '30D': 30, '90D': 90, 'All': null };
@@ -89,7 +90,16 @@ function thresholdColumns(rows, { cap, capLabel, fmt, width, height, emptyText }
   return g;
 }
 
+/** The first date in the rolling window, or null for All. */
+function periodFrom() {
+  const days = DAYS[period];
+  if (!days) return null;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+  return cutoff.toISOString().slice(0, 10);
+}
+
 export function analytics(store, nav) {
+  if (takeWantedTab() === 'outlook') tab = 'outlook';     // sent here from the Outlook page
   const acct = store.activeAccount;
   const cur = acct.currency;
   const all = store.tradesFor(acct.id);
@@ -117,7 +127,7 @@ export function analytics(store, nav) {
   const head = el('header', { class: 'head an-head' },
     el('h1', {}, 'Analytics'),
     el('div', { class: 'seg', style: { marginLeft: '6px' } },
-      ...[['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['execution', 'Execution'], ['discipline', 'Discipline'], ['year', 'Year']].map(([k, label]) =>
+      ...[['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['execution', 'Execution'], ['discipline', 'Discipline'], ['outlook', 'Outlook'], ['year', 'Year']].map(([k, label]) =>
         el('button', { class: k === tab ? 'is-on' : '', onClick: () => { tab = k; nav.refresh(); } }, label))),
     /* The weekly page brings a wider control than the others, so it gives up
        the count here to make room for it. */
@@ -155,6 +165,7 @@ export function analytics(store, nav) {
              : tab === 'timing'   ? timingTab(store, acct, trades, ctx)
              : tab === 'execution' ? executionTab(store, acct, trades, ctx)
              : tab === 'year'     ? yearly(store, acct, all, ctx)
+             : tab === 'outlook'  ? outlookTab(store, acct, trades, ctx, periodFrom())
              :                      discipline(store, acct, trades, ctx);
   return el('div', { class: 'view' }, head, body);
 }

@@ -17,7 +17,7 @@ export const EMOTION_AFTER = [[1, 'Angry'], [2, 'Regret'], [3, 'Indifferent'], [
 export const EXEC_TFS = ['1m', '3m', '5m', '15m', '30m', '1H', '4H', 'D'];
 /* What went wrong, if anything. A trade can carry several. */
 export const MISTAKES = [['closed_early', 'Closed early'], ['early_entry', 'Early entry'], ['no_confirm', 'No confirmation entry'],
-  ['be_early', 'Moved to BE early'], ['bad_sl', 'Bad stop loss'], ['tp_far', 'TP too far'], ['wrong_bias', 'Wrong bias']];
+  ['be_early', 'Moved to BE early'], ['bad_sl', 'Bad stop loss'], ['tp_far', 'TP too far'], ['wrong_bias', 'Wrong bias'], ['analysis', 'Analysis mistake']];
 /* How cleanly price moved: smooth and readable, or choppy. */
 export const DELIVERY = [['good', 'Good'], ['neutral', 'Neutral'], ['poor', 'Poor']];
 /* How the trade ended, as opposed to what it made. */

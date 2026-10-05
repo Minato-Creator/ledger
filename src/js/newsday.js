@@ -12,7 +12,7 @@
    it says nothing, and what was put on the trade by hand stands.
    ============================================================ */
 import { oandaInstrument, currenciesOf } from './candles.js';
-import { localDay } from './news.js';
+import { localDay, newsLabel } from './news.js';
 import { isRedFolder, isBankHoliday, holidayFromCurrency, holidayName } from './questions.js';
 
 export const pairCurrencies = pair => currenciesOf(oandaInstrument(pair));
@@ -74,13 +74,23 @@ export function newsDayOf(t, news) {
   return { red: n.events.length > 0 || AROUND.includes(t.news), holiday: n.holidays.length > 0 };
 }
 
-/** The red folder(s) of a trade's day as words: "USD · Core PCE Price Index m/m",
+/** The red folder(s) of a trade's day by their short names: "USD - Core PCE",
     or several, one after the other. null when there were none. */
 export function newsText(t, news) {
   const evs = newsOf(t, news).events;
-  if (!evs.length) return null;
-  const curs = [...new Set(evs.map(e => e.country).filter(Boolean))];
-  return (curs.length ? curs.join(', ') + ' · ' : '') + evs.map(e => e.title).join(', ');
+  return evs.length ? evs.map(newsLabel).join(', ') : null;
+}
+/**
+ * Every red folder of the trade's day for its pair: the one picked on the
+ * trade first, then the rest in time order. From the calendar where it was
+ * read for that day; otherwise only what is on the trade.
+ */
+export function dayRedFolders(t, news) {
+  const d = dayNews(news, t?.pair, t?.date);
+  if (!d) return t?.newsEvent?.title ? [t.newsEvent] : [];
+  const all = d.red.map(snapEvent).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  const picked = all.find(e => sameEv(e, t.newsEvent));
+  return picked ? [picked, ...all.filter(e => e !== picked)] : all;
 }
 /** Its bank holidays as words: "Canada", "China, Canada". null for none. */
 export const holidayText = (t, news) => { const h = newsOf(t, news).holidays; return h.length ? h.map(holidayName).join(', ') : null; };

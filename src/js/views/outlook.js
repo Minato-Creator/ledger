@@ -26,6 +26,8 @@ import { outlookShotsOf } from '../store.js';
 import { tradeChart } from './tradechart.js';
 import { isRedFolder, isBankHoliday, holidayCountry } from '../questions.js';
 import * as cd from '../candles.js';
+import * as oe from '../outlookedge.js';
+import { outlookStrip } from './an-outlook.js';
 
 /* The chart's height in an outlook block — half the block is chart. */
 const OB_CHART_H = 470;
@@ -259,8 +261,7 @@ export function outlook(store, nav, dateArg) {
 
     const verdictSlot = el('div', {});
     verdicts.set(item.id, verdictSlot);
-    const v = verdict(item);
-    if (v) verdictSlot.append(v);
+    verdictSlot.append(...[verdict(item), gradeLine(item)].filter(Boolean));
 
     return el('section', { class: 'card outlook-block' },
       el('div', { class: 'ob-head' },
@@ -283,7 +284,28 @@ export function outlook(store, nav, dateArg) {
     const slot = verdicts.get(item.id);
     if (!slot) return;
     const v = verdict(item);
-    slot.replaceChildren(...(v ? [v] : []));
+    slot.replaceChildren(...[v, gradeLine(item)].filter(Boolean));
+  }
+
+  /* ---------- the call, graded: the day's candle against the bias ---------- */
+  function gradeLine(item) {
+    const pair = cleanSymbol(item.pair || '');
+    if (!pair || (item.bias !== 'long' && item.bias !== 'short')) return null;
+    const { end } = oe.dayCandleSpan(date);
+    if (end > Date.now() / 1000) return el('div', { class: 'ob-grade is-wait' }, el('span', { class: 'bar' }), el('span', { class: 'txt' }, `Graded once today's candle closes (5pm New York).`));
+    const line = el('div', { class: 'ob-grade' }, el('span', { class: 'bar' }), el('span', { class: 'txt' }, 'Grading the call on the day’s candle…'));
+    const bias = item.bias;
+    oe.gradeCalls(store, [{ date, pair, bias }]).then(G => {
+      if (item.bias !== bias) return;
+      const g = G.list[0];
+      if (!g || g.state !== 'graded') { line.querySelector('.txt').textContent = G.why ? `Not graded — ${G.why}.` : 'Not graded — no prices for that day.'; return; }
+      const pct = g.candle.move / g.candle.open * 100;
+      const word = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+      line.classList.add(g.right === true ? 'is-right' : g.right === false ? 'is-wrong' : 'is-flat');
+      line.querySelector('.txt').replaceChildren(`The day closed ${word} ${Math.abs(pct).toFixed(2)}% — `,
+        el('b', {}, g.right === true ? `your ${BIASES.find(b => b.key === bias).label} was right` : g.right === false ? `your ${BIASES.find(b => b.key === bias).label} was wrong` : 'not a call either way'), '.');
+    }).catch(() => {});
+    return line;
   }
 
   function verdict(item) {
@@ -320,7 +342,8 @@ export function outlook(store, nav, dateArg) {
         el('b', {}, `${trades.length} trade${trades.length === 1 ? '' : 's'}`),
         `, ${sideWord}`,
         trades[0].timeOpen ? `, first at ${trades[0].timeOpen}` : '', '.',
-        against ? el('span', { style: { color: 'var(--yellow)' } }, ' Against what you wrote.') : null),
+        against ? el('span', { style: { color: 'var(--yellow)' } }, ' Against what you wrote.')
+          : (item.bias === 'long' && longs && !shorts) || (item.bias === 'short' && shorts && !longs) ? el('span', { class: 'ob-with' }, ' With your bias.') : null),
       el('span', { class: 'r', style: { color: net == null ? 'var(--grey-4)' : tone } },
         net == null ? '—' : c.rFmt(net)));
   }
@@ -359,7 +382,7 @@ export function outlook(store, nav, dateArg) {
       stamp,
       el('div', { class: 'spacer' }),
       dayNav),
-    el('div', { class: 'outlook-scroll' }, newsStrip(store, date, nav), list),
+    el('div', { class: 'outlook-scroll' }, acct ? outlookStrip(store, acct, nav) : null, newsStrip(store, date, nav), list),
   );
 
   paint();

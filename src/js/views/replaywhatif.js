@@ -16,7 +16,7 @@ const wrT = w => (w == null ? '—' : `${Math.round(w * 100)}%`);
 const signCls = v => (v > 1e-9 ? 'is-up' : v < -1e-9 ? 'is-down' : '');
 
 /* remembered while the app is open */
-const memo = { tab: 'stop', stop: null, rr: null, mcN: null, seed: 1 };
+const memo = { tab: 'mc', stop: null, rr: null, mcN: null, seed: 1 };
 
 /**
  * @param A        analyse()'s numbers (its rows: { t, s, r } in close order)
@@ -47,7 +47,7 @@ export function whatIf(A, sessions) {
     paint();
   }).catch(e => { body.replaceChildren(el('p', { class: 'rp-empty' }, 'The prices could not be read: ' + (e.message || e))); });
 
-  const TABS = [['stop', 'Stop loss'], ['rr', 'Risk : reward'], ['mc', 'Monte Carlo']];
+  const TABS = [['mc', 'Monte Carlo'], ['rr', 'Risk : reward'], ['stop', 'Stop loss']];   // Monte Carlo first (Minato)
   const SUBS = {
     stop: 'each stop closer or further — the target where it was',
     rr: 'the stop moved, the target at a number of R — find the sweet spot',

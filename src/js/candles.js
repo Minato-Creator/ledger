@@ -164,13 +164,30 @@ const memory = new Map();
 export function forgetCandles() { memory.clear(); }
 
 /**
- * One UTC day of 1-minute candles: from the vault if it is there, else from
- * OANDA — kept in the vault once the day is over, so it is never fetched again.
+ * One UTC day of 1-minute candles: from Replay's download when it holds the
+ * whole day, else from the vault's day file, else from OANDA — kept in the
+ * vault once the day is over, so it is never fetched again.
  */
+/* Replay's two-year download (replaydata.js registers { read, grow } here, so
+   the two files need not import each other). For a downloaded pair it is the
+   one store: a day it holds is read from it; a finished day it does not hold
+   yet makes it grow to now, then is read from it — never kept a second time
+   as a day file. Today is always asked of OANDA. */
+let local = null;
+export function useLocalPrices(fn) { local = fn; }
+
 export async function loadDay(store, inst, day, cred, now = Date.now() / 1000) {
   const key = inst + '/' + day;
   const seen = memory.get(key);
   if (seen && (seen.done || now - seen.at < 60)) return seen.rows;
+  if (local) {
+    try {
+      let rows = await local.read(inst, day, now);
+      /* a finished day the download does not reach yet: grow the download, then read it */
+      if (!rows && dayStart(day) + DAY <= now - 120 && cred && await local.grow(inst, day, cred, now)) rows = await local.read(inst, day, now);
+      if (rows) { memory.set(key, { rows, done: true, at: now }); return rows; }
+    } catch { /* not readable or not reachable: carry on as before */ }
+  }
   const kept = await store.readJSON(fileOf(inst, day), null);
   if (kept && Array.isArray(kept.candles)) { memory.set(key, { rows: kept.candles, done: true, at: now }); return kept.candles; }
   const from = dayStart(day), to = from + DAY;
