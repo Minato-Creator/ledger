@@ -66,9 +66,9 @@ export function openChartSettings(store, { tab, trading = false } = {}) {
           : el('span', { class: 'tv-pair' }, sw(k[key].up, (d, v) => { d.candles[key].up = v; }, 'tv-up-' + key), sw(k[key].down, (d, v) => { d.candles[key].down = v; }, 'tv-down-' + key)));
       return [
         section('Candles'),
-        row('Colours', seg([['quire', 'Quire’s profit / loss'], ['custom', 'Custom']], k.mode, (d, v) => { d.candles.mode = v; }, 'tv-cmode')),
+        row('Colours', seg([['quire', 'Laminar’s profit / loss'], ['custom', 'Custom']], k.mode, (d, v) => { d.candles.mode = v; }, 'tv-cmode')),
         part('Body', 'body'), part('Borders', 'border'), part('Wick', 'wick'),
-        el('p', { class: 'tv-note' }, quire ? 'Following Settings → Appearance in Quire. Choose Custom to set your own.' : 'Your own colours, on every chart.'),
+        el('p', { class: 'tv-note' }, quire ? 'Following Settings → Appearance in Laminar. Choose Custom to set your own.' : 'Your own colours, on every chart.'),
         section('Data modification'),
         row('Precision', select([['default', 'Default'], ...[0, 1, 2, 3, 4, 5, 6].map(n => [n, n ? `1/${10 ** n}` : '1'])], draft.precision,
           (d, v) => { d.precision = v === 'default' ? 'default' : +v; }, 'tv-prec')),
@@ -108,7 +108,7 @@ export function openChartSettings(store, { tab, trading = false } = {}) {
       const c = draft.canvas;
       return [
         section('Chart basic styles'),
-        row('Background', seg([['quire', 'Quire’s'], ['solid', 'Solid'], ['gradient', 'Gradient']], c.bg, (d, v) => { d.canvas.bg = v; }, 'tv-bg'),
+        row('Background', seg([['quire', 'Laminar’s'], ['solid', 'Solid'], ['gradient', 'Gradient']], c.bg, (d, v) => { d.canvas.bg = v; }, 'tv-bg'),
           c.bg === 'quire' ? null : sw(c.bgColor, (d, v) => { d.canvas.bgColor = v; }, 'tv-bg1'),
           c.bg === 'gradient' ? sw(c.bgColor2, (d, v) => { d.canvas.bgColor2 = v; }, 'tv-bg2') : null),
         row('Grid lines',

@@ -179,10 +179,9 @@ export function accounts(store, nav) {
       el('div', { style: { flex: '1', display: 'flex', flexDirection: 'column',
                            alignItems: 'center', justifyContent: 'center', gap: '20px' } },
         el('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' } },
-          el('div', { class: 'brand-mark', style: { width: '52px', height: '52px', borderRadius: '18px' } },
-            brandMark(52, 68)),
+          el('div', { class: 'brand-mark', style: { width: '64px', height: '64px' } }, brandMark(64)),
           el('div', { style: { textAlign: 'center' } },
-            el('h1', { class: 'welcome-title' }, 'Welcome to Quire'),
+            el('h1', { class: 'welcome-title' }, 'Welcome to Laminar'),
             el('p', { class: 'm', style: { margin: '9px 0 0', fontSize: '12.5px', color: 'var(--grey-5)' } },
               'Your edge, in writing.'))),
         create));

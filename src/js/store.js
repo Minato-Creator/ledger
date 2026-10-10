@@ -245,7 +245,7 @@ class Store {
       this.writeJSON(FILES.drawings, this.data.drawings),
       this.ensureDir(SHOTS),
       this.writeText(MANIFEST, JSON.stringify({
-        kind: 'quire-vault', version: 1, app: 'Quire',
+        kind: 'quire-vault', version: 1, app: 'Laminar',
         note: 'Your journal. data/ holds the trades, screenshots/ holds the charts.',
       }, null, 2)),
     ]);
@@ -300,7 +300,7 @@ class Store {
     const entries = [{
       name: MANIFEST,
       bytes: bytesOfText(JSON.stringify({
-        kind: 'quire-vault', version: 1, app: 'Quire',
+        kind: 'quire-vault', version: 1, app: 'Laminar',
         exported: new Date().toISOString(),
         accounts: this.allAccounts.length,
         trades: this.trades.length,
@@ -340,7 +340,7 @@ class Store {
        working, because that is the whole point of having them. */
     const trades = find('data/trades.json') || find('trades.json');
     const accounts = find('data/accounts.json') || find('accounts.json');
-    if (!trades || !accounts) throw new Error('That file is not a Quire vault.');
+    if (!trades || !accounts) throw new Error('That file is not a Laminar vault.');
 
     const t = JSON.parse(textOfBytes(trades.bytes));
     const a = JSON.parse(textOfBytes(accounts.bytes));

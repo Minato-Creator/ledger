@@ -211,7 +211,7 @@ export function settings(store, nav) {
     store.isPreview ? 'This is a preview copy — it has nowhere to move a vault to.'
     : !store.canChooseFolder
       ? (typeof window !== 'undefined' && window.self !== window.top
-          ? 'A page inside a frame cannot open a folder picker. Open Quire in its own window.'
+          ? 'A page inside a frame cannot open a folder picker. Open Laminar in its own window.'
           : typeof location !== 'undefined' && location.protocol === 'file:'
             ? 'A file opened straight from disk cannot open a folder picker. Use the desktop app.'
             : 'This browser cannot open a folder picker. Chrome or Edge can, and so can the desktop app.')

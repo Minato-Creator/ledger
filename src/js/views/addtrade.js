@@ -897,7 +897,7 @@ export function addTrade(store, nav, existingId = null) {
       el('input', { class: 'field news-text', placeholder: 'e.g. CPI m/m (USD) — or leave empty',
         value: f.newsEvent?.title || '',
         onInput: e => { const v = e.target.value; f.newsEvent = v.trim() ? { title: v, country: '', at: null } : null; } }),
-      el('span', { class: 'news-hint' }, 'not in the calendar Quire keeps'));
+      el('span', { class: 'news-hint' }, 'not in the calendar Laminar keeps'));
     holWrap.replaceChildren(el('select', { class: 'field news-sel',
       onChange: e => { f.holidays = e.target.value ? [e.target.value] : []; } },
       el('option', { value: '' }, 'N/A'),

@@ -70,7 +70,7 @@ export function encodeMonth(inst, month, rows, complete) {
 
 /** The bytes of a month file → { head, rows }. */
 export function decodeMonth(u8) {
-  if (MAGIC.some((b, i) => u8[i] !== b)) throw new Error('Not a Quire price file.');
+  if (MAGIC.some((b, i) => u8[i] !== b)) throw new Error('Not a Laminar price file.');
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
   const hl = dv.getUint32(4, true);
   const head = JSON.parse(new TextDecoder().decode(u8.subarray(8, 8 + hl)));

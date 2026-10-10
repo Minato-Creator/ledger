@@ -28,7 +28,7 @@ const CHECKED_TEXT = (() => { const [y, m, d] = CHECKED.split('-').map(Number); 
 /* ---------- small pieces ---------- */
 const STAR = 'M10 1.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L10 14.9l-5.2 2.7 1-5.8L1.6 7.7l5.8-.8z';
 export function stars(n, big = false) {
-  const wrap = el('span', { class: 'stars' + (big ? ' big' : ''), title: `${n} of 5 — Quire’s trust rating`, 'aria-label': `${n} of 5 stars` });
+  const wrap = el('span', { class: 'stars' + (big ? ' big' : ''), title: `${n} of 5 — Laminar’s trust rating`, 'aria-label': `${n} of 5 stars` });
   for (let i = 1; i <= 5; i++) {
     const s = svg('svg', { viewBox: '0 0 20 20' });
     if (n >= i) s.append(svg('path', { class: 'f', d: STAR }));
@@ -84,7 +84,7 @@ export function firmsPage(store, nav, sub) {
         el('span', { class: 'px' }, from ? from : ''));
     }),
     el('div', { class: 'pf-k', style: { marginTop: '14px', paddingBottom: '4px' } }, 'How trust is rated'),
-    el('p', { class: 'pf-note' }, 'Years running, payout record, how often rules change, and reported payout disputes — weighed against Trustpilot scores and how many reviews they rest on. Quire’s own rating, not the firm’s.'));
+    el('p', { class: 'pf-note' }, 'Years running, payout record, how often rules change, and reported payout disputes — weighed against Trustpilot scores and how many reviews they rest on. Laminar’s own rating, not the firm’s.'));
 
   const main = el('div', { class: 'pf-main' });
   paintFirm(main, store, nav, firm);
@@ -379,7 +379,7 @@ function fineCard(firm, repaint) {
 /* ---------- Quire's take ---------- */
 function takeCard(firm) {
   return el('section', { class: 'card pf-take' },
-    el('h3', {}, 'Quire’s take', el('span', {}, 'an opinion from the rules above — not advice')),
+    el('h3', {}, 'Laminar’s take', el('span', {}, 'an opinion from the rules above — not advice')),
     el('div', { class: 'pf-takecols' },
       el('div', { class: 'pf-takecol is-pro' }, el('span', { class: 'pf-k' }, 'Going for it'),
         ...firm.take.pros.map(x => el('div', { class: 'pf-ti' }, el('i', {}, '+'), x))),

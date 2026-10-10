@@ -87,9 +87,10 @@ a:hover { color:var(--blue-strong); }
 .card.light .eyebrow { color:var(--ink-on-light-2); }
 
 /* ---------- sidebar ---------- */
-.brand { display:flex; align-items:center; gap:9px; padding-left:6px; }
+.brand { display:flex; align-items:center; justify-content:center; gap:9px; min-height:32px; }
+.brand-word { display:block; color:var(--ink); }
 .brand-mark { width:32px; height:32px; border-radius:11px; display:flex; align-items:center; justify-content:center; flex:none; }
-.brand-mark svg { display:block; border-radius:11px; }
+.brand-mark .brand-img { display:block; }
 .brand-name { font:400 15px var(--mono); letter-spacing:-.01em; color:var(--ink); }
 
 .acct-switch { position:relative; }
@@ -603,12 +604,7 @@ select.field:hover {
    here was lighter than the dark theme's own surface and inverted the meaning. */
 [data-theme="dark"] { --cell:#151817; --cell-quiet:#0C0E0D; }
 
-/* The mark brings its own black tile, in both themes — it is the app's face
-   and has to look the same everywhere it appears. On a dark ground a hairline
-   keeps its edge from dissolving into the sidebar. */
-[data-theme="dark"] .brand-mark svg {
-  box-shadow:0 0 0 1px rgba(255,255,255,.07);
-}
+/* The mark is a picture with its own lit edge — the same in both themes. */
 [data-theme="dark"] ::-webkit-scrollbar-thumb { border-color:var(--card); }
 
 /* One switch, two words, no icon — it is a setting, not a toy. */
