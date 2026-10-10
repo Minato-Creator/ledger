@@ -1683,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "ledger"
-version = "2.18.0"
+version = "2.29.0"
 dependencies = [
  "tauri",
  "tauri-build",

@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Quire",
-  "version": "2.27.0",
+  "productName": "Laminar",
+  "mainBinaryName": "Laminar",
+  "version": "2.29.0",
   "identifier": "com.minato.ledger",
   "build": {
     "frontendDist": "../src"
@@ -10,7 +11,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Quire",
+        "title": "Laminar",
         "width": 1440,
         "height": 900,
         "minWidth": 1080,

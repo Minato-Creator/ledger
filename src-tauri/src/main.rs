@@ -220,7 +220,7 @@ fn fetch_oanda(path: String, token: String, live: bool) -> Result<String, String
     let host = if live { "https://api-fxtrade.oanda.com" } else { "https://api-fxpractice.oanda.com" };
     let res = ureq::get(&format!("{host}{path}"))
         .timeout(std::time::Duration::from_secs(20))
-        .set("User-Agent", "Quire")
+        .set("User-Agent", "Laminar")
         .set("Authorization", &format!("Bearer {token}"))
         .set("Accept-Datetime-Format", "UNIX")
         .call();
@@ -251,7 +251,7 @@ fn fetch_text(url: String) -> Result<String, String> {
 
     let res = ureq::get(&url)
         .timeout(std::time::Duration::from_secs(20))
-        .set("User-Agent", "Quire")
+        .set("User-Agent", "Laminar")
         .call()
         .map_err(|e| e.to_string())?;
 
@@ -261,6 +261,13 @@ fn fetch_text(url: String) -> Result<String, String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        /* The window's name, set here as well as in tauri.conf.json, so the title bar says Laminar whatever an older config carried */
+        .setup(|app| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_title("Laminar");
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             read_text,
             write_text,
@@ -278,7 +285,7 @@ fn main() {
             fetch_text
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Quire");
+        .expect("error while running Laminar");
 }
 
 /* Base64 written by hand is base64 worth testing. A bug here would not throw;
