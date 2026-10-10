@@ -1,19 +1,14 @@
-# Build Quire — Windows only, to save build minutes.
-#
-# On a private repo GitHub counts every Windows minute twice and every macOS
-# minute ten times, so building all three systems burned ~100 minutes a run.
-# This builds just the Windows installer and caches Rust between runs, so a
-# run after the first is a few minutes. Public repos build for free.
-name: Build Quire
+# Build Laminar — Windows only, to save build minutes.
+name: Build Laminar
 
 on:
-  workflow_dispatch:          # Actions tab → Build Quire → Run workflow
+  workflow_dispatch:          # Actions tab → Build Laminar → Run workflow
   push:
-    tags: ['v*']              # or push a tag like v2.27.0
+    tags: ['v*']
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true    # a newer run stops an older one, no minutes wasted
+  cancel-in-progress: true
 
 jobs:
   windows:
@@ -35,13 +30,13 @@ jobs:
       - name: Install the build tools
         run: npm install --no-audit --no-fund
         env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1   # the test browser is not needed to build
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
 
       - name: Build the installer
         run: npx tauri build --bundles nsis
 
       - uses: actions/upload-artifact@v4
         with:
-          name: quire-windows
+          name: laminar-windows
           path: src-tauri/target/release/bundle/nsis/*.exe
           retention-days: 14
