@@ -14,11 +14,16 @@ import { el, svg, icon, fitted } from '../ui.js';
 import * as c from '../calc.js';
 import * as M from '../mc.js';
 import { ticks, hoverLayer, readRow, tipLayer } from './chartkit.js';
+import { calm, ease, easeInOut, countTo, whenSeen, once, along, tintRGB } from './motion.js';
 
 let cache = null;                       // { sig, sim } — one run per trades + horizon
+/* A new risk or drawdown limit only rescales the answer: the page is drawn
+   again without the play, and the figures glide to their new values. */
+let quiet = false;
 
 const pc = (v, d = 1) => (v == null || !isFinite(v) ? '—' : `${v > 0.0005 ? '+' : v < -0.0005 ? '−' : ''}${Math.abs(v).toFixed(d)}%`);
 const odds = p => (p == null ? '—' : p < 0.001 ? '< 0.1%' : p > 0.999 ? '> 99.9%' : c.pct(p, p < 0.1 ? 1 : 0));
+const CLOUD = 180;                      // runs drawn faintly behind the fan (only drawing; the sums use every run)
 const oneIn = p => (p > 0 && p < 0.5 ? `about 1 in ${Math.round(1 / p)}` : null);
 
 export function mcPage(ctx) {
@@ -27,7 +32,9 @@ export function mcPage(ctx) {
   const risk = Number(S.risk ?? acct.defaultRiskPercent ?? 1) || 1;
   const limit = Number(S.ddLimit) || 10;
   const H = S.horizon || 100;
-  const set = async (k, v) => { S[k] = v; await save(); nav.refresh(); };
+  const set = async (k, v) => { S[k] = v; if (k === 'risk' || k === 'ddLimit') quiet = true; await save(); nav.refresh(); };
+  const play = !quiet && !calm();
+  quiet = false;
 
   const rs = [];
   let skipped = 0;
@@ -80,10 +87,10 @@ export function mcPage(ctx) {
   }
 
   const sig = JSON.stringify([acct.id, state.source, H, rs.length, rs.reduce((a, b) => a + b, 0).toFixed(6)]);
-  if (!cache || cache.sig !== sig) cache = { sig, sim: M.simulate(rs, { horizon: H, samples: 24 }) };
+  if (!cache || cache.sig !== sig) cache = { sig, sim: M.simulate(rs, { horizon: H, samples: CLOUD }) };
   const sim = cache.sim;
 
-  body.append(...answer(sim, rs, D, { risk, limit, H, acct, set }));
+  body.append(...answer(sim, rs, D, { risk, limit, H, acct, set, play }));
   /* The settings stay put above the page while it scrolls under them. */
   return el('div', { class: 'view lab-view' }, head, strip, controls, body);
 }
@@ -100,17 +107,25 @@ function answer(sim, rs, D, o) {
   const pProfit = sim.finals.filter(x => x > 0).length / sim.runs;
   const L50 = P(sim.longL, .5), L95 = P(sim.longL, .95);
 
-  const tile = (k, v, s, cls = '', title = '') => el('div', { class: 'lab-tile' + cls, title },
-    el('span', { class: 'k' }, k), el('span', { class: 'v' }, v), el('span', { class: 's' }, s || ' '));
-  const tiles = el('div', { class: 'lab-tiles mc-tiles' },
-    tile('Median result', pc(fin(.5)), `90% between ${pc(fin(.05), 0)} and ${pc(fin(.95), 0)}`,
+  /* Played, the figures count up once the fan has drawn most of itself; a
+     new risk glides them from where they stood. */
+  let n = 0;
+  const tile = (k, key, val, fmt, s, cls = '', title = '') => {
+    const v = el('span', { class: 'v' });
+    const delay = o.play ? 700 + 80 * n : 0;
+    countTo(v, 'lmc:' + key, val, fmt, { delay, dur: o.play ? 1100 : 450, fresh: o.play });
+    return el('div', { class: 'lab-tile' + cls, title, style: o.play ? { '--d': (120 + 70 * n++) + 'ms' } : {} },
+      el('span', { class: 'k' }, k), v, el('span', { class: 's' }, s || ' '));
+  };
+  const tiles = el('div', { class: 'lab-tiles mc-tiles' + (o.play ? ' mo-play' : '') },
+    tile('Median result', 'med', fin(.5), v => pc(v), `90% between ${pc(fin(.05), 0)} and ${pc(fin(.95), 0)}`,
       ' is-hero' + (fin(.5) > 0 ? ' is-pos' : fin(.5) < 0 ? ' is-neg' : ''),
       `After ${H} trades at ${risk}% a trade. Half of the runs finished above this, half below.`),
-    tile('Chance of profit', c.pct(pProfit, 0), `after ${H} trades`),
-    tile('Typical drawdown', pc(-dd(.5)), `1 in 20 runs: ${pc(-dd(.95))}`, '', 'The deepest fall from a high along the way, in the middle run'),
-    tile(`Reach −${limit}%`, odds(hit), oneIn(hit) || `within ${H} trades`, hit <= 0.05 ? ' is-ok' : ' is-bad',
+    tile('Chance of profit', 'profit', pProfit, v => c.pct(v, 0), `after ${H} trades`),
+    tile('Typical drawdown', 'dd', -dd(.5), v => pc(v), `1 in 20 runs: ${pc(-dd(.95))}`, '', 'The deepest fall from a high along the way, in the middle run'),
+    tile(`Reach −${limit}%`, 'hit', hit, odds, oneIn(hit) || `within ${H} trades`, hit <= 0.05 ? ' is-ok' : ' is-bad',
       `How many runs fall ${limit}% from a high at some point`),
-    tile('Losing streak', `${L50} in a row`, `1 in 20 runs: ${L95}`, '', 'The longest run of losses in a typical run'));
+    tile('Losing streak', 'streak', L50, v => `${Math.round(v)} in a row`, `1 in 20 runs: ${L95}`, '', 'The longest run of losses in a typical run'));
 
   return [
     tiles,
@@ -123,50 +138,93 @@ function answer(sim, rs, D, o) {
   ];
 }
 
-/* ---------- the next trades, as a fan ---------- */
+/* ---------- the next trades, as a fan ----------
+   Behind the bands, a cloud: 180 of the runs drawn faintly on a canvas, the
+   light adding up where they cross, so the likely paths glow brightest.
+   Played, the runs stream out left to right behind a scanning line, the
+   bands open behind it, and the median draws itself with a light at its tip. */
 function fanCard(sim, o) {
   return el('section', { class: 'card lab-chart mc-fan' },
     el('div', { class: 'lab-chart-head' },
       el('h2', {}, `The next ${o.H} trades`),
       el('span', { class: 'lab-sub' }, `at ${o.risk}% a trade`),
       el('span', { class: 'lab-legend' }, el('i', { class: 'mc-k-med' }), 'median', el('i', { class: 'mc-k-50' }), 'half of runs', el('i', { class: 'mc-k-90' }), '9 in 10')),
-    fitted((w, h) => drawFan(sim, o, w, h), 300));
+    fitted(once(o.play, (w, h, go) => drawFan(sim, o, w, h, go)), 300));
 }
 
-function drawFan(sim, o, W, H) {
-  const wrap = el('div', { class: 'lab-svgwrap' });
+function drawFan(sim, o, W, H, go = false) {
+  const wrap = el('div', { class: 'lab-svgwrap mc-fanwrap' + (go ? ' mo-play' : '') });
   const k = o.risk;
   const F = sim.fan;
   const plot = { l: 52, r: W - 14, t: 12, b: H - 24 };
   let lo = 0, hi = 0;
   for (const f of F) { lo = Math.min(lo, f.p5 * k); hi = Math.max(hi, f.p95 * k); }
-  for (const p of sim.few) for (const v of p) { lo = Math.min(lo, v * k); hi = Math.max(hi, v * k); }
+  for (const p of sim.few.slice(0, 24)) for (const v of p) { lo = Math.min(lo, v * k); hi = Math.max(hi, v * k); }
   const pad = (hi - lo) * 0.06 || 1; lo -= pad; hi += pad;
   const X = t => plot.l + (t / sim.horizon) * (plot.r - plot.l);
   const Y = v => plot.b - ((v - lo) / (hi - lo)) * (plot.b - plot.t);
-  const g = svg('svg', { class: 'lab-svg', width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  const step = Math.max(1, Math.ceil(sim.horizon / 160));
+
+  /* the cloud */
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const cv = el('canvas', { class: 'mc-cloud', width: Math.round(W * dpr), height: Math.round(H * dpr), style: { width: W + 'px', height: H + 'px' } });
+  const cx = cv.getContext('2d');
+  const tint = tintRGB();
+  const cloud = (at = () => 1) => {                    // at(i): how much of run i is out (0–1)
+    if (!cx) return;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx.clearRect(0, 0, W, H);
+    cx.save(); cx.beginPath(); cx.rect(plot.l, plot.t - 2, plot.r - plot.l, plot.b - plot.t + 4); cx.clip();
+    cx.globalCompositeOperation = 'lighter';
+    cx.lineWidth = 1; cx.strokeStyle = `rgba(${tint}, 0.07)`;
+    sim.few.forEach((p, i) => {
+      const upto = Math.floor(Math.min(1, at(i)) * sim.horizon);
+      if (upto < 1) return;
+      cx.beginPath();
+      for (let t = 0; t <= upto; t += step) { const x = X(t), y = Y(p[t] * k); t ? cx.lineTo(x, y) : cx.moveTo(x, y); }
+      if (upto % step) cx.lineTo(X(upto), Y(p[upto] * k));
+      cx.stroke();
+    });
+    cx.restore();
+  };
+
+  const g = svg('svg', { class: 'lab-svg mc-fansvg', width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  const id = 'mcf' + Math.random().toString(36).slice(2, 7);
+  const reveal = svg('rect', { x: plot.l - 2, y: 0, width: go ? 0 : plot.r - plot.l + 4, height: H });
+  g.append(svg('defs', {}, svg('clipPath', { id }, reveal),
+    svg('filter', { id: id + 'g', x: '-50%', y: '-50%', width: '200%', height: '200%' }, svg('feGaussianBlur', { stdDeviation: 3.2 }))));
   for (const v of ticks(lo, hi, 5)) {
     g.append(svg('line', { class: Math.abs(v) < 1e-9 ? 'lab-zero' : 'lab-grid', x1: plot.l, x2: plot.r, y1: Y(v), y2: Y(v) }));
     g.append(svg('text', { class: 'lab-tick', x: plot.l - 8, y: Y(v) + 3.5, 'text-anchor': 'end' }, pc(v, Math.abs(v) < 10 && v % 1 ? 1 : 0)));
   }
   for (const t of ticks(0, sim.horizon, 6)) g.append(svg('text', { class: 'lab-tick', x: X(t), y: plot.b + 16, 'text-anchor': 'middle' }, t === 0 ? 'now' : String(t)));
-  /* Forty single futures behind the bands, faint — what one run actually looks like. */
-  const step = Math.max(1, Math.ceil(sim.horizon / 160));
-  for (const p of sim.few) {
+  /* a dozen single futures, sharper than the cloud — what one run actually looks like */
+  for (const p of sim.few.slice(0, 12)) {
     let d = '';
     for (let t = 0; t < p.length; t += step) d += (t ? 'L' : 'M') + X(t).toFixed(1) + ',' + Y(p[t] * k).toFixed(1);
     g.append(svg('path', { class: 'mc-path', d }));
   }
+  const bands = svg('g', { 'clip-path': `url(#${id})` });
   const band = (a, b, cls) => {
     const top = F.map(f => `${X(f.t).toFixed(1)},${Y(f[b] * k).toFixed(1)}`);
     const bot = F.map(f => `${X(f.t).toFixed(1)},${Y(f[a] * k).toFixed(1)}`).reverse();
-    g.append(svg('path', { class: cls + ' line-area', d: 'M' + top.join('L') + 'L' + bot.join('L') + 'Z' }));
+    bands.append(svg('path', { class: cls, d: 'M' + top.join('L') + 'L' + bot.join('L') + 'Z' }));
   };
   band('p5', 'p95', 'mc-band90');
   band('p25', 'p75', 'mc-band50');
-  g.append(svg('path', { class: 'mc-median line-draw', pathLength: 1, d: 'M' + F.map(f => `${X(f.t).toFixed(1)},${Y(f.p50 * k).toFixed(1)}`).join('L') }));
-  const end = F[F.length - 1];
-  g.append(svg('circle', { class: 'mc-end line-tip', cx: X(end.t), cy: Y(end.p50 * k), r: 4 }));
+  g.append(bands);
+  const pts = F.map(f => [X(f.t), Y(f.p50 * k)]);
+  const med = 'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L');
+  const medGlow = svg('path', { class: 'mc-median-glow', d: med, filter: `url(#${id}g)`, pathLength: 1 });
+  const medLine = svg('path', { class: 'mc-median', d: med, pathLength: 1 });
+  if (go) for (const m of [medGlow, medLine]) { m.style.strokeDasharray = '1'; m.style.strokeDashoffset = '1'; }
+  g.append(medGlow, medLine);
+  const [ex, ey] = pts[pts.length - 1];
+  const headGlow = svg('circle', { class: 'mc-head-glow', cx: ex, cy: ey, r: 9 });
+  const head = svg('circle', { class: 'mc-end', cx: ex, cy: ey, r: 4 });
+  g.append(headGlow, head);
+  const scan = svg('line', { class: 'mc-scan', x1: plot.l, x2: plot.l, y1: plot.t, y2: plot.b });
+  if (go) g.append(scan);
 
   hoverLayer(wrap, g, plot, x => {
     const t = Math.round(((x - plot.l) / (plot.r - plot.l)) * sim.horizon);
@@ -178,13 +236,42 @@ function drawFan(sim, o, W, H) {
       readRow('mc-k-med', pc(f.p50 * k), 'median'),
       readRow('mc-k-90', pc(f.p5 * k), 'worst 1 in 20')] };
   });
-  wrap.prepend(g);
+  wrap.prepend(cv, g);
+
+  if (!go) { cloud(); return wrap; }
+  /* the play: one clock for the canvas, the scanning line, the opening bands and the median's light */
+  const N = sim.few.length, T_CLOUD = 1250, T_MED0 = 650, T_MED = 900;
+  const at = (ms, i) => (ms - (i / N) * 520) / 520;        // each run streams out over half a second, staggered
+  const tip = along(pts);
+  cloud(() => 0);
+  whenSeen(wrap, () => requestAnimationFrame(t0 => {
+    const frame = now => {
+      if (!wrap.isConnected) return;
+      const ms = now - t0;
+      cloud(i => easeInOut(at(ms, i)));
+      const sx = plot.l + (plot.r - plot.l) * easeInOut(ms / T_CLOUD);
+      scan.setAttribute('x1', sx); scan.setAttribute('x2', sx);
+      scan.style.opacity = String(ms < T_CLOUD ? 0.9 : Math.max(0, 0.9 - (ms - T_CLOUD) / 300));
+      reveal.setAttribute('width', Math.max(0, sx - plot.l + 2));
+      const mp = ease((ms - T_MED0) / T_MED);
+      for (const m of [medGlow, medLine]) m.style.strokeDashoffset = String(1 - mp);
+      const [hx, hy] = tip(mp);
+      for (const c of [head, headGlow]) { c.setAttribute('cx', hx); c.setAttribute('cy', hy); }
+      if (ms < Math.max(T_CLOUD + 320, T_MED0 + T_MED + 40)) requestAnimationFrame(frame);
+      else {
+        cloud(); scan.remove(); reveal.setAttribute('width', plot.r - plot.l + 4);
+        for (const m of [medGlow, medLine]) { m.style.strokeDasharray = ''; m.style.strokeDashoffset = ''; }
+        wrap.classList.add('is-done');
+      }
+    };
+    requestAnimationFrame(frame);
+  }));
   return wrap;
 }
 
 /* ---------- a histogram of a sorted list, scaled by risk ---------- */
-function histogram(sorted, scale, { W, H, marks = [], limit = null, signNeg = false, tone }) {
-  const wrap = el('div', { class: 'lab-svgwrap' });
+function histogram(sorted, scale, { W, H, marks = [], limit = null, signNeg = false, tone, go = false }) {
+  const wrap = el('div', { class: 'lab-svgwrap mc-hist' + (go ? ' mo-play' : '') });
   const tip = tipLayer(wrap);
   /* Ascending, in % of the account. A drawdown is drawn as the negative it is. */
   const vals = signNeg ? sorted.map(v => -v * scale).reverse() : sorted.map(v => v * scale);
@@ -205,7 +292,7 @@ function histogram(sorted, scale, { W, H, marks = [], limit = null, signNeg = fa
     const a = lo + i * bw, b = a + bw, mid = (a + b) / 2;
     const h = n ? Math.max(1.5, (n / top) * (plot.b - plot.t)) : 0;
     const cls = tone(mid);
-    if (h) g.append(svg('rect', { class: 'col-fill-svg mc-bin ' + cls, x: plot.l + i * slot + 1, y: plot.b - h, width: Math.max(1, slot - 2), height: h, rx: 1.5 }));
+    if (h) g.append(svg('rect', { class: 'col-fill-svg mc-bin ' + cls, x: plot.l + i * slot + 1, y: plot.b - h, width: Math.max(1, slot - 2), height: h, rx: 1.5, style: `--d:${80 + i * 22}ms` }));
     const hit = svg('rect', { class: 'an-hit', x: plot.l + i * slot, y: plot.t, width: slot, height: plot.b - plot.t, fill: 'transparent' });
     hit.addEventListener('pointerenter', () => tip.show(plot.l + i * slot + slot / 2, plot.t + 30, [
       el('div', { class: 'h' }, `${pc(a)} to ${pc(b)}`),
@@ -222,6 +309,7 @@ function histogram(sorted, scale, { W, H, marks = [], limit = null, signNeg = fa
     g.append(svg('line', { class: 'mc-limit', x1: X(limit), x2: X(limit), y1: plot.t - 4, y2: plot.b }));
   }
   wrap.prepend(g);
+  if (go) whenSeen(wrap);
   return wrap;
 }
 
@@ -230,9 +318,9 @@ function finishCard(sim, o) {
   const q = p => M.pctile(sim.finals, p) * k;
   return el('section', { class: 'card lab-chart' },
     el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Where you finish'), el('span', { class: 'lab-sub' }, `after ${o.H} trades`)),
-    fitted((w, h) => histogram(sim.finals, k, { W: w, H: h, tone: v => (v >= 0 ? 'is-pos' : 'is-neg'),
+    fitted(once(o.play, (w, h, go) => histogram(sim.finals, k, { W: w, H: h, go, tone: v => (v >= 0 ? 'is-pos' : 'is-neg'),
       marks: [[`5% ${pc(q(.05), 0)}`, q(.05)], [`median ${pc(q(.5), 1)}`, q(.5), 'is-med'], [`95% ${pc(q(.95), 0)}`, q(.95)]]
-        .filter((m, i, all) => i === 1 || Math.abs(m[1] - all[1][1]) > (q(.95) - q(.05)) * 0.22) }), 200));
+        .filter((m, i, all) => i === 1 || Math.abs(m[1] - all[1][1]) > (q(.95) - q(.05)) * 0.22) })), 200));
 }
 
 function ddCard(sim, o) {
@@ -243,9 +331,9 @@ function ddCard(sim, o) {
     el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Deepest drawdown'),
       el('span', { class: 'lab-sub' }, 'in each run'),
       el('span', { class: 'lab-legend' }, el('i', { class: 'mc-k-limit' }), `your −${o.limit}% · ${odds(beyond)} of runs reach it`)),
-    fitted((w, h) => histogram(sim.dds, k, { W: w, H: h, signNeg: true, limit: -o.limit,
+    fitted(once(o.play, (w, h, go) => histogram(sim.dds, k, { W: w, H: h, go, signNeg: true, limit: -o.limit,
       tone: v => (v <= -o.limit ? 'is-neg' : 'is-dim'),
-      marks: [[`median ${pc(q(.5), 1)}`, q(.5), 'is-med'], [`1 in 20 ${pc(q(.95), 1)}`, q(.95)]] }), 200));
+      marks: [[`median ${pc(q(.5), 1)}`, q(.5), 'is-med'], [`1 in 20 ${pc(q(.95), 1)}`, q(.95)]] })), 200));
 }
 
 /* ---------- losing runs ---------- */
@@ -258,18 +346,19 @@ function streakCard(sim, o) {
     el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Losing streaks'),
       el('span', { class: 'lab-sub' }, `chance of at least this many losses in a row, in ${o.H} trades`),
       el('span', { class: 'lab-legend' }, el('i', { class: 'mc-k-limit' }), `takes you past −${o.limit}%`)));
-  const facts = el('div', { class: 'mc-facts' },
+  const facts = el('div', { class: 'mc-facts' + (o.play ? ' mo-play' : '') },
     fact(`${toLimit}`, `losses in a row take you to −${o.limit}% at ${k}% a trade`),
     fact(odds(pLimit), `chance of a run that long in the next ${o.H} trades`),
     fact(`${M.pctile(sim.longL, .5)} – ${M.pctile(sim.longL, .95)}`, 'longest losing run: typical, and 1 in 20'),
     fact(`${M.pctile(sim.longW, .5)}`, 'longest winning run, typical'));
-  card.append(el('div', { class: 'mc-split' }, fitted((w, h) => drawStreaks(rows, k, toLimit, w, h), 190), facts));
+  card.append(el('div', { class: 'mc-split' }, fitted(once(o.play, (w, h, go) => drawStreaks(rows, k, toLimit, w, h, go)), 190), facts));
+  if (o.play) whenSeen(facts);
   return card;
 }
 const fact = (v, k) => el('div', { class: 'mc-fact' }, el('b', {}, v), el('span', {}, k));
 
-function drawStreaks(rows, k, toLimit, W, H) {
-  const wrap = el('div', { class: 'lab-svgwrap' });
+function drawStreaks(rows, k, toLimit, W, H, go = false) {
+  const wrap = el('div', { class: 'lab-svgwrap mc-hist' + (go ? ' mo-play' : '') });
   const tip = tipLayer(wrap);
   const plot = { l: 6, r: W - 6, t: 22, b: H - 36 };
   const g = svg('svg', { class: 'lab-svg', width: W, height: H, viewBox: `0 0 ${W} ${H}` });
@@ -280,8 +369,8 @@ function drawStreaks(rows, k, toLimit, W, H) {
     const cx = plot.l + slot * i + slot / 2;
     const h = Math.max(1.5, x.p * (plot.b - plot.t));
     const over = x.k >= toLimit;
-    g.append(svg('rect', { class: 'col-fill-svg mc-bin ' + (over ? 'is-neg' : 'is-dim'), x: cx - bw / 2, y: plot.b - h, width: bw, height: h, rx: 3 }));
-    if (slot >= 30 || i % 2 === 0) g.append(svg('text', { class: 'mc-val', x: cx, y: plot.b - h - 6, 'text-anchor': 'middle' }, c.pct(x.p, 0)));
+    g.append(svg('rect', { class: 'col-fill-svg mc-bin ' + (over ? 'is-neg' : 'is-dim'), x: cx - bw / 2, y: plot.b - h, width: bw, height: h, rx: 3, style: `--d:${80 + i * 45}ms` }));
+    if (slot >= 30 || i % 2 === 0) g.append(svg('text', { class: 'mc-val', x: cx, y: plot.b - h - 6, 'text-anchor': 'middle', style: `--d:${380 + i * 45}ms` }, c.pct(x.p, 0)));
     g.append(svg('text', { class: 'mc-k', x: cx, y: plot.b + 15, 'text-anchor': 'middle' }, String(x.k)));
     if (slot >= 34 || i % 2 === 0) g.append(svg('text', { class: 'lab-tick', x: cx, y: plot.b + 29, 'text-anchor': 'middle' }, pc(-x.k * k, x.k * k < 10 ? 1 : 0)));
     const hit = svg('rect', { class: 'an-hit', x: cx - slot / 2, y: plot.t - 16, width: slot, height: plot.b - plot.t + 46, fill: 'transparent' });
@@ -293,6 +382,7 @@ function drawStreaks(rows, k, toLimit, W, H) {
     g.append(hit);
   });
   wrap.prepend(g);
+  if (go) whenSeen(wrap);
   return wrap;
 }
 
@@ -306,10 +396,10 @@ function riskCard(sim, rs, D, o) {
   const kel = M.kelly(rs);
   const r2 = v => Math.round(v * 100) / 100;
   const grid = [...new Set([0.25, 0.5, 0.75, 1, 1.5, 2, 3, r2(risk), sug ? r2(sug) : null].filter(v => v != null && v > 0))].sort((a, b) => a - b);
-  const row = r => {
+  const row = (r, i) => {
     const p = M.chanceOfLimit(sim.dds, r, limit);
     const isSug = sug && r === r2(sug), isYou = r === r2(risk);
-    return el('button', { class: 'mc-row' + (isSug ? ' is-sug' : '') + (isYou ? ' is-you' : ''), title: 'Use this risk',
+    return el('button', { class: 'mc-row' + (isSug ? ' is-sug' : '') + (isYou ? ' is-you' : ''), title: 'Use this risk', style: { '--d': (60 + i * 55) + 'ms' },
         onClick: () => { if (!isYou) set('risk', r); } },
       el('span', { class: 'rk' }, `${r.toFixed(2)}%`, isSug ? el('i', {}, 'suggested') : isYou ? el('i', { class: 'you' }, 'yours') : null),
       el('span', { class: 'n ' + (M.pctile(sim.finals, .5) >= 0 ? 'is-pos' : 'is-neg') }, pc(M.pctile(sim.finals, .5) * r)),
@@ -320,6 +410,11 @@ function riskCard(sim, rs, D, o) {
   };
   const said = sug == null ? 'Your trades never drew down in any run — there is nothing to size against.'
     : `Risk ${sug.toFixed(2)}% a trade and a −${limit}% drawdown happens in about 1 run in 20 over the next ${H} trades.`;
+  const table = el('div', { class: 'mc-table' + (o.play ? ' mo-play' : '') },
+    el('div', { class: 'mc-row is-head' }, el('span', {}, 'Risk'), el('span', {}, 'Median'), el('span', {}, 'Typical DD'),
+      el('span', {}, '1 in 20 DD'), el('span', {}, `Reach −${limit}%`), el('span', {}, 'To limit')),
+    ...grid.map(row));
+  if (o.play) whenSeen(table);
   return el('section', { class: 'card lab-chart mc-risk' },
     el('div', { class: 'lab-chart-head' }, el('h2', {}, 'How much to risk'),
       el('span', { class: 'lab-sub' }, `to keep a −${limit}% drawdown unlikely`)),
@@ -330,15 +425,12 @@ function riskCard(sim, rs, D, o) {
           fact(sug == null ? '—' : `${sug.toFixed(2)}%`, 'suggested · 1 in 20 reach the limit'),
           fact(safe == null ? '—' : `${safe.toFixed(2)}%`, 'careful · 1 in 100'),
           fact(kel == null ? '—' : kel === 0 ? '0%' : `${kel.toFixed(1)}%`, kel ? `Kelly ceiling · half is ${(kel / 2).toFixed(1)}%` : 'Kelly · no edge to size')),
-        fitted((w, h) => drawRiskCurve(sim, o, sug, safe, w, h), 170)),
-      el('div', { class: 'mc-table' },
-        el('div', { class: 'mc-row is-head' }, el('span', {}, 'Risk'), el('span', {}, 'Median'), el('span', {}, 'Typical DD'),
-          el('span', {}, '1 in 20 DD'), el('span', {}, `Reach −${limit}%`), el('span', {}, 'To limit')),
-        ...grid.map(row))));
+        fitted(once(o.play, (w, h, go) => drawRiskCurve(sim, o, sug, safe, w, h, go)), 170)),
+      table));
 }
 
-function drawRiskCurve(sim, o, sug, safe, W, H) {
-  const wrap = el('div', { class: 'lab-svgwrap' });
+function drawRiskCurve(sim, o, sug, safe, W, H, go = false) {
+  const wrap = el('div', { class: 'lab-svgwrap mc-riskwrap' + (go ? ' mo-play' : '') });
   const xMax = Math.max(3, (sug || 1) * 2, o.risk * 1.3);
   const N = 90;
   const pts = [];
@@ -353,8 +445,8 @@ function drawRiskCurve(sim, o, sug, safe, W, H) {
   }
   for (const r of ticks(0, xMax, 6)) g.append(svg('text', { class: 'lab-tick', x: X(r), y: plot.b + 16, 'text-anchor': 'middle' }, `${r}%`));
   g.append(svg('line', { class: 'mc-five', x1: plot.l, x2: plot.r, y1: Y(.05), y2: Y(.05) }));
-  g.append(svg('path', { class: 'mc-curve line-draw', pathLength: 1, d: `M${X(0)},${Y(0)}` + pts.map(([r, p]) => `L${X(r).toFixed(1)},${Y(p).toFixed(1)}`).join('') }));
-  const dot = (r, cls) => { if (r != null && r <= xMax) g.append(svg('circle', { class: 'mc-dot line-tip ' + cls, cx: X(r), cy: Y(M.chanceOfLimit(sim.dds, r, o.limit)), r: 4.5 })); };
+  g.append(svg('path', { class: 'mc-curve', pathLength: 1, d: `M${X(0)},${Y(0)}` + pts.map(([r, p]) => `L${X(r).toFixed(1)},${Y(p).toFixed(1)}`).join('') }));
+  const dot = (r, cls) => { if (r != null && r <= xMax) g.append(svg('circle', { class: 'mc-dot ' + cls, cx: X(r), cy: Y(M.chanceOfLimit(sim.dds, r, o.limit)), r: 4.5 })); };
   dot(safe, 'is-safe'); dot(sug, 'is-sug'); dot(o.risk, 'is-you');
   hoverLayer(wrap, g, plot, x => {
     const r = Math.max(0.01, ((x - plot.l) / (plot.r - plot.l)) * xMax);
@@ -363,5 +455,6 @@ function drawRiskCurve(sim, o, sug, safe, W, H) {
       readRow('mc-k-limit', odds(p), `reach −${o.limit}%`)] };
   });
   wrap.prepend(g);
+  if (go) whenSeen(wrap);
   return wrap;
 }

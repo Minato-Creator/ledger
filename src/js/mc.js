@@ -29,7 +29,7 @@
 import { rng, pctile } from './lab.js';
 
 export const HORIZONS = [50, 100, 250, 500];
-export const MIN_TRADES = 20;
+export const MIN_TRADES = 10;   // Minato: 10 is enough to start (it was 20)
 
 /**
  * Play the next `horizon` trades `runs` times.

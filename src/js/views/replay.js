@@ -272,7 +272,15 @@ function dataCard(nav) {
 
   card.append(el('div', { class: 'rp-data-h' },
     el('h2', {}, 'Price data'),
-    el('span', { class: 'rp-sub' }, `two years of OANDA one-minute prices per pair · ${pairs.length ? `${pairs.length} pair${pairs.length === 1 ? '' : 's'} · ${mb(total)}` : 'none yet'}`)));
+    el('span', { class: 'rp-sub' }, `${rd.historyOf(ix)} years of OANDA one-minute prices per pair · ${pairs.length ? `${pairs.length} pair${pairs.length === 1 ? '' : 's'} · ${mb(total)}` : 'none yet'}`)));
+
+  /* how far back: two years unless more is wanted (the Lab's quant tests want more) */
+  const yrs = rd.historyOf(ix);
+  card.append(el('div', { class: 'rp-hist' },
+    el('span', { class: 'rp-k' }, 'History'),
+    el('div', { class: 'seg rp-years' }, ...rd.HISTORY.map(y => el('button', { type: 'button', class: y === yrs ? 'is-on' : '', 'data-years': y,
+      onClick: async () => { if (y === yrs) return; ix = await rd.setHistory(y); nav.refresh(); } }, `${y} years`))),
+    el('span', { class: 'rp-sub' }, yrs > 2 ? `older months show as missing — press Update on a pair to get them (about ${2 * yrs} MB a pair)` : 'more history: more to test a strategy on')));
 
   if (keyState === false) {
     card.append(el('div', { class: 'rp-nokey' },
@@ -301,7 +309,7 @@ function dataCard(nav) {
     ...SUGGEST.filter(s => !have.has(s)).map(s => el('button', { class: 'chip rp-chip', 'data-inst': s, disabled: keyState === false, onClick: () => add(s) }, pairName(s))),
     input,
     el('button', { class: 'btn btn-quiet', disabled: keyState === false, onClick: () => add(input.value) }, 'Download')));
-  card.append(el('p', { class: 'rp-foot' }, 'Kept in your vault under replay/prices — about 4 MB a pair. A month is saved once; this month is brought up to date when you ask.'));
+  card.append(el('p', { class: 'rp-foot' }, 'Kept in your vault under replay/prices — about 2 MB a pair a year. A month is saved once; this month is brought up to date when you ask.'));
   return card;
 }
 

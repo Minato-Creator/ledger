@@ -26,7 +26,10 @@ import { fs } from './fs.js';
 import { call, parseCandles, explain, useLocalPrices } from './candles.js';
 
 export const ROOT = 'replay/prices';
-export const MONTHS_BACK = 24;                   // two years, plus the month we are in
+export const MONTHS_BACK = 24;                   // two years, plus the month we are in — the default
+/* How far back to keep: two years unless asked for more (the index remembers it). */
+export const HISTORY = [2, 5, 10];
+export const historyOf = ix => (HISTORY.includes(ix?.years) ? ix.years : 2);
 const INDEX = `${ROOT}/index.json`;
 const MAGIC = [0x51, 0x52, 0x43, 0x31];          // "QRC1"
 const MIN = 60, DAY = 86400;
@@ -35,10 +38,10 @@ const MIN = 60, DAY = 86400;
 export const monthKey = s => new Date(s * 1000).toISOString().slice(0, 7);
 export const monthStart = key => Date.UTC(+key.slice(0, 4), +key.slice(5, 7) - 1, 1) / 1000;
 export const monthEnd = key => Date.UTC(+key.slice(0, 4), +key.slice(5, 7), 1) / 1000;
-/** Every month from two years back to this one, oldest first. */
-export function monthsWanted(now = Date.now() / 1000) {
+/** Every month from `years` back (two by default) to this one, oldest first. */
+export function monthsWanted(now = Date.now() / 1000, years = 2) {
   const d = new Date(now * 1000), out = [];
-  for (let k = MONTHS_BACK; k >= 0; k--) out.push(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - k, 1)).toISOString().slice(0, 7));
+  for (let k = years * 12; k >= 0; k--) out.push(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - k, 1)).toISOString().slice(0, 7));
   return out;
 }
 export const fileOf = (inst, month) => `${ROOT}/${inst}/${month}.qrc`;
@@ -98,10 +101,17 @@ export async function readIndex() {
 }
 async function writeIndex() { await fs.writeText(INDEX, JSON.stringify(index, null, 2)); }
 export function forgetIndex() { index = null; memo.clear(); }
+/** Keep 2, 5 or 10 years. More: the older months show as missing, to download. Fewer: nothing saved is deleted. */
+export async function setHistory(years) {
+  const ix = await readIndex();
+  ix.years = HISTORY.includes(years) ? years : 2;
+  await writeIndex();
+  return ix;
+}
 
 /** What the Data screen shows for a pair. */
 export function pairStatus(ix, inst, now = Date.now() / 1000) {
-  const want = monthsWanted(now), have = ix.pairs[inst]?.months || {};
+  const want = monthsWanted(now, historyOf(ix)), have = ix.pairs[inst]?.months || {};
   const done = want.filter(m => have[m] && (have[m].complete || m === monthKey(now)));
   const missing = want.filter(m => !have[m] || (!have[m].complete && m !== monthKey(now)));
   const stale = have[monthKey(now)] && !have[monthKey(now)].complete
@@ -250,7 +260,7 @@ export function growFor(inst, day, cred, now = Date.now() / 1000) {
     const ix = await readIndex();
     const have = ix.pairs[inst]?.months;
     if (!have || !Object.keys(have).length) return false;
-    const want = monthsWanted(now), dayM = day.slice(0, 7);
+    const want = monthsWanted(now, historyOf(ix)), dayM = day.slice(0, 7);
     if (!want.includes(dayM)) return false;
     const dayEnd = Date.parse(day + 'T00:00:00Z') / 1000 + DAY;
     for (const m of want) {

@@ -19,7 +19,9 @@ import * as c from '../calc.js';
 import * as L from '../lab.js';
 import { ghostPage } from './ghost.js';
 import { mcPage } from './montecarlo.js';
+import { quantPage } from './quant.js';
 import { ticks, hoverLayer, readRow } from './chartkit.js';
+import { calm, easeInOut, countTo, whenSeen, once } from './motion.js';
 
 let cache = null;          // { sig, result } — kept across repaints and pages
 let running = null;        // { sig, cancel }
@@ -56,7 +58,7 @@ export function lab(store, nav, sub) {
   };
   const ctx = { store, nav, acct, state, save, firm, plan, pick };
   ctx.head = (which, ...extra) => labHead(ctx, which, extra);
-  return sub === 'rules' ? rulesPage(ctx) : sub === 'ghost' ? ghostPage(ctx)
+  return sub === 'rules' ? rulesPage(ctx) : sub === 'ghost' ? ghostPage(ctx) : sub === 'quant' ? quantPage(ctx)
        : sub === 'prop' ? answerPage(ctx) : mcPage(ctx);
 }
 
@@ -67,12 +69,12 @@ function labHead(ctx, which, extra) {
   return el('header', { class: 'head' },
     el('h1', {}, 'The Lab'),
     el('div', { class: 'seg lab-views', role: 'tablist', 'aria-label': 'Tool' },
-      ...[['mc', 'Monte Carlo', '#/lab'], ['prop', 'Prop firm', '#/lab/prop'], ['ghost', 'Ghost', '#/lab/ghost']].map(([k, label, href]) =>
+      ...[['mc', 'Monte Carlo', '#/lab'], ['prop', 'Prop firm', '#/lab/prop'], ['ghost', 'Ghost', '#/lab/ghost'], ['quant', 'Quant', '#/lab/quant']].map(([k, label, href]) =>
         el('button', { class: which === k ? 'is-on' : '', role: 'tab', 'aria-selected': String(which === k),
           onClick: () => { if (which !== k) nav.go(href); } }, label))),
     ...extra.slice(0, 1),
     el('div', { class: 'spacer' }),
-    el('div', { class: 'seg lab-source', role: 'group', 'aria-label': 'Which trades' },
+    which === 'quant' ? null : el('div', { class: 'seg lab-source', role: 'group', 'aria-label': 'Which trades' },
       ...SOURCES.map(([v, label]) => el('button', { class: state.source === v ? 'is-on' : '',
         onClick: async () => { if (state.source === v) return; state.source = v; await save(); nav.refresh(); } }, label))),
     ...extra.slice(1));
@@ -101,6 +103,7 @@ function answerPage(ctx) {
 
   const show = (v) => body.replaceChildren(v);
   const p = plan();
+  const play = !calm();                // a fresh answer plays; there is no setting here that only rescales it
   if (!sheet) show(prompt('No firm yet', 'Type in a firm’s rules to see what its evaluation is worth to you.', 'Set up a firm', nav));
   else {
     const need = L.missing(sheet);
@@ -114,7 +117,7 @@ function answerPage(ctx) {
   function run(sample, sheet, p) {
     const sumR = sample.days.reduce((a, d) => a + d.reduce((x, y) => x + y, 0), 0);
     const sig = JSON.stringify([state.source, acct.id, sample.trades, sample.dayCount, sumR.toFixed(6), sample.perWeek, sheet, p]);
-    if (cache && cache.sig === sig) { show(answer(cache.result, sample, sheet, p)); return; }
+    if (cache && cache.sig === sig) { show(answer(cache.result, sample, sheet, p, play)); return; }
     if (running) running.cancel();
     let cancelled = false;
     running = { sig, cancel: () => { cancelled = true; } };
@@ -130,7 +133,7 @@ function answerPage(ctx) {
       if (s.done) {
         running = null;
         cache = { sig, result: s.value };
-        show(answer(s.value, sample, sheet, p));
+        show(answer(s.value, sample, sheet, p, play));
         return;
       }
       const v = s.value;
@@ -170,27 +173,34 @@ function paintStrip(strip, s) {
   ].filter(Boolean));
 }
 
-function answer(R, sample, sheet, p) {
-  const tile = (label, value, sub, cls = '', title = '') => el('div', { class: 'lab-tile' + cls, title },
-    el('span', { class: 'k' }, label), el('span', { class: 'v' }, value), el('span', { class: 's' }, sub || ' '));
+function answer(R, sample, sheet, p, play = false) {
+  /* Played, the tiles rise in one after another and their figures count up. */
+  let n = 0;
+  const tile = (label, value, sub, cls = '', title = '') => {
+    const v = el('span', { class: 'v' });
+    if (Array.isArray(value)) countTo(v, 'lab:' + label, value[0], value[1], { delay: play ? 450 + 80 * n : 0, dur: play ? 1100 : 0, fresh: true });
+    else v.textContent = value;
+    return el('div', { class: 'lab-tile' + cls, title, style: play ? { '--d': (80 + 70 * n++) + 'ms' } : {} },
+      el('span', { class: 'k' }, label), v, el('span', { class: 's' }, sub || ' '));
+  };
   const be = R.breakEven;
   const beText = be.status === 'found' ? r2(be.meanR) : be.status === 'below' ? `< ${r2(be.meanR)}` : `> ${r2(be.meanR)}`;
 
-  const tiles = el('div', { class: 'lab-tiles' },
-    tile('EV / evaluation', k$(R.ev, { sign: true }), `${k$(R.evRange[0], { sign: true, short: true })} to ${k$(R.evRange[1], { sign: true, short: true })}`,
+  const tiles = el('div', { class: 'lab-tiles' + (play ? ' mo-play' : '') },
+    tile('EV / evaluation', [R.ev, v => k$(v, { sign: true })], `${k$(R.evRange[0], { sign: true, short: true })} to ${k$(R.evRange[1], { sign: true, short: true })}`,
       R.ev > 0 ? ' is-pos is-hero' : R.ev < 0 ? ' is-neg is-hero' : ' is-hero',
       'Average result of one evaluation, fee included. Underneath: where it lands on 80% of plausible versions of your history.'),
-    tile('Pass rate', c.pct(R.passRate, 1), sheet.steps === 2 ? 'both steps' : ''),
-    tile('Paid', c.pct(R.paidRate, 1), 'at least once'),
-    tile('Median payout', R.paidPct.p50 == null ? '—' : k$(R.paidPct.p50), R.avgPayouts ? `${R.avgPayouts.toFixed(1)} payouts avg` : ''),
-    tile('Break-even edge', beText, `yours ${r2(sample.meanR)}`,
+    tile('Pass rate', [R.passRate, v => c.pct(v, 1)], sheet.steps === 2 ? 'both steps' : ''),
+    tile('Paid', [R.paidRate, v => c.pct(v, 1)], 'at least once'),
+    tile('Median payout', R.paidPct.p50 == null ? '—' : [R.paidPct.p50, v => k$(v)], R.avgPayouts ? `${R.avgPayouts.toFixed(1)} payouts avg` : ''),
+    tile('Break-even edge', be.status === 'found' ? [be.meanR, r2] : beText, `yours ${r2(sample.meanR)}`,
       be.status === 'found' ? (sample.meanR > be.meanR ? ' is-ok' : ' is-bad') : '',
       'The edge per trade below which this evaluation stops paying for itself'));
 
   return el('div', { class: 'lab-answer' },
     tiles,
-    el('div', { class: 'lab-main' }, pathsCard(R), outcomesCard(R)),
-    el('div', { class: 'lab-pair' }, payoutCard(R), edgeCard(R, sample)),
+    el('div', { class: 'lab-main' }, pathsCard(R, play), outcomesCard(R, play)),
+    el('div', { class: 'lab-pair' }, payoutCard(R, play), edgeCard(R, sample, play)),
     el('p', { class: 'lab-note', title: 'Drawdown and daily limits are checked on closed trades — a journal cannot see how far a trade went against you while it was open.' },
       `${R.runs.toLocaleString('en-US')} runs · risk ${p.riskEval}% / ${p.riskFunded}% · ${plural(R.horizonMonths, 'month')} funded`));
 }
@@ -201,7 +211,7 @@ function answer(R, sample, sheet, p) {
    Ninety accounts drawn as they went: each a line from the day you start to
    the day it ends, on the target or on the floor. The colour is how it
    ended. Hover a day for how every one of the ten thousand stood by then. */
-function pathsCard(R) {
+function pathsCard(R, play) {
   const E = R.evalChart;
   const card = el('section', { class: 'card lab-chart lab-paths' },
     el('div', { class: 'lab-chart-head' },
@@ -210,12 +220,14 @@ function pathsCard(R) {
       el('span', { class: 'lab-legend' },
         el('i', { class: 'is-pass' }), 'Passed', el('i', { class: 'is-fail' }), 'Failed',
         E.cum.open[E.cum.open.length - 1] > 0.001 ? [el('i', { class: 'is-open' }), 'Still going'] : null)));
-  card.append(fitted((w, h) => drawPaths(E, w, h), 280));
+  card.append(fitted(once(play, (w, h, go) => drawPaths(E, w, h, go)), 280));
   return card;
 }
 
-function drawPaths(E, W, H) {
-  const wrap = el('div', { class: 'lab-svgwrap' });
+/* Played, the accounts run out from day 0 behind a scanning line, and each
+   ends with a dot that lands as the line reaches it. */
+function drawPaths(E, W, H, go = false) {
+  const wrap = el('div', { class: 'lab-svgwrap lab-pathswrap' + (go ? ' mo-play' : '') });
   const plot = { l: 52, r: W - 70, t: 12, b: H - 24 };
   const xMax = Math.max(5, Math.ceil(E.p95Days * 1.05));
   let yMin = Math.min(E.floor, 0), yMax = Math.max(E.target, 0);
@@ -231,7 +243,9 @@ function drawPaths(E, W, H) {
 
   const g = svg('svg', { class: 'lab-svg', width: W, height: H, viewBox: `0 0 ${W} ${H}` });
   const id = 'clip' + Math.random().toString(36).slice(2, 7);
-  g.append(svg('defs', {}, svg('clipPath', { id }, svg('rect', { x: plot.l, y: plot.t - 2, width: plot.r - plot.l, height: plot.b - plot.t + 4 }))));
+  const reveal = svg('rect', { x: plot.l, y: plot.t - 2, width: go ? 0 : plot.r - plot.l, height: plot.b - plot.t + 4 });
+  g.append(svg('defs', {}, svg('clipPath', { id }, reveal)));
+  const T_RUN = 1500;
 
   for (const v of ticks(yMin, yMax, 5)) {
     g.append(svg('line', { class: v === 0 ? 'lab-zero' : 'lab-grid', x1: plot.l, x2: plot.r, y1: Y(v), y2: Y(v) }));
@@ -252,13 +266,16 @@ function drawPaths(E, W, H) {
   level(E.floor, 'is-floor', E.ddType === 'static' ? 'floor' : 'floor ↑');
 
   const lines = svg('g', { 'clip-path': `url(#${id})` });
+  /* when the scan reaches a share x of the width — the inverse of its ease, found by halving */
+  const dAt = x => { let a = 0, b = 1; for (let i = 0; i < 18; i++) { const m = (a + b) / 2; if (easeInOut(m) < x) a = m; else b = m; } return a * T_RUN; };
   const order = { open: 0, fail: 1, pass: 2 };
   for (const p of E.paths.slice().sort((a, b) => order[a.end] - order[b.end])) {
     let d = '';
     for (let i = 0; i < p.pts.length; i += 2) d += (i ? 'L' : 'M') + X(p.pts[i]).toFixed(1) + ',' + Y(p.pts[i + 1]).toFixed(1);
     lines.append(svg('path', { class: 'lab-path is-' + p.end, d }));
     const lx = p.pts[p.pts.length - 2], ly = p.pts[p.pts.length - 1];
-    if (lx <= xMax && p.end !== 'open') lines.append(svg('circle', { class: 'lab-end is-' + p.end, cx: X(lx), cy: Y(ly), r: 2.4 }));
+    if (lx <= xMax && p.end !== 'open') lines.append(svg('circle', { class: 'lab-end is-' + p.end, cx: X(lx), cy: Y(ly), r: 2.4,
+      style: `--d:${Math.round(dAt(lx / xMax))}ms` }));
   }
   g.append(lines);
 
@@ -273,11 +290,27 @@ function drawPaths(E, W, H) {
       readRow('is-going', c.pct(Math.max(0, 1 - pass - fail), 1), 'still going')] };
   });
   wrap.prepend(g);
+  if (go) {
+    const scan = svg('line', { class: 'lab-scan', x1: plot.l, x2: plot.l, y1: plot.t, y2: plot.b });
+    g.append(scan);
+    whenSeen(wrap, () => requestAnimationFrame(t0 => {
+      const frame = now => {
+        if (!wrap.isConnected) return;
+        const ms = now - t0, sx = plot.l + (plot.r - plot.l) * easeInOut(ms / T_RUN);
+        reveal.setAttribute('width', Math.max(0, sx - plot.l));
+        scan.setAttribute('x1', sx); scan.setAttribute('x2', sx);
+        scan.style.opacity = String(ms < T_RUN ? 0.9 : Math.max(0, 0.9 - (ms - T_RUN) / 300));
+        if (ms < T_RUN + 320) requestAnimationFrame(frame);
+        else { reveal.setAttribute('width', plot.r - plot.l); scan.remove(); wrap.classList.add('is-done'); }
+      };
+      requestAnimationFrame(frame);
+    }));
+  }
   return wrap;
 }
 
 /* How every account ended. Four rows that add to the whole. */
-function outcomesCard(R) {
+function outcomesCard(R, play) {
   const rows = [
     ['fail', 'Failed evaluation', R.rates.failed,
       [['drawdown', R.fail.drawdown], ['daily', R.fail.daily], ['time', R.fail.time + R.fail.stale]]],
@@ -285,15 +318,20 @@ function outcomesCard(R) {
     ['alive', 'Funded, not paid yet', R.rates.unpaidAlive, []],
     ['paid', 'Paid', R.rates.paid, []],
   ].filter(r => r[2] > 0.0005 || r[0] === 'paid' || r[0] === 'fail');
+  /* Played, the bars fill one after another and their shares count up with them. */
+  const list = el('div', { class: 'lab-orows' + (play ? ' mo-play' : '') }, ...rows.map(([k, label, v, why], i) => {
+    const parts = why.filter(([, n]) => n / R.runs >= 0.0005).map(([w, n]) => `${w} ${c.pct(n / R.runs, 1)}`);
+    const d = 200 + i * 140, b = el('b');
+    countTo(b, 'lab:o:' + k, v, x => c.pct(x, 1), { delay: play ? d : 0, dur: play ? 900 : 0, fresh: true });
+    return el('div', { class: 'lab-orow', style: { '--d': d + 'ms' } },
+      el('div', { class: 'top' }, el('span', { class: 'l' }, label), b),
+      el('div', { class: 'bar' }, el('i', { class: 'is-' + k, style: { width: Math.max(v > 0 ? 1.5 : 0, v * 100) + '%' } })),
+      parts.length ? el('div', { class: 'why' }, parts.join(' · ')) : null);
+  }));
+  if (play) whenSeen(list);
   return el('section', { class: 'card lab-chart lab-outcomes' },
     el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Outcomes')),
-    el('div', { class: 'lab-orows' }, ...rows.map(([k, label, v, why]) => {
-      const parts = why.filter(([, n]) => n / R.runs >= 0.0005).map(([w, n]) => `${w} ${c.pct(n / R.runs, 1)}`);
-      return el('div', { class: 'lab-orow' },
-        el('div', { class: 'top' }, el('span', { class: 'l' }, label), el('b', {}, c.pct(v, 1))),
-        el('div', { class: 'bar' }, el('i', { class: 'is-' + k, style: { width: Math.max(v > 0 ? 1.5 : 0, v * 100) + '%' } })),
-        parts.length ? el('div', { class: 'why' }, parts.join(' · ')) : null);
-    })),
+    list,
     R.avgPassDays ? el('div', { class: 'lab-ofoot' }, el('b', {}, String(Math.round(R.avgPassDays))), 'trading days to pass, on average') : null);
 }
 
@@ -301,17 +339,17 @@ function outcomesCard(R) {
    A smoothed distribution rather than a row of bins: the shape is the
    message, and bins make the shape depend on where the edges happen to
    fall. The 10th, 50th and 90th percentiles are marked on it. */
-function payoutCard(R) {
+function payoutCard(R, play) {
   const card = el('section', { class: 'card lab-chart lab-payout' },
     el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Payouts'),
       el('span', { class: 'lab-sub' }, `paid accounts · ${plural(R.horizonMonths, 'month')}`)));
   if (R.paid.length < 10) { card.append(el('p', { class: 'lab-empty' }, 'Too few paid accounts to draw.')); return card; }
-  card.append(fitted((w, h) => drawPayout(R, w, h), 190));
+  card.append(fitted(once(play, (w, h, go) => drawPayout(R, w, h, go)), 190));
   return card;
 }
 
-function drawPayout(R, W, H) {
-  const wrap = el('div', { class: 'lab-svgwrap' });
+function drawPayout(R, W, H, go = false) {
+  const wrap = el('div', { class: 'lab-svgwrap lab-curvewrap' + (go ? ' mo-play' : '') });
   const data = R.paid;
   const n = data.length;
   const mean = data.reduce((a, b) => a + b, 0) / n;
@@ -346,8 +384,8 @@ function drawPayout(R, W, H) {
   g.append(svg('line', { class: 'lab-zero', x1: plot.l, x2: plot.r, y1: plot.b, y2: plot.b }));
   let line = '';
   xs.forEach((x, i) => { line += (i ? 'L' : 'M') + X(x).toFixed(1) + ',' + Y(ys[i]).toFixed(1); });
-  g.append(svg('path', { d: `${line}L${X(hi).toFixed(1)},${plot.b}L${X(lo).toFixed(1)},${plot.b}Z`, fill: `url(#${gid})` }));
-  g.append(svg('path', { class: 'lab-curve is-paid', d: line }));
+  g.append(svg('path', { class: 'lab-area', d: `${line}L${X(hi).toFixed(1)},${plot.b}L${X(lo).toFixed(1)},${plot.b}Z`, fill: `url(#${gid})` }));
+  g.append(svg('path', { class: 'lab-curve is-paid', d: line, pathLength: 1 }));
 
   /* The three marks, labelled above the plot where nothing else is. */
   const marks = [['p10', R.paidPct.p10], ['median', R.paidPct.p50], ['p90', R.paidPct.p90]];
@@ -374,6 +412,7 @@ function drawPayout(R, W, H) {
       readRow('is-paid', c.pct(above, 0), 'were paid more')] };
   });
   wrap.prepend(g);
+  if (go) whenSeen(wrap);
   return wrap;
 }
 
@@ -382,16 +421,16 @@ function drawPayout(R, W, H) {
    break-even; the shaded band is where your own edge probably is, given how
    many trades it was measured on. Above zero the line is the profit colour,
    below it the loss colour. */
-function edgeCard(R, sample) {
+function edgeCard(R, sample, play) {
   const card = el('section', { class: 'card lab-chart lab-edge' },
     el('div', { class: 'lab-chart-head' }, el('h2', {}, 'EV by edge'),
       el('span', { class: 'lab-sub' }, 'R per trade')));
-  card.append(fitted((w, h) => drawEdge(R, sample, w, h), 190));
+  card.append(fitted(once(play, (w, h, go) => drawEdge(R, sample, w, h, go)), 190));
   return card;
 }
 
-function drawEdge(R, sample, W, H) {
-  const wrap = el('div', { class: 'lab-svgwrap' });
+function drawEdge(R, sample, W, H, go = false) {
+  const wrap = el('div', { class: 'lab-svgwrap lab-curvewrap' + (go ? ' mo-play' : '') });
   const pts = R.curve;
   const x0 = pts[0].edge, x1 = pts[pts.length - 1].edge;
   let yMin = Math.min(0, ...pts.map(p => p.ev)), yMax = Math.max(0, ...pts.map(p => p.ev));
@@ -423,7 +462,7 @@ function drawEdge(R, sample, W, H) {
   }
   let d = '';
   pts.forEach((p, i) => { d += (i ? 'L' : 'M') + X(p.edge).toFixed(1) + ',' + Y(p.ev).toFixed(1); });
-  g.append(svg('path', { class: 'lab-curve', d, stroke: `url(#${gid})` }));
+  g.append(svg('path', { class: 'lab-curve', d, stroke: `url(#${gid})`, pathLength: 1 }));
 
   const evAt = x => {
     for (let i = 1; i < pts.length; i++) if (x <= pts[i].edge) {
@@ -451,6 +490,7 @@ function drawEdge(R, sample, W, H) {
       readRow(ev >= 0 ? 'is-paid' : 'is-fail', k$(ev, { sign: true }), 'per evaluation')] };
   });
   wrap.prepend(g);
+  if (go) whenSeen(wrap);
   return wrap;
 }
 

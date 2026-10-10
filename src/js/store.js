@@ -505,6 +505,10 @@ class Store {
     if (d.lab.mc.risk != null && !(Number(d.lab.mc.risk) > 0)) { d.lab.mc.risk = null; note(); }
     if (![50, 100, 250, 500].includes(d.lab.mc.horizon)) { d.lab.mc.horizon = 100; note(); }
     if (!(Number(d.lab.mc.ddLimit) > 0 && Number(d.lab.mc.ddLimit) <= 90)) { d.lab.mc.ddLimit = 10; note(); }
+    /* Quant's saved versions: each a name, the prompt that describes it, its settings */
+    if (!d.lab.quant || typeof d.lab.quant !== 'object') { d.lab.quant = defaultLab().quant; note(); }
+    if (!Array.isArray(d.lab.quant.versions)) { d.lab.quant.versions = []; note(); }
+    d.lab.quant.versions = d.lab.quant.versions.filter(v => v && typeof v === 'object' && v.id && v.settings && typeof v.settings === 'object');
     for (const [k, v] of Object.entries(blankRules())) {
       if (!(k in d.lab.ghost)) { d.lab.ghost[k] = v; note(); }
       else if (Array.isArray(v) && !Array.isArray(d.lab.ghost[k])) { d.lab.ghost[k] = []; note(); }
@@ -1179,7 +1183,7 @@ const PLAYBOOK_VERSION = 3;
 function defaultLab() {
   return { version: 1, firms: [], firmId: null, source: 'live',
            plan: { riskEval: null, riskFunded: null, months: 6 }, ghost: blankRules(),
-           mc: { risk: null, horizon: 100, ddLimit: 10 } };
+           mc: { risk: null, horizon: 100, ddLimit: 10 }, quant: { versions: [], current: null } };
 }
 
 function defaultPlaybook() {

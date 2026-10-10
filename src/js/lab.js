@@ -102,7 +102,7 @@ export function sampleFrom(account, trades) {
 
 /** Enough to say anything at all. Below this the page explains rather than
     printing a number that would look far more certain than it is. */
-export const MIN_TRADES = 20;
+export const MIN_TRADES = 10;   // Minato: 10 is enough to start (it was 20)
 export const MIN_DAYS = 5;
 
 /* ---------- the rule sheet ---------- */
