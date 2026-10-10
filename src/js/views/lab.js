@@ -25,6 +25,7 @@ import { calm, easeInOut, countTo, whenSeen, once } from './motion.js';
 
 let cache = null;          // { sig, result } — kept across repaints and pages
 let running = null;        // { sig, cancel }
+let propPlayed = null;      // the answer last played: it plays again only when the answer is a new one
 
 const SOURCES = [['live', 'Live'], ['forward', 'Forward test'], ['both', 'Both']];
 const isFwd = t => t.mode === 'forward';
@@ -103,7 +104,7 @@ function answerPage(ctx) {
 
   const show = (v) => body.replaceChildren(v);
   const p = plan();
-  const play = !calm();                // a fresh answer plays; there is no setting here that only rescales it
+  const quietNow = calm();
   if (!sheet) show(prompt('No firm yet', 'Type in a firm’s rules to see what its evaluation is worth to you.', 'Set up a firm', nav));
   else {
     const need = L.missing(sheet);
@@ -117,7 +118,8 @@ function answerPage(ctx) {
   function run(sample, sheet, p) {
     const sumR = sample.days.reduce((a, d) => a + d.reduce((x, y) => x + y, 0), 0);
     const sig = JSON.stringify([state.source, acct.id, sample.trades, sample.dayCount, sumR.toFixed(6), sample.perWeek, sheet, p]);
-    if (cache && cache.sig === sig) { show(answer(cache.result, sample, sheet, p, play)); return; }
+    const play = !quietNow && sig !== propPlayed;   // a new answer plays; the same one, drawn again, does not
+    if (cache && cache.sig === sig) { show(answer(cache.result, sample, sheet, p, play)); if (play) propPlayed = sig; return; }
     if (running) running.cancel();
     let cancelled = false;
     running = { sig, cancel: () => { cancelled = true; } };
@@ -134,6 +136,7 @@ function answerPage(ctx) {
         running = null;
         cache = { sig, result: s.value };
         show(answer(s.value, sample, sheet, p, play));
+        if (play) propPlayed = sig;
         return;
       }
       const v = s.value;

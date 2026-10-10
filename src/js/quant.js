@@ -39,9 +39,10 @@
    before the 5pm New York close to an hour after it, when the market
    stops and reopens.
    ============================================================ */
+import { pipOf } from './pips.js';
 import { aggregate, rolloverOf } from './candles.js';
 
-export const PIP = { XAU_USD: 0.1 };
+export const PIP = { XAU_USD: 0.1 };   /* kept for older callers; pips.js knows every market */
 /* The engine's defaults are Version 4 (quantversions.js has every version, each with all its settings
    spelled out): 15m external swings 8 either side, a double confirmation at least 12 entry candles long,
    no trade at tier 3, aim past a target under the minimum R, two more goes at a level after the first. */
@@ -52,7 +53,9 @@ export const DEFAULTS = { K: 2, KX: 8, zone: 0.3, minR: 1.5, pips: 2, full: 0.5,
   /* Version 8: after the rejection, wait for a 1m internal break (within confirmMins); take profit at a fixed R instead of a structure target */
   confirm: false, confirmMins: 60, fixedR: null,
   /* Version 10/11: the 15m internal structure (and the 1H) pointing the trade's way when the rejection candle closes */
-  int15Agree: false, h1Agree: false };   // spread in pips, paid on the entry
+  int15Agree: false, h1Agree: false,
+  /* Version 12: every timeframe but the 4H stretched — scale 4 reads the '1m/3m/5m/15m' as 4m/12m/20m/1H */
+  scale: 1 };   // spread in pips, paid on the entry
 
 const isFull = (b, f) => { const r = b[2] - b[3]; return r > 0 && Math.abs(b[4] - b[1]) / r >= f; };
 /* past a level: a full-bodied close beyond it — or a candle whose whole body is beyond it (it opened there, after a gap) */
@@ -249,17 +252,17 @@ const swingAt = (bars, j, K, side) => j >= K && j + K < bars.length && pivot(bar
 export function backtest(rows, { inst = 'XAU_USD', K = DEFAULTS.K, KX = DEFAULTS.KX, zone = DEFAULTS.zone, minR = DEFAULTS.minR, pips = DEFAULTS.pips,
   full = DEFAULTS.full, spread = DEFAULTS.spread, breakEven = true, kinds = ['mtf', 'ltf'], mtfEntry = DEFAULTS.mtfEntry, ltfEntry = DEFAULTS.ltfEntry,
   maxR = DEFAULTS.maxR, pickR = DEFAULTS.pickR, tier3 = DEFAULTS.tier3, dcBars = DEFAULTS.dcBars, div = DEFAULTS.div, stopAt = DEFAULTS.stopAt, hours = DEFAULTS.hours, capR = DEFAULTS.capR, minStop = DEFAULTS.minStop, divAll = DEFAULTS.divAll, reentry = DEFAULTS.reentry, htf = DEFAULTS.htf, htfLevel = DEFAULTS.htfLevel, htfK = DEFAULTS.htfK, htfOfs = DEFAULTS.htfOfs, htfOnlyLevel = DEFAULTS.htfOnlyLevel, nearest = DEFAULTS.nearest, sessions = DEFAULTS.sessions, tz = DEFAULTS.tz, maxPerDay = DEFAULTS.maxPerDay, dayLossR = DEFAULTS.dayLossR,
-  weekLossR = DEFAULTS.weekLossR, pauseAfter = DEFAULTS.pauseAfter, confirm = DEFAULTS.confirm, confirmMins = DEFAULTS.confirmMins, fixedR = DEFAULTS.fixedR, int15Agree = DEFAULTS.int15Agree, h1Agree = DEFAULTS.h1Agree, onProgress } = {}) {
-  const pip = PIP[inst] ?? 0.0001, buf = pips * pip, cost = spread * pip;
+  weekLossR = DEFAULTS.weekLossR, pauseAfter = DEFAULTS.pauseAfter, confirm = DEFAULTS.confirm, confirmMins = DEFAULTS.confirmMins, fixedR = DEFAULTS.fixedR, int15Agree = DEFAULTS.int15Agree, h1Agree = DEFAULTS.h1Agree, scale = DEFAULTS.scale, onProgress } = {}) {
+  const pip = pipOf(inst), buf = pips * pip, cost = spread * pip;
   const nearClose = t => { const a = rolloverOf(t); return t - a < 3600 || a + 86400 - t < 1800; };
-  const agg = {}; for (const m of [1, 3, 5, 15, 240]) agg[m] = aggregate(rows, m);
-  const SZ = { 1: 60, 3: 180, 5: 300, 15: 900 };
+  const agg = {}; for (const m of [1, 3, 5, 15]) agg[m] = aggregate(rows, m * scale); agg[240] = aggregate(rows, 240);
+  const SZ = { 1: 60 * scale, 3: 180 * scale, 5: 300 * scale, 15: 900 * scale };
   const frames = {
-    ext15: structure(agg[15], 900, { K: KX, full }),       // MTF external: the direction
-    int15: structure(agg[15], 900, { K, full }),           // MTF internal: IPL / IPH
-    s5: structure(agg[5], 300, { K, full }),               // LTF: the OFS, its protected levels, break-even
-    s3: { bars: agg[3], size: 180 },
-    s1: structure(agg[1], 60, { K, full }),
+    ext15: structure(agg[15], SZ[15], { K: KX, full }),       // MTF external: the direction
+    int15: structure(agg[15], SZ[15], { K, full }),           // MTF internal: IPL / IPH
+    s5: structure(agg[5], SZ[5], { K, full }),               // LTF: the OFS, its protected levels, break-even
+    s3: { bars: agg[3], size: SZ[3] },
+    s1: structure(agg[1], SZ[1], { K, full }),
   };
   frames[15] = frames.ext15; frames[5] = frames.s5; frames[1] = frames.s1;   // the charts' names
   const H1 = h1Agree ? structure(aggregate(rows, 60), 3600, { K, full }) : null;
@@ -308,9 +311,9 @@ export function backtest(rows, { inst = 'XAU_USD', K = DEFAULTS.K, KX = DEFAULTS
   const allowed = (d, t) => dirAt(ext, t) === d || (htf && windowAt(t) === d && (!htfOfs || dirAt(frames.s5, t) === d));
 
   const SETUPS = [
-    { kind: 'mtf', name: 'MTF structure', src: [frames.ext15, frames.int15], entry: agg[mtfEntry], esz: SZ[mtfEntry], tf: 15, etf: mtfEntry,
+    { kind: 'mtf', name: 'MTF structure', src: [frames.ext15, frames.int15], entry: agg[mtfEntry], esz: SZ[mtfEntry], tf: 15 * scale, etf: mtfEntry * scale,
       label: (lv, d) => (lv.htf ? '4H NC' : lv.fromExt ? (d > 0 ? 'PL' : 'PH') : (d > 0 ? 'IPL' : 'IPH')), ltf: false, tierOf: 'ext15' },
-    { kind: 'ltf', name: 'LTF after OFS', src: [frames.s5], entry: agg[ltfEntry], esz: SZ[ltfEntry], tf: 5, etf: ltfEntry,
+    { kind: 'ltf', name: 'LTF after OFS', src: [frames.s5], entry: agg[ltfEntry], esz: SZ[ltfEntry], tf: 5 * scale, etf: ltfEntry * scale,
       label: (lv, d) => (d > 0 ? 'IPL' : 'IPH'), ltf: true, tierOf: 's5' },
   ].filter(x => kinds.includes(x.kind));
   const signals = [], skipped = { rr: 0, noTarget: 0, busy: 0, close: 0, far: 0, tier3: 0, dc: 0, div: 0 };

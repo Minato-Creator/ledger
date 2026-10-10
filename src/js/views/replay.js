@@ -341,6 +341,11 @@ function pairRow(inst, nav) {
   return el('div', { class: 'rp-row', 'data-inst': inst }, ...cells, right);
 }
 
+/* A download runs on while you look at other pages: only the Data page is drawn again as it goes —
+   redrawing whatever page is open after every month would replay its animations and stall it. */
+const onData = () => /^#\/replay\/data/.test(location.hash);
+const refreshData = nav => { if (onData()) nav.refresh(); };
+
 async function start(inst, nav) {
   const cred = await getKey();
   if (!cred) { keyState = false; return nav.refresh(); }
@@ -351,7 +356,7 @@ async function start(inst, nav) {
   nav.refresh();
   try {
     const n = await rd.downloadPair(inst, cred, { signal: job.ctrl.signal,
-      onProgress: p => { job.done = p.done; job.total = p.total; job.month = p.month; rd.readIndex().then(i => { ix = i; nav.refresh(); }); } });
+      onProgress: p => { job.done = p.done; job.total = p.total; job.month = p.month; rd.readIndex().then(i => { ix = i; refreshData(nav); }); } });
     job.finished = true;
     toast(n ? `${pairName(inst)} — ${n} month${n === 1 ? '' : 's'} saved` : `${pairName(inst)} is up to date`);
   } catch (e) {
@@ -359,5 +364,5 @@ async function start(inst, nav) {
     else job.error = rd.explain(e);
   }
   ix = await rd.readIndex();
-  nav.refresh();
+  refreshData(nav);
 }

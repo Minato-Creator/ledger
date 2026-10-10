@@ -2,14 +2,17 @@
    The Lab · Quant — Minato's own strategy, written as rules (quant.js) and
    traded by the app over every one-minute candle Replay has downloaded.
 
-   Gold first. Versions (quantversions.js): pick one at the top; each has its
-   prompt (the strategy in words, to copy into an AI) and its settings —
-   read-only for the built-in ones, editable for his own (New version from…,
-   saved in lab.json → quant.versions; a change runs it again).
+   Gold first. Versions (quantversions.js): three built in — Version 1 and 2
+   (his risk entry, quant13.js) and Version 3 (A+ 1H, quant.js) — plus his
+   own (New version from…, saved in lab.json → quant.versions; a change
+   runs it again). Each has its prompt (the strategy in words, to copy into
+   an AI) and its settings.
      • tiles: total R, trades, win rate (won · lost · break-even), profit
        factor, deepest drawdown, average win
      • the equity line, the two setups and the two years
      • every version side by side on the same prices
+     • ten years, every pair downloaded: the curves, the years against
+       buying and holding, and the volatility surface (quant10view.js)
      • on the right, the picked trade marked up the way he marks his: the
        level (PL / PH / IPL / IPH), the DC low and the sweep (x), the
        position, the target, the break-even — and the list.
@@ -19,6 +22,9 @@ import * as cd from '../candles.js';
 import * as rd from '../replaydata.js';
 import * as Q from '../quant.js';
 import * as V from '../quantversions.js';
+import { prepare13, run13 } from '../quant13.js';
+import { pipOf, spreadOf } from '../pips.js';
+import { tenYearCard, yearsCard, volCard } from './quant10view.js';
 import { ticks, hoverLayer, readRow } from './chartkit.js';
 import { createCore, CHART_TFS, TV_FONT } from '../chart/core.js';
 
@@ -38,26 +44,98 @@ const ui = { open: false };   // the prompt and settings, folded away until aske
 let STORE = null;          // the app's store, for the charts' settings
 const YEAR_CUT = Date.parse('2025-10-01T00:00:00Z') / 1000;
 
-function runOf(v) {
-  const o = V.optionsOf(v), key = prices.sig + JSON.stringify(o);
-  if (!runs.has(key)) {
-    const R = Q.backtest(prices.rows, { inst: INST, ...o });
-    runs.set(key, { R, S: Q.stats(R.trades), Y: [Q.stats(R.trades.filter(x => x.openT < YEAR_CUT)), Q.stats(R.trades.filter(x => x.openT >= YEAR_CUT))] });
+const pending = new Map(); // sig + settings → the run on its way
+
+/* The engine runs beside the page (quantworker.js), so a run never freezes it. Where a worker cannot
+   start — the one-file build opened from disk — it runs here, one at a time, between frames. The run
+   the page is waiting for goes ahead of the Versions card's. */
+const engine = (() => {
+  let w = null, broken = false, sentSig = null, busy = false, seq = 0;
+  const queue = [], waiting = new Map();
+  const trim = R => ({ trades: R.trades, signals: R.signals, skipped: R.skipped, from: R.from, to: R.to });
+  const start = () => {
+    if (w || broken || typeof Worker !== 'function') return w;
+    try {
+      w = new Worker(new URL('js/quantworker.js', document.baseURI), { type: 'module' });
+      w.onmessage = e => {
+        const it = waiting.get(e.data?.id);
+        if (!it) return;                                  // the prices arriving: nothing to answer
+        waiting.delete(e.data.id); busy = false;
+        if (e.data.error) it.reject(new Error(e.data.error)); else it.resolve(e.data.R);
+        pump();
+      };
+      w.onerror = e => {                                   // it could not start: the rest run here
+        e.preventDefault?.(); broken = true; try { w.terminate(); } catch { /* gone */ } w = null; sentSig = null;
+        queue.unshift(...waiting.values()); waiting.clear(); busy = false; pump();
+      };
+    } catch { broken = true; w = null; }
+    return w;
+  };
+  function pump() {
+    if (busy || !queue.length) return;
+    const it = queue.shift();
+    busy = true;
+    if (start()) {
+      if (sentSig !== it.prices.sig) {
+        const rows = it.prices.rows, flat = new Float64Array(rows.length * 5);
+        for (let i = 0, k = 0; i < rows.length; i++, k += 5) { const r = rows[i]; flat[k] = r[0]; flat[k + 1] = r[1]; flat[k + 2] = r[2]; flat[k + 3] = r[3]; flat[k + 4] = r[4]; }
+        w.postMessage({ type: 'rows', id: 'rows', flat }, [flat.buffer]);
+        sentSig = it.prices.sig;
+      }
+      const id = ++seq;
+      waiting.set(id, it);
+      w.postMessage({ type: 'run', id, opts: it.opts });
+    } else {
+      setTimeout(() => {
+        try {
+          const { engine, inst, ...opts } = it.opts;
+          if (engine === '13') { it.prices.P ??= prepare13(it.prices.rows); it.resolve(trim(run13(it.prices.P, inst, opts))); }
+          else it.resolve(trim(Q.backtest(it.prices.rows, { inst, ...opts })));
+        } catch (e) { it.reject(e); }
+        busy = false; pump();
+      }, 16);
+    }
   }
-  return runs.get(key);
+  return {
+    run(key, prices, opts, urgent) {
+      return new Promise((resolve, reject) => {
+        const it = { key, prices, opts, resolve, reject };
+        if (urgent) queue.unshift(it); else queue.push(it);
+        pump();
+      });
+    },
+    /* a queued run wanted now: to the front */
+    hurry(key) { const i = queue.findIndex(x => x.key === key); if (i > 0) queue.unshift(...queue.splice(i, 1)); },
+    forget() { queue.length = 0; },
+  };
+})();
+
+const keyOf = v => prices.sig + JSON.stringify(V.optionsOf(v));
+const runOf = v => (prices ? runs.get(keyOf(v)) : undefined);
+const ranAlready = v => !!prices && runs.has(keyOf(v));
+/** A version's run: from the cache, or on its way. */
+function runAsync(v, urgent = false) {
+  const key = keyOf(v);
+  if (runs.has(key)) return Promise.resolve(runs.get(key));
+  if (pending.has(key)) { if (urgent) engine.hurry(key); return pending.get(key); }
+  const p = engine.run(key, prices, { inst: INST, ...V.optionsOf(v) }, urgent).then(R => {
+    const r = { R, S: Q.stats(R.trades), Y: [Q.stats(R.trades.filter(x => x.openT < YEAR_CUT)), Q.stats(R.trades.filter(x => x.openT >= YEAR_CUT))] };
+    runs.set(key, r); pending.delete(key); return r;
+  }, e => { pending.delete(key); throw e; });
+  pending.set(key, p);
+  return p;
 }
-const ranAlready = v => !!prices && runs.has(prices.sig + JSON.stringify(V.optionsOf(v)));
 
 export function quantPage(ctx) {
   STORE = ctx.store;
   const { state, save, nav } = ctx;
   if (!state.quant) state.quant = { versions: [], current: null };
   const all = V.allVersions(state);
-  const ver = all.find(v => v.id === state.quant.current) || all.find(v => v.id === 'v10') || all[0];
+  const ver = V.currentOf(state);
   const choose = id => { state.quant.current = id; pick.id = null; save(); nav.refresh(); };
   const head = ctx.head('quant',
     el('select', { class: 'field lab-firm qt-ver', 'aria-label': 'Version', onChange: e => choose(e.target.value) },
-      ...all.map(v => el('option', { value: v.id, selected: v.id === ver.id }, v.name))));
+      ...all.map(v => el('option', { value: v.id, selected: v.id === ver.id }, fullName(v)))));
   const body = el('div', { class: 'lab-body qt-body' });
   const view = el('div', { class: 'view lab-view qt-view' }, head, body);
   const wait = text => body.replaceChildren(el('div', { class: 'lab-wait' }, el('div', { class: 'lab-progress is-busy' }, el('i')), el('span', {}, text)));
@@ -79,17 +157,16 @@ export function quantPage(ctx) {
       wait(`Reading two years of ${INST.replace('_', '')}…`);
       const rows = await rd.candlesBetween(INST, rd.monthStart(keys[0]), rd.monthEnd(keys[keys.length - 1]));
       if (!view.isConnected) return;
-      prices = { sig, rows }; runs.clear();
+      prices = { sig, rows }; runs.clear(); pending.clear(); engine.forget();
     }
-    if (!ranAlready(ver)) {
-      wait(`${ver.name}: trading ${prices.rows.length.toLocaleString('en-US')} one-minute candles by its rules…`);
-      await new Promise(r => setTimeout(r, 30));
-    }
-    const K = { rows: prices.rows, ...runOf(ver) };
+    if (!ranAlready(ver)) wait(`${ver.name}: trading ${prices.rows.length.toLocaleString('en-US')} one-minute candles by its rules…`);
+    const run = await runAsync(ver, true);
+    if (!view.isConnected) return;
+    const K = { rows: prices.rows, ...run };
     if (view.isConnected) body.replaceChildren(...answer(K, ver, ctx, all));
   })().catch(e => body.replaceChildren(el('p', { class: 'lab-empty' }, `Could not run: ${e.message || e}`)));
 
-  view.__quant = () => (prices ? { rows: prices.rows, ...runOf(ver), version: ver } : null);
+  view.__quant = () => (prices && runOf(ver) ? { rows: prices.rows, ...runOf(ver), version: ver } : null);
   return view;
 }
 
@@ -106,13 +183,15 @@ function answer(K, ver, ctx, all) {
     el('span', { class: 'i' }, el('b', {}, 'XAUUSD'), `${month(R.from)} – ${month(R.to)}`),
     el('span', { class: 'i' }, el('b', {}, rows.length.toLocaleString('en-US')), 'one-minute candles'),
     el('span', { class: 'i' }, el('b', {}, String(R.signals)), 'setups found'),
-    el('span', { class: 'i' }, el('b', {}, String(R.skipped.rr)), `under ${o.minR}R, left`),
-    el('span', { class: 'i' }, `OANDA mid · $${(o.spread * Q.PIP[INST]).toFixed(2)} spread on every entry`));
+    el('span', { class: 'i' }, el('b', {}, String(R.skipped.rr ?? R.skipped['under 1.5R'] ?? 0)), `under ${o.minR}R, left`),
+    el('span', { class: 'i' }, `OANDA mid · $${((o.spread ?? spreadOf(INST)) * pipOf(INST)).toFixed(2)} spread on every entry`));
+  const e13 = V.engineOf(ver) === '13';
 
   const tile = (k, v, s, cls = '') => el('div', { class: 'card rp-tile qt-tile ' + cls }, el('span', { class: 'rp-k' }, k), el('b', { class: 'rp-tv' }, v), el('span', { class: 'rp-ts' }, s));
   const tiles = el('div', { class: 'rp-tiles qt-tiles' },
     tile('Total', rT(S.total, 1), `${rT(S.avg)} a trade`, sign(S.total)),
-    tile('Trades', String(S.n), `${T.filter(x => x.kind === 'mtf').length} MTF · ${T.filter(x => x.kind === 'ltf').length} LTF after OFS`),
+    tile('Trades', String(S.n), e13 ? `${T.filter(x => /space/.test(x.because)).length} empty space · ${T.filter(x => /divergence/.test(x.because)).length} divergence`
+      : `${T.filter(x => x.kind === 'mtf').length} MTF · ${T.filter(x => x.kind === 'ltf').length} LTF after OFS`),
     tile('Win rate', S.winRate == null ? '—' : `${Math.round(S.winRate * 100)}%`, `${S.won} won · ${S.lost} lost · ${S.be} BE`),
     tile('Profit factor', pfT(S.pf), 'won R ÷ lost R'),
     tile('Max drawdown', rT(-S.maxDD, 1), `${S.worstStreak} losses in a row at worst`),
@@ -126,12 +205,13 @@ function answer(K, ver, ctx, all) {
       ...T.slice().reverse().map(x => el('button', { class: 'ra-li qt-li' + (x.id === pick.id ? ' is-on' : ''), 'data-id': String(x.id),
           onClick: () => { pick.id = x.id; paintSide(); } },
         el('i', { class: x.dir > 0 ? 'is-long' : 'is-short' }), el('span', {}, when(x.openT)),
-        el('span', {}, `${x.kind === 'mtf' ? 'MTF' : 'LTF'} · ${x.etf}m in${x.via === '4H NC' ? ' · 4H' : ''}`),
+        el('span', {}, e13 ? `${x.level.label}${x.session ? ' · ' + x.session.replace(/ \d{4}-.*/, '') : ''}` : `${x.kind === 'mtf' ? 'MTF' : 'LTF'} · ${x.etf}m in${x.via === '4H NC' ? ' · 4H' : ''}`),
         el('span', { class: sign(x.r) }, x.why === 'be' ? 'BE' : rT(x.r)))));
     const fact = (k, v, cls = '') => el('div', { class: 'ra-fact ' + cls }, el('span', {}, k), el('b', {}, v));
     side.replaceChildren(
       el('div', { class: 'ra-side-head' }, el('h2', {}, `Trade ${t.id} · ${t.dir > 0 ? 'Long' : 'Short'}`),
-        el('span', { class: 'lab-sub' }, `${t.setup} at the ${t.level.label === '4H NC' ? '' : t.tf + 'm '}${t.level.label}${t.via === '4H NC' ? ', inside a 4H NC window' : ''} · ${when(t.openT)}`)),
+        el('span', { class: 'lab-sub' }, e13 ? `${t.setup} at the MTF ${t.level.label} · ${t.because}${t.session ? ' · ' + t.session.replace(/ \d{4}-.*/, '') + ' open' : ''} · ${when(t.openT)}`
+          : `${t.setup} at the ${t.level.label === '4H NC' ? '' : t.tf % 60 === 0 ? t.tf / 60 + 'H ' : t.tf + 'm '}${t.level.label}${t.via === '4H NC' ? ', inside a 4H NC window' : ''} · ${when(t.openT)}`)),
       quantChart(K, t),
       el('div', { class: 'ra-facts' },
         fact('Entry', t.entry.toFixed(2)), fact('Stop', t.sl.toFixed(2)), fact('Target', `${t.tp.toFixed(2)} · ${t.rr.toFixed(1)}R`),
@@ -145,9 +225,12 @@ function answer(K, ver, ctx, all) {
   };
   paintSide();
 
-  const kinds = ['mtf', 'ltf'].map(k => ({ k, name: k === 'mtf' ? '15m protected structure' : '5m, after the OFS', s: Q.stats(T.filter(x => x.kind === k)) }));
+  const tfName = m => (m % 60 === 0 ? `${m / 60}H` : `${m}m`), sc = o.scale || 1;
+  const kinds = e13
+    ? [['space', 'Empty space behind the level', x => /space/.test(x.because)], ['div', 'Divergence at the sweep', x => /divergence/.test(x.because)]].map(([k, name, f]) => ({ k, name, s: Q.stats(T.filter(f)) }))
+    : ['mtf', 'ltf'].map(k => ({ k, name: k === 'mtf' ? `${tfName(15 * sc)} protected structure` : `${tfName(5 * sc)}, after the OFS`, s: Q.stats(T.filter(x => x.kind === k)) }));
   const split = el('section', { class: 'card lab-chart qt-split' },
-    el('div', { class: 'lab-chart-head' }, el('h2', {}, 'The two setups'), el('span', { class: 'lab-sub' }, 'and the two years')),
+    el('div', { class: 'lab-chart-head' }, el('h2', {}, e13 ? 'Why each was taken' : 'The two setups'), el('span', { class: 'lab-sub' }, 'and the two years')),
     el('div', { class: 'qt-kinds' }, ...kinds.map(({ k, name, s }) => el('div', { class: 'qt-kind', 'data-kind': k },
       el('span', { class: 'qt-kn' }, name),
       el('b', { class: sign(s.total) }, rT(s.total, 1)),
@@ -162,9 +245,11 @@ function answer(K, ver, ctx, all) {
     fitted((w, h) => equityChart(T, S, w, h, id => { pick.id = id; paintSide(); }), 250));
 
   return [vcard, strip, tiles,
-    el('div', { class: 'ra-main qt-main' }, el('div', { class: 'ra-left' }, equity, split, compareCard(ver, ctx, all)), side)];
+    el('div', { class: 'ra-main qt-main' }, el('div', { class: 'ra-left' }, equity, split, compareCard(ver, ctx, all)), side),
+    tenYearCard(ctx), yearsCard(ctx), volCard(ctx)];
 }
 const pfT = pf => (pf == null ? '—' : pf === Infinity ? '∞' : pf.toFixed(2));
+const fullName = v => v.name + (v.tag ? ' · ' + v.tag : '');
 
 /* ---------- the version: its prompt and its settings ---------- */
 function versionCard(ver, ctx, all) {
@@ -181,7 +266,7 @@ function versionCard(ver, ctx, all) {
   } }, `New version from ${ver.name}`);
   const delBtn = mine ? el('button', { class: 'btn btn-quiet qt-del', onClick: e => {
     if (e.currentTarget.dataset.sure !== '1') { e.currentTarget.dataset.sure = '1'; e.currentTarget.textContent = 'Delete it?'; return; }
-    state.quant.versions = state.quant.versions.filter(v => v.id !== ver.id); state.quant.current = ver.from || 'v4'; save(); nav.refresh();
+    state.quant.versions = state.quant.versions.filter(v => v.id !== ver.id); state.quant.current = ver.from || 'q1'; save(); nav.refresh();
   } }, 'Delete') : null;
 
   const prompt = el('textarea', { class: 'field qt-prompt', readOnly: !mine, spellcheck: false, rows: 9,
@@ -190,7 +275,7 @@ function versionCard(ver, ctx, all) {
 
   /* the settings: read for a built-in version, to turn for his own (a change runs it again) */
   const knob = kb => {
-    const s = { ...V.BASE, ...ver.settings };
+    const s = { ...V.baseOf(ver), ...ver.settings };
     const val = kb.kind ? (s.kinds || []).includes(kb.k) : s[kb.k];
     let ctl;
     if (kb.bool) ctl = el('button', { class: 'qt-tog' + (val ? ' is-on' : ''), disabled: !mine, 'aria-pressed': String(!!val), onClick: () => set(!val) }, val ? 'On' : 'Off');
@@ -200,14 +285,14 @@ function versionCard(ver, ctx, all) {
     function set(x) {
       if (kb.kind) { const k = new Set(ver.settings.kinds || []); x ? k.add(kb.k) : k.delete(kb.k); ver.settings.kinds = [...k]; }
       else ver.settings[kb.k] = x;
-      if (!ver.edited) ver.prompt = `${ver.name} — ${ver.note}\n\n${V.rulesInWords(ver.settings)}`;
+      if (!ver.edited) ver.prompt = V.promptOf(ver);
       pick.id = null; save(); nav.refresh();
     }
     return el('label', { class: 'qt-knob', 'data-k': kb.k }, el('span', {}, kb.label), ctl, kb.unit ? el('i', {}, kb.pct ? '% ' + kb.unit : kb.unit) : null);
   };
 
   return el('section', { class: 'card qt-version', 'data-version': ver.id },
-    el('div', { class: 'lab-chart-head' }, el('h2', {}, ver.name),
+    el('div', { class: 'lab-chart-head' }, el('h2', {}, fullName(ver)),
       el('span', { class: 'lab-sub' }, `${ver.builtIn ? 'built in' : 'yours'} · ${ver.date}`),
       el('div', { class: 'spacer' }), copyBtn, newBtn, delBtn),
     el('p', { class: 'qt-note' }, ver.note),
@@ -215,14 +300,14 @@ function versionCard(ver, ctx, all) {
       el('summary', {}, 'Prompt and settings'),
       el('div', { class: 'qt-vbody' },
         el('div', { class: 'qt-pwrap' }, el('span', { class: 'qt-plabel' }, mine ? 'Prompt — the strategy in words, yours to edit' : 'Prompt — the strategy in words'), prompt),
-        el('div', { class: 'qt-knobs' }, ...V.KNOBS.map(knob)))));
+        el('div', { class: 'qt-knobs' }, ...V.knobsOf(ver).map(knob)))));
 }
 
 /* ---------- every version side by side ---------- */
 function compareCard(ver, ctx, all) {
   const row = (v, r) => el('button', { class: 'qt-crow' + (v.id === ver.id ? ' is-on' : ''), 'data-id': v.id,
       onClick: () => { if (v.id !== ver.id) { ctx.state.quant.current = v.id; pick.id = null; ctx.save(); ctx.nav.refresh(); } } },
-    el('span', {}, v.name),
+    el('span', {}, fullName(v)),
     ...(r ? [el('span', {}, String(r.S.n)), el('span', { class: sign(r.S.total) }, rT(r.S.total, 1)), el('span', {}, pfT(r.S.pf)),
       el('span', {}, r.S.winRate == null ? '—' : `${Math.round(r.S.winRate * 100)}%`), el('span', {}, rT(-r.S.maxDD, 0)),
       el('span', { class: sign(r.Y[0].total) }, rT(r.Y[0].total, 0)), el('span', { class: sign(r.Y[1].total) }, rT(r.Y[1].total, 0))]
@@ -235,13 +320,11 @@ function compareCard(ver, ctx, all) {
   const next = () => {
     const v = todo.shift();
     if (!v || !list.isConnected) return;
-    const r = runOf(v);
-    list.querySelector(`.qt-crow[data-id="${v.id}"]`)?.replaceWith(row(v, r));
-    setTimeout(next, 20);
+    runAsync(v).then(r => { list.querySelector(`.qt-crow[data-id="${v.id}"]`)?.replaceWith(row(v, r)); next(); }, () => next());
   };
   if (todo.length) setTimeout(next, 400);
   return el('section', { class: 'card lab-chart qt-compare' },
-    el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Versions'), el('span', { class: 'lab-sub' }, 'the same two years, every version · pick one to open it')),
+    el('div', { class: 'lab-chart-head' }, el('h2', {}, 'Versions'), el('span', { class: 'lab-sub' }, 'the same two years of gold, every version · pick one to open it')),
     list);
 }
 
@@ -317,9 +400,11 @@ function quantChart(K, t) {
           const xr = mid(t.rej.t);
           /* the structure at the entry: protected and weak, 15m and 5m — quiet, behind the setup's own marks */
           const xo = G.xT(t.openT);
-          for (const [tf, S] of [['15m', t.struct?.m15], ['5m', t.struct?.m5]]) {
+          /* the structure's own timeframes: 15m and 5m, or stretched (Version 12: 1H and 20m) */
+          const sc = t.kind === 'mtf' ? t.tf / 15 : t.tf / 5, tfName = m => (m % 60 === 0 ? `${m / 60}H` : `${m}m`);
+          for (const [tf, S] of [[tfName(15 * sc), t.struct?.m15], [tfName(5 * sc), t.struct?.m5]]) {
             if (!S) continue;
-            const up = S.dir > 0, faint = tf === '5m' ? 'rgba(128,128,128,.55)' : 'rgba(128,128,128,.8)';
+            const up = S.dir > 0, faint = tf === tfName(5 * sc) ? 'rgba(128,128,128,.55)' : 'rgba(128,128,128,.8)';
             if (Math.abs(S.ps.p - t.level.p) > 1e-6) dotted(mid(S.ps.t), xo, G.Y(S.ps.p), `${tf} ${up ? 'PL' : 'PH'}`, faint);
             dotted(mid(S.weak.t), xo, G.Y(S.weak.p), `${tf} weak ${up ? 'H' : 'L'}`, faint);
           }

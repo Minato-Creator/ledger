@@ -3,14 +3,19 @@
    engine (quant.js), and its prompt — the whole strategy in words, as it
    would be given to an AI (or a person) to rebuild or improve it.
 
-   The built-in versions are frozen here with every setting spelled out, so
-   changing the engine's defaults never changes what an old version was.
-   Minato's own versions live in the vault (lab.json → quant.versions).
+   Three built in, the three that held up over ten years: Version 1 and 2
+   run quant13.js (his risk entry at MTF structure), Version 3 runs
+   quant.js (the A+ 1H rules). Their settings are frozen here, so changing
+   an engine's defaults never changes what a version was. Minato's own
+   versions live in the vault (lab.json → quant.versions); a version made
+   from Version 1 or 2 runs quant13.js, any other quant.js.
    ============================================================ */
+
+import { OPENS } from './quant13.js';
 
 export const BASE = { K: 2, KX: 8, zone: 0.3, minR: 1.5, pips: 2, full: 0.5, spread: 3, mtfEntry: 5, ltfEntry: 3,
   tier3: true, dcBars: 12, breakEven: true, kinds: ['mtf', 'ltf'], capR: null, pickR: false, reentry: 0, divAll: false, htf: false, htfK: 5,
-  mySessions: false, maxPerDay: 0, dayLossR: 0, confirm: false, confirmMins: 60, stopLevel: false, fixedR: null, int15Agree: false, h1Agree: false };
+  mySessions: false, maxPerDay: 0, dayLossR: 0, confirm: false, confirmMins: 60, stopLevel: false, fixedR: null, int15Agree: false, h1Agree: false, divMin: 0, scale: 1 };
 
 /* Pre-Asia 07:00, Asia 08:00–12:00, Pre-London 13:00, London 14:00–17:00 — his local time (UTC+8), as minutes of the day */
 export const MY_SESSIONS = [[420, 720], [780, 1020]];
@@ -31,6 +36,8 @@ export const KNOBS = [
   { k: 'pickR', label: 'Aim past near targets', bool: true },
   { k: 'reentry', label: 'Re-entries a level', unit: 'more goes after the first', min: 0, max: 5, step: 1 },
   { k: 'divAll', label: 'Divergence on 1/3/5/15m', bool: true },
+  { k: 'divMin', label: 'Divergence on at least', unit: 'of the 4 timeframes (0: not asked)', min: 0, max: 4, step: 1 },
+  { k: 'scale', label: 'Timeframes ×', unit: '(4: 4m / 12m / 20m / 1H)', min: 1, max: 8, step: 1 },
   { k: 'htf', label: '4H NC windows', bool: true },
   { k: 'htfK', label: '4H swings', unit: 'candles either side', min: 2, max: 12, step: 1 },
   { k: 'mySessions', label: 'Your sessions only', bool: true },
@@ -53,6 +60,7 @@ export function rulesInWords(s) {
   const kinds = S.kinds || [];
   const lines = [
     'Instrument: XAUUSD (gold), OANDA mid one-minute candles, built up to 3m, 5m and 15m.',
+    S.scale > 1 ? `Timeframes stretched ×${S.scale}: wherever these rules say 1m, 3m, 5m and 15m, read ${S.scale}m, ${3 * S.scale}m, ${5 * S.scale}m and ${15 * S.scale}m (the 4H stays 4H; fills and the 1m confirmation stay on one-minute candles).` : null,
     'Structure on every timeframe: a swing high/low is a fractal (higher/lower than the candles either side). Structure breaks only when a candle closes past the level with a body of at least half the candle (or a whole body past it after a gap); anything less that trades past is a sweep — an NC (no close). After a break, the swing that caused it is protected (PL in an uptrend, PH in a downtrend).',
     `Direction: the 15m external structure only — swings ${S.KX} candles either side. No 4H or daily filter. The 15m internal structure (swings ${S.K} either side) gives the internal protected levels (IPL / IPH).`,
     'Levels to trade from, always with the 15m direction:',
@@ -62,7 +70,7 @@ export function rulesInWords(s) {
     S.maxPerDay ? `At most ${S.maxPerDay} trades a day.` : null,
     S.dayLossR ? `Stop for the day once ${n(S.dayLossR)}R has been lost that day.` : null,
     S.htf ? `4H NC windows: when a 4H candle runs a 4H swing low (swings ${S.htfK} candles either side) without a full close below it — a 4H NC+S — longs are allowed on any of the levels above, on any timeframe, even against the 15m, for that leg: until a 4H full close below that candle's low, until price reaches the nearest 4H swing high above, or until a 4H NC the other way. Shorts mirrored.` : null,
-    S.divAll ? 'Divergence required: at the second push, RSI (14, on the closes) shows divergence against the DC low on every one of the 1m, 3m, 5m and 15m.' : null,
+    S.divAll ? 'Divergence required: at the second push, RSI (14, on the closes) shows divergence against the DC low on every one of the 1m, 3m, 5m and 15m.' : S.divMin ? `Divergence required: at the second push, RSI (14, on the closes) shows divergence against the DC low on at least ${S.divMin} of the 1m, 3m, 5m and 15m.` : null,
     S.reentry ? `Re-entries: after a trade at a level, up to ${S.reentry} more go(es) at the same level from a fresh DC low, while the level stands.` : null,
     S.tier3 ? 'Tier 3: no trade once the leg\'s weak high/low has already been run without a break (15m for 15m levels, 5m for 5m levels).' : null,
     `NC+S with a double confirmation (longs; shorts mirrored): price comes to the level and makes a first reaction low near it — the DC low, within the bottom ${pct(S.zone)} of the leg from the level, or below the level. After a bounce${S.dcBars ? `, at least ${S.dcBars} entry candles later,` : ''} a second push sweeps that low, with no full close below the protected level. The first opposite (bullish) candle closes — the rejection candle — and the trade opens at the next candle's open.`,
@@ -76,71 +84,94 @@ export function rulesInWords(s) {
   return lines.filter(Boolean).join('\n');
 }
 
-const v2 = { ...BASE, KX: 5, tier3: false, dcBars: 0 };
-const v3 = { ...BASE };
-const v4 = { ...BASE, pickR: true, reentry: 2 };
-const v5 = { ...BASE, pickR: true, reentry: 2, divAll: true };
-const v6 = { ...BASE, pickR: true, reentry: 2, htf: true, htfK: 5 };
-const v7 = { ...BASE, pickR: true, reentry: 2, mySessions: true, maxPerDay: 3, dayLossR: 3 };
-const v8 = { ...BASE, pickR: true, reentry: 2, tier3: false, dcBars: 40, confirm: true, stopLevel: true, fixedR: 1.5 };
-const v10 = { ...BASE, pickR: true, reentry: 2, tier3: false, dcBars: 40, confirm: true, confirmMins: 120, stopLevel: true, fixedR: 1.5, int15Agree: true };
-const v11 = { ...v10, h1Agree: true };
-const v9 = { ...BASE, pickR: true, reentry: 2, tier3: false, dcBars: 40, confirm: true, stopLevel: true, capR: 3 };
+/* ---------- Version 1 and 2: quant13.js ---------- */
+export const BASE13 = { maxAgeDays: 5, divMin: 3, isoAtr: 3, minR: 1.5, zone: 0.3, reentry: 1, threeSL: false, nyOpen: 480, perSession: 1 };
+
+export const KNOBS13 = [
+  { k: 'threeSL', label: '3SL — only the hour either side of each open', bool: true },
+  { k: 'nyOpen', label: 'New York open', unit: 'minutes after midnight New York (480 = 8:00, 570 = 9:30)', min: 420, max: 600, step: 30 },
+  { k: 'perSession', label: 'Trades a session', unit: 'at most', min: 1, max: 3, step: 1 },
+  { k: 'maxAgeDays', label: 'A level is let go after', unit: 'days', min: 1, max: 30, step: 1 },
+  { k: 'isoAtr', label: 'Empty space behind the level', unit: '15m ATRs at least', min: 1, max: 8, step: 0.5 },
+  { k: 'divMin', label: 'Or divergence on at least', unit: 'of the 1m / 3m / 5m / 15m', min: 1, max: 4, step: 1 },
+  { k: 'zone', label: 'DC low within', unit: 'of the leg from the level', min: 0.1, max: 0.6, step: 0.05, pct: true },
+  { k: 'reentry', label: 'Re-entries a level', unit: 'more goes after the first', min: 0, max: 3, step: 1 },
+  { k: 'minR', label: 'Minimum target', unit: 'R', min: 1, max: 5, step: 0.25 },
+];
+
+/** Version 1 / 2's rules in words, from its settings. */
+export function rulesInWords13(s) {
+  const S = { ...BASE13, ...s };
+  const ny = `${Math.floor(S.nyOpen / 60)}:${String(S.nyOpen % 60).padStart(2, '0')}`;
+  return [
+    'Market: XAUUSD (gold) first — any pair Replay has downloaded. OANDA mid one-minute candles.',
+    'Structure, read as a hierarchy: the smallest swings on 5m candles make the LTF (degree 1); swings of those make the MTF (degree 2); swings of those the one above (degree 3). No CHoCH. A real break is a full-bodied close past the level, the next candle carrying on, no close back inside for 3 candles, and at least one ATR travelled. Anything less is a failed break (NC+S) and the level stands; once a push has been defended (a strong candle straight back), the rest of that leg needs a displacement candle (1.5 ATR body) to break.',
+    `Levels: the protected low (high) behind every real break of the MTF — internal and external — until that structure really breaks it, and never longer than ${S.maxAgeDays} days.`,
+    `The risk entry (longs; shorts mirrored): the MTF is up and the LTF has not shifted up yet. Price comes to an MTF protected low and makes a first reaction swing low on 15m candles within the bottom ${Math.round(S.zone * 100)}% of the leg from the level; a later push sweeps that low (the level's own first sweep — IPL+S — does not count, the next one does), with no real break of the level. The first bullish 15m candle closes — the rejection — and the trade opens at the next candle's open.`,
+    `Only when the level has empty space behind it (no other MTF level within ${S.isoAtr} ATR of the 15m below it) or the sweep shows RSI(14) divergence against the DC low on at least ${S.divMin} of the 1m, 3m, 5m and 15m. Not after the MTF has failed to break its own way twice since its last real break.`,
+    S.reentry ? `Up to ${S.reentry} more go(es) at the same level from a fresh DC low.` : null,
+    S.threeSL ? `3SL: trades open only from 1 hour before to 1 hour after the Tokyo (9:00 Tokyo), London (8:00 London) and New York (${ny} New York) opens, each in its own clock — at most ${S.perSession} trade${S.perSession > 1 ? 's' : ''} a session.` : null,
+    'Stop: past the sweep, plus a buffer (2 pips on gold, 1 elsewhere).',
+    `Target: the weak structure — the MTF leg's extreme (or, after the MTF failed the other way, the extreme of that failed leg). If it is further than the day has left in it (the 20-day average range less today's), the nearest internal swing still standing at ${S.minR}R or more instead. Under ${S.minR}R — no trade.`,
+    'Break-even: once the LTF really breaks the trade\'s way after the entry, in profit, the stop moves to the entry.',
+    'Fills on one-minute candles; a typical OANDA spread paid on every entry ($0.30 on gold); nothing opened from 30 minutes before the 5pm New York close to an hour after it; one trade at a time.',
+  ].filter(Boolean).join('\n');
+}
+
+/* Version 3 = the old Version 12: Version 4's exits, divergence on 3+ of 4, every timeframe ×4 */
+const v12 = { ...BASE, pickR: true, reentry: 2, tier3: false, dcBars: 12, divMin: 3, scale: 4 };
 
 export const BUILTIN = [
-  { id: 'v2', name: 'Version 2', builtIn: true, date: '2026-10-09', settings: v2,
-    note: 'Built from your direction: no HTF alignment; focus on protected structure, the LTF OFS, the MTF structure and NC+S; break-even on 5m structure of the same leg only. The double confirmation read the way your own charts show it.',
+  { id: 'q1', name: 'Version 1', tag: 'Risk entries', engine: '13', builtIn: true, date: '2026-10-12', settings: { ...BASE13 },
+    note: "Your risk entry at MTF structure, read the way you marked chart 1: real breaks only (full-bodied, carried on, held), no CHoCH, a DC at an MTF protected level with empty space behind it or divergence, the weak structure as the target. Levels are let go after 5 days. Built on gold Oct 2021 – Oct 2026 and checked on Oct 2016 – Sep 2021, which it never saw (+38R, profit factor 2.03). Ten years of gold: 155 trades, +101R, profit factor 2.04, 39% won, deepest drawdown 12.5R — every year from 2019 positive. It beat 200 out of 200 random-entry twins. On AUDUSD it loses (−28R): this is a gold edge.",
     prompt: null },
-  { id: 'v3', name: 'Version 3', builtIn: true, date: '2026-10-09', settings: v3,
-    note: 'Version 2 plus three filters, each kept only because both years (Oct 2024–Sep 2025 and Oct 2025–Oct 2026) improved with it: 15m external swings 8 candles either side; a double confirmation at least 12 entry candles long; no trade at tier 3. Tried and dropped: target caps at 3R/4R/5R, a wider stop (+$1, +$2), divergence on the entry candles, a stop at the protected level, a session filter.',
+  { id: 'q2', name: 'Version 2', tag: 'Risk entries · 3SL', engine: '13', builtIn: true, date: '2026-10-12', settings: { ...BASE13, threeSL: true },
+    note: "Version 1 inside your 3SL windows: from an hour before to an hour after the Tokyo, London and New York opens (New York at 8:00 New York time), one trade a session. Ten years of gold: 54 trades (about 5 a year), +48R, profit factor 2.51, 41% won, deepest drawdown 6R — half Version 1's R from a third of its trades, with half the drawdown. On AUDUSD it loses (−17R).",
     prompt: null },
-  { id: 'v4', name: 'Version 4', builtIn: true, date: '2026-10-09', settings: v4,
-    note: 'Version 3 plus two things from your own way of trading: when the nearest strong high is under 1.5R, aim for the next one ("if the previous high is less than 1.5R then don\'t worry about it"), and re-enter a level after a stop (up to two more goes, each from a fresh DC low). More trades and more R, the same profit factor. Tried and dropped: target caps at 3R/4R/5R and a stop $1–$2 wider (your ideas — the profit is in the far targets), a minimum stop of $2–$3, divergence on only 1–3 of the four timeframes.',
-    prompt: null },
-  { id: 'v5', name: 'Version 5 · A+', builtIn: true, date: '2026-10-09', settings: v5,
-    note: 'Version 4, taking only the A+ trades: RSI divergence on every one of the 1m, 3m, 5m and 15m at the second push, as your plan says ("DIV must be seen on all LTF"). Very few trades, but the best of them — profit factor above 3 in both years. Divergence on only some of the four was worse than none.',
-    prompt: null },
-  { id: 'v6', name: 'Version 6 · HTF windows', builtIn: true, date: '2026-10-10', settings: v6,
-    note: 'Version 4 plus your 4H idea: after a 4H NC+S (a 4H swing run with no close past it), setups that way are taken on any timeframe, even against the 15m, for that leg — until the 4H candle\'s extreme is closed through, price reaches the 4H protected structure on the other side, or a 4H NC the other way. More trades (633) and more R in both years, but a deeper drawdown, and the window trades on their own are only just positive (174 trades, +42R, PF 1.35). With 4H swings of 4 or 6 candles instead of 5, year 1 comes out a little below Version 4 — so treat it as promising, not proven. Tried and dropped: capping targets at 10R (+79R instead of +198R) or skipping trades over 10R; requiring the 5m OFS inside the window; a 15m DC risk entry at the 4H NC level only.',
-    prompt: null },
-  { id: 'v7', name: 'Version 7 · Your sessions', builtIn: true, date: '2026-10-10', settings: v7,
-    note: 'Version 4, opening trades only in your sessions — Pre-Asia, Asia, Pre-London and London (07:00–12:00 and 13:00–17:00 your time) — with your playbook\'s day rules: at most 3 trades a day, stop for the day at −3R (your 1.5% cap at 0.5% a trade). Fewer trades and a smaller drawdown, but much of Version 4\'s profit was made outside these hours (your 00:00–07:00 and 21:00–24:00). Pre-London is the best session by far; Pre-Asia loses on its own. Daily and weekly stops barely change the drawdown — the losing runs stretch across days.',
-    prompt: null },
-  { id: 'v8', name: 'Version 8 · High win rate', builtIn: true, date: '2026-10-10', settings: v8,
-    note: 'Built for your goal: a 40–50% win rate with a small drawdown. Version 4 with four changes, each chosen on year 1 and then checked on year 2: (1) a double confirmation at least 40 entry candles long — the longer the gap between the DC low and the sweep, the better, in a smooth line from 12 to 80; (2) after the rejection candle, wait for a 1m internal break (a full close past the last 1m swing high before the sweep low); (3) the stop past the protected level, not just the sweep; (4) take profit at 1.5R, your minimum. Tier 3 trades are allowed. Result: 185 trades (about 8 a month), 55% win rate (53% year 1, 56% year 2), profit factor 1.85, +29R, deepest drawdown 4R, at most 4 losses in a row, every quarter positive — including Jul–Oct 2026 when Version 4 lost 30R. Run with neighbouring structure settings (DC zone 20–40%, 15m swings 5 or 8) it averages +14R, profit factor 1.4 — the honest expectation. The catch: 108 of the 185 trades end at break-even (your 5m break-even rule does most of the work — without it the win rate falls to about 45%), and the total R is far below Version 4’s, which lives on rare 10R+ runners. Tried and dropped: wider stops by ATR, engulfing or close-back rejection candles, break-even only after +0.5R or on the 15m, 4H windows and a wider DC zone (more trades, weaker), targets of 2R–3R (lower win rate, about the same R).',
-    prompt: null },
-  { id: 'v9', name: 'Version 9 · Structure target', builtIn: true, date: '2026-10-10', settings: v9,
-    note: 'Version 8, but aiming at the structure target (the nearest strong high past 1.5R, as in Version 4), brought in to 3R when it is further. 174 trades, 45% win rate, profit factor 1.90, +28R, deepest drawdown 5R. Closer to how you pick targets; one quarter slightly negative (Jul–Sep 2025, −2R).',
-    prompt: null },
-  { id: 'v10', name: 'Version 10 · Robust', builtIn: true, date: '2026-10-10', settings: v10,
-    note: "Version 8 made sturdier. Every idea was scored not on one setting but averaged over ten neighbouring ones (DC zone 20–40%, 15m swings 5 or 8) — Version 4's +198R, for one, averages only +54R that way, and Version 8's +29R averages +14R. Two changes held up everywhere: (1) the 15m internal structure (IPL/IPH swings) must point the trade's way when the rejection candle closes — the pullback has not broken it; (2) wait up to 2 hours (not 1) for the 1m internal break. Result: 153 trades (about 6 a month), 58% win rate (59% year 1, 58% year 2), profit factor 2.08, +28R, deepest drawdown 4R, 4 losses in a row at worst. Averaged over the neighbours: +20R, profit factor 1.8, 53% won, both years positive in all ten. Tried and dropped this round: the setup on other entry timeframes added together (more trades, weaker), a smaller or bigger DC (30, 50, 60), skipping your 00:00–07:00, tier 3, the 5m agreeing, 2R targets, break-even on the 15m, a trailing stop on 1m/5m/15m swings, re-entries. Also fixed for every version: a stop the market gaps through now fills at the open, and break-even only moves the stop once that 5m close is in profit (before, a few trades were moved to break-even while still under water).",
-    prompt: null },
-  { id: 'v11', name: 'Version 11 · 1H aligned', builtIn: true, date: '2026-10-10', settings: v11,
-    note: "Version 10 plus the 1H structure pointing the trade's way too. Fewer trades, better ones: 102 trades (about 4 a month), 61% win rate (64% year 1, 58% year 2), profit factor 2.37, +26R, deepest drawdown 3R, 3 losses in a row at worst. Averaged over the neighbouring settings: +19R, profit factor 2.1, 57% won, both years positive in all ten. Requiring the daily as well leaves too few trades (about 3 a month).",
+  { id: 'q3', name: 'Version 3', tag: 'A+ 1H', engine: '12', builtIn: true, date: '2026-10-10', settings: v12,
+    note: "Your A+ — RSI divergence at the second push on at least 3 of the 1m/3m/5m/15m — with the structure read on bigger timeframes (every timeframe ×4: structure on the 1H and 20m, entries on 12m and 20m), Version 4's sweep stop, structure target and break-even. The one rule set from the earlier rounds that held up over ten years on both markets. Ten years: gold 229 trades, +65R, profit factor 1.47, 22% won, deepest drawdown 15R; AUDUSD +27R, profit factor 1.16. About 1 year in 3 loses.",
     prompt: null },
 ];
-for (const v of BUILTIN) v.prompt = `${v.name} — ${v.note}\n\n${rulesInWords(v.settings)}`;
+for (const v of BUILTIN) v.prompt = promptOf(v);
+
+/** A version's engine: '13' (Version 1 / 2 and their copies) or '12' (quant.js). */
+export function engineOf(v) { return v?.engine === '13' ? '13' : '12'; }
+/** The strategy in words for any version. */
+export function promptOf(v) {
+  return `${v.name}${v.tag ? ' · ' + v.tag : ''} — ${v.note}\n\n${engineOf(v) === '13' ? rulesInWords13(v.settings) : rulesInWords(v.settings)}`;
+}
 
 /** Every version: the built-in ones, then his. */
 export const allVersions = state => [...BUILTIN, ...(state?.quant?.versions || [])];
+/** The version to open: his pick if it still exists (the old Version 2–12 are gone), else Version 1. */
+export const currentOf = state => { const all = allVersions(state); return all.find(v => v.id === state?.quant?.current) || all[0]; };
 
 /** The engine's options for a version. */
 export function optionsOf(v) {
+  if (engineOf(v) === '13') {
+    const s = { ...BASE13, ...v.settings };
+    const opens = OPENS.map(([tz, open, name]) => [tz, name === 'New York' ? s.nyOpen : open, name]);
+    return { engine: '13', maxAgeDays: s.maxAgeDays, divMin: s.divMin, isoAtr: s.isoAtr, minR: s.minR, zone: s.zone, reentry: s.reentry, kinds: ['risk'],
+      sessions: s.threeSL ? opens : null, perSession: s.perSession || 1 };
+  }
   const s = { ...BASE, ...v.settings };
   return { K: s.K, KX: s.KX, zone: s.zone, minR: s.minR, pips: s.pips, full: s.full, spread: s.spread, mtfEntry: s.mtfEntry, ltfEntry: s.ltfEntry,
     tier3: !!s.tier3, dcBars: s.dcBars, breakEven: !!s.breakEven, kinds: s.kinds, capR: s.capR || null,
-    pickR: !!s.pickR, reentry: s.reentry || 0, divAll: s.divAll ? 4 : false, htf: !!s.htf, htfK: s.htfK || 5,
+    pickR: !!s.pickR, reentry: s.reentry || 0, divAll: s.divAll ? 4 : (s.divMin || false), scale: s.scale || 1, htf: !!s.htf, htfK: s.htfK || 5,
     sessions: s.mySessions ? MY_SESSIONS : null, maxPerDay: s.maxPerDay || 0, dayLossR: s.dayLossR || 0,
     confirm: !!s.confirm, confirmMins: s.confirmMins || 60, int15Agree: !!s.int15Agree, h1Agree: !!s.h1Agree, stopAt: s.stopLevel ? 'level' : 'sweep', fixedR: s.fixedR || null };
 }
+/** The settings a version's page shows. */
+export const knobsOf = v => (engineOf(v) === '13' ? KNOBS13 : KNOBS);
+export const baseOf = v => (engineOf(v) === '13' ? BASE13 : BASE);
 
-/** A new version from another: the next number, its settings, its prompt. */
+/** A new version from another: the next number, its engine, its settings, its prompt. */
 export function newVersion(state, from) {
   const all = allVersions(state);
   const num = Math.max(0, ...all.map(v => Number(/\d+/.exec(v.name)?.[0]) || 0)) + 1;
-  const settings = JSON.parse(JSON.stringify({ ...BASE, ...from.settings }));
-  const v = { id: 'qv_' + Math.random().toString(36).slice(2, 8), name: `Version ${num}`, date: new Date().toISOString().slice(0, 10),
-    from: from.id, settings, note: `Based on ${from.name}.`, edited: false };
-  v.prompt = `${v.name} — ${v.note}\n\n${rulesInWords(settings)}`;
+  const settings = JSON.parse(JSON.stringify({ ...baseOf(from), ...from.settings }));
+  const v = { id: 'qv_' + Math.random().toString(36).slice(2, 8), name: `Version ${num}`, engine: engineOf(from), date: new Date().toISOString().slice(0, 10),
+    from: from.id, settings, note: `Based on ${from.name}${from.tag ? ' · ' + from.tag : ''}.`, edited: false };
+  v.prompt = promptOf(v);
   return v;
 }

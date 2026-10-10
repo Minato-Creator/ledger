@@ -17,9 +17,10 @@ import { ticks, hoverLayer, readRow, tipLayer } from './chartkit.js';
 import { calm, ease, easeInOut, countTo, whenSeen, once, along, tintRGB } from './motion.js';
 
 let cache = null;                       // { sig, sim } — one run per trades + horizon
-/* A new risk or drawdown limit only rescales the answer: the page is drawn
-   again without the play, and the figures glide to their new values. */
-let quiet = false;
+/* The play runs when the chart is new: the first time, and after any setting that changes it (risk,
+   trades ahead, the drawdown you'd accept, other trades). Coming back, or the page being drawn again
+   with nothing changed, shows the answer as it is. */
+let playedSig = null;
 
 const pc = (v, d = 1) => (v == null || !isFinite(v) ? '—' : `${v > 0.0005 ? '+' : v < -0.0005 ? '−' : ''}${Math.abs(v).toFixed(d)}%`);
 const odds = p => (p == null ? '—' : p < 0.001 ? '< 0.1%' : p > 0.999 ? '> 99.9%' : c.pct(p, p < 0.1 ? 1 : 0));
@@ -32,9 +33,7 @@ export function mcPage(ctx) {
   const risk = Number(S.risk ?? acct.defaultRiskPercent ?? 1) || 1;
   const limit = Number(S.ddLimit) || 10;
   const H = S.horizon || 100;
-  const set = async (k, v) => { S[k] = v; if (k === 'risk' || k === 'ddLimit') quiet = true; await save(); nav.refresh(); };
-  const play = !quiet && !calm();
-  quiet = false;
+  const set = async (k, v) => { S[k] = v; await save(); nav.refresh(); };
 
   const rs = [];
   let skipped = 0;
@@ -90,7 +89,10 @@ export function mcPage(ctx) {
   if (!cache || cache.sig !== sig) cache = { sig, sim: M.simulate(rs, { horizon: H, samples: CLOUD }) };
   const sim = cache.sim;
 
+  const shown = JSON.stringify([sig, risk, limit]);
+  const play = !calm() && shown !== playedSig;
   body.append(...answer(sim, rs, D, { risk, limit, H, acct, set, play }));
+  if (play) playedSig = shown;
   /* The settings stay put above the page while it scrolls under them. */
   return el('div', { class: 'view lab-view' }, head, strip, controls, body);
 }
