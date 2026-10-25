@@ -20,6 +20,7 @@
      stays blank.
    ============================================================ */
 import { el, icon, toast, folderMark, confirmButton, lightbox } from '../ui.js';
+import { pairMark, instrumentOf } from '../flags.js';
 import * as c from '../calc.js';
 import { cleanSymbol } from '../calc.js';
 import { outlookShotsOf } from '../store.js';
@@ -263,9 +264,12 @@ export function outlook(store, nav, dateArg) {
     verdicts.set(item.id, verdictSlot);
     verdictSlot.append(...[verdict(item), gradeLine(item)].filter(Boolean));
 
+    const markSlot = el('span', { class: 'pair-mark' });
+    const paintMark = () => markSlot.replaceChildren(...(instrumentOf(item.pair).kind !== 'none' ? [pairMark(item.pair, 22)] : []));
+    paintMark(); pairField.addEventListener('input', paintMark);
     return el('section', { class: 'card outlook-block' },
       el('div', { class: 'ob-head' },
-        pairField,
+        el('div', { class: 'pair-wrap ob-pair' }, markSlot, pairField),
         biasWrap,
         el('div', { class: 'spacer' }),
         day.instruments.length > 1

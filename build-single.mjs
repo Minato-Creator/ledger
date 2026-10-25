@@ -65,6 +65,21 @@ function parse(rel) {
 
 parse(ENTRY);
 
+/* Our backgrounds (backgrounds.js names them as 'media/…'). Their stills
+   always come along as data, so a single file shows each one at least as a
+   picture. The videos are ~25 MB between them, so they come along only with
+   --with-media; otherwise they are played from a media/ folder beside the
+   page (copy src/media there when the page is put on a website). */
+const withMedia = process.argv.includes('--with-media');
+const mediaInline = code => code.replace(/(['"])media\/([\w\-./]+\.(mp4|webm|jpg|png))\1/g, (all, q, rel, ext) => {
+  const file = path.join(SRC, 'media', rel);
+  if (!fs.existsSync(file)) return all;
+  if ((ext === 'mp4' || ext === 'webm') && !withMedia) return all;
+  const type = { mp4: 'video/mp4', webm: 'video/webm', jpg: 'image/jpeg', png: 'image/png' }[ext];
+  return `${q}data:${type};base64,${fs.readFileSync(file).toString('base64')}${q}`;
+});
+for (const m of order) m.code = mediaInline(m.code);
+
 const modules = order.map(m => `
 /* ---- ${m.rel} ${'-'.repeat(Math.max(0, 60 - m.rel.length))} */
 const ${m.id} = (() => {
@@ -75,10 +90,19 @@ return { ${m.exported.join(', ')} };
 // ---- assemble the page -------------------------------------------------
 const preview = process.argv.includes('--preview');
 const html = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');
-const css = fs.readFileSync(path.join(SRC, 'css/app.css'), 'utf8');
+/* The look's stylesheet and its fonts come along too. A double-clicked page
+   cannot fetch a font file beside it, so each one is written into the CSS as
+   data — about 140 KB for all four. */
+const fontsInline = text => text.replace(/url\((['"]?)\.\.\/fonts\/([^'")]+)\1\)/g, (_all, _q, name) => {
+  const bytes = fs.readFileSync(path.join(SRC, 'fonts', name));
+  return `url(data:font/woff2;base64,${bytes.toString('base64')})`;
+});
+const css = fontsInline(fs.readFileSync(path.join(SRC, 'css/app.css'), 'utf8'));
+const lookCss = fontsInline(fs.readFileSync(path.join(SRC, 'css/look.css'), 'utf8'));
 
 let out = html
   .replace(/<link[^>]+href="css\/app\.css"[^>]*>/, () => `<style>\n${css}\n</style>`)
+  .replace(/<link[^>]+href="css\/look\.css"[^>]*>/, () => `<style>\n${lookCss}\n</style>`)
   .replace(/<script[^>]*src="js\/app\.js"[^>]*><\/script>/,
     () => `<script>\n${preview ? 'window.__LEDGER_PREVIEW__ = true;\n' : ''}(() => {\n"use strict";\n${modules}\n})();\n</script>`);
 
@@ -91,8 +115,8 @@ if (!out.includes('<style>') || !out.includes('__m_js_app_js')) {
   throw new Error('the CSS or the modules did not make it into the page');
 }
 
-const outName = preview ? 'Ledger-preview.html' : 'Ledger.html';
-if (preview) out = out.replace(/<title>[^<]*<\/title>/, '<title>Ledger — preview</title>');
+const outName = preview ? 'Laminar-preview.html' : 'Laminar.html';
+if (preview) out = out.replace(/<title>[^<]*<\/title>/, '<title>Laminar — preview</title>');
 fs.writeFileSync(new URL('./' + outName, import.meta.url).pathname, out);
 console.log(`bundled ${order.length} modules`);
 console.log(order.map(m => '  ' + m.rel).join('\n'));

@@ -118,7 +118,7 @@ function answerPage(ctx) {
   function run(sample, sheet, p) {
     const sumR = sample.days.reduce((a, d) => a + d.reduce((x, y) => x + y, 0), 0);
     const sig = JSON.stringify([state.source, acct.id, sample.trades, sample.dayCount, sumR.toFixed(6), sample.perWeek, sheet, p]);
-    const play = !quietNow && sig !== propPlayed;   // a new answer plays; the same one, drawn again, does not
+    const play = !quietNow && (ctx.nav.fresh || sig !== propPlayed);   // plays on every visit and for a new answer; the same one drawn again does not
     if (cache && cache.sig === sig) { show(answer(cache.result, sample, sheet, p, play)); if (play) propPlayed = sig; return; }
     if (running) running.cancel();
     let cancelled = false;

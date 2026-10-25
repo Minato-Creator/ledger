@@ -17,9 +17,9 @@ import { ticks, hoverLayer, readRow, tipLayer } from './chartkit.js';
 import { calm, ease, easeInOut, countTo, whenSeen, once, along, tintRGB } from './motion.js';
 
 let cache = null;                       // { sig, sim } — one run per trades + horizon
-/* The play runs when the chart is new: the first time, and after any setting that changes it (risk,
-   trades ahead, the drawdown you'd accept, other trades). Coming back, or the page being drawn again
-   with nothing changed, shows the answer as it is. */
+/* The play runs every time the page is opened, and after any setting that changes the answer (risk,
+   trades ahead, the drawdown you'd accept, other trades). The page being drawn again with nothing
+   changed — a click elsewhere on it — shows the answer as it is. */
 let playedSig = null;
 
 const pc = (v, d = 1) => (v == null || !isFinite(v) ? '—' : `${v > 0.0005 ? '+' : v < -0.0005 ? '−' : ''}${Math.abs(v).toFixed(d)}%`);
@@ -90,7 +90,7 @@ export function mcPage(ctx) {
   const sim = cache.sim;
 
   const shown = JSON.stringify([sig, risk, limit]);
-  const play = !calm() && shown !== playedSig;
+  const play = !calm() && (ctx.nav.fresh || shown !== playedSig);
   body.append(...answer(sim, rs, D, { risk, limit, H, acct, set, play }));
   if (play) playedSig = shown;
   /* The settings stay put above the page while it scrolls under them. */
@@ -114,8 +114,8 @@ function answer(sim, rs, D, o) {
   let n = 0;
   const tile = (k, key, val, fmt, s, cls = '', title = '') => {
     const v = el('span', { class: 'v' });
-    const delay = o.play ? 700 + 80 * n : 0;
-    countTo(v, 'lmc:' + key, val, fmt, { delay, dur: o.play ? 1100 : 450, fresh: o.play });
+    const delay = o.play ? 1300 + 90 * n : 0;
+    countTo(v, 'lmc:' + key, val, fmt, { delay, dur: o.play ? 1400 : 450, fresh: o.play });
     return el('div', { class: 'lab-tile' + cls, title, style: o.play ? { '--d': (120 + 70 * n++) + 'ms' } : {} },
       el('span', { class: 'k' }, k), v, el('span', { class: 's' }, s || ' '));
   };
@@ -242,8 +242,8 @@ function drawFan(sim, o, W, H, go = false) {
 
   if (!go) { cloud(); return wrap; }
   /* the play: one clock for the canvas, the scanning line, the opening bands and the median's light */
-  const N = sim.few.length, T_CLOUD = 1250, T_MED0 = 650, T_MED = 900;
-  const at = (ms, i) => (ms - (i / N) * 520) / 520;        // each run streams out over half a second, staggered
+  const N = sim.few.length, T_CLOUD = 2100, T_MED0 = 900, T_MED = 1500;
+  const at = (ms, i) => (ms - (i / N) * 900) / 900;        // each run streams out over about a second, staggered
   const tip = along(pts);
   cloud(() => 0);
   whenSeen(wrap, () => requestAnimationFrame(t0 => {

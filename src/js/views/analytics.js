@@ -6,7 +6,7 @@ import { timingTab } from './an-timing.js';
 import { executionTab } from './an-execution.js';
 import { outlookTab, takeWantedTab } from './an-outlook.js';
 
-let tab = 'overview';       // overview | weekly | tags | timing | execution | discipline | outlook | year
+let tab = 'overview';       // overview | weekly | tags | timing | execution | discipline | outlook  (the year lives on the Calendar now)
 let year = null;            // resolved on first paint to the latest year traded
 let period = '30D';
 const DAYS = { '7D': 7, '30D': 30, '90D': 90, 'All': null };
@@ -98,8 +98,44 @@ function periodFrom() {
   return cutoff.toISOString().slice(0, 10);
 }
 
+/* ============================================================
+   The year, for the Calendar page
+
+   It used to be a tab here, which put two calendars in two places. It is
+   drawn on the Calendar now, beside the month, and only lent from here so
+   its arithmetic stays where the rest of the analytics' is.
+   ============================================================ */
+export function yearPanel(store, nav) {
+  const acct = store.activeAccount;
+  const all = store.tradesFor(acct.id);
+  const years = [...new Set(all.map(t => String(t.date).slice(0, 4)))].filter(Boolean).sort();
+  const thisYear = String(new Date().getFullYear());
+  if (year == null || (years.length && !years.includes(year) && year !== thisYear)) {
+    year = years.length ? years[years.length - 1] : thisYear;
+  }
+  const stepYear = (delta) => {
+    const n = String(Number(year) + delta);
+    if (Number(n) < 2000 || Number(n) > Number(thisYear) + 1) return;
+    year = n; nav.refresh();
+  };
+  const stepper = el('div', { class: 'stepper' },
+    el('button', { onClick: () => stepYear(-1), 'aria-label': 'Previous year' }, icon('chevleft', 12, 'var(--grey-2)', 2.4)),
+    el('span', { class: 'val', style: { minWidth: '52px' } }, year),
+    el('button', { onClick: () => stepYear(1), 'aria-label': 'Next year' }, icon('chevright', 12, 'var(--grey-2)', 2.4)));
+  const sub = el('span', { class: 'sub' }, `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`);
+  const ctx = { unit: store.displayUnit, account: acct, cur: acct.currency, nav };
+  const body = all.length ? yearly(store, acct, all, ctx)
+    : el('div', { class: 'card', style: { flex: '1' } },
+        el('div', { class: 'empty' },
+          icon('calendar', 34, 'var(--grey-6)', 1.4),
+          el('h2', { style: { fontSize: '16px' } }, 'Nothing logged yet'),
+          el('p', {}, 'A year fills in as you trade it.')));
+  return { stepper, sub, body };
+}
+
 export function analytics(store, nav) {
   if (takeWantedTab() === 'outlook') tab = 'outlook';     // sent here from the Outlook page
+  if (tab === 'year') tab = 'overview';
   const acct = store.activeAccount;
   const cur = acct.currency;
   const all = store.tradesFor(acct.id);
@@ -127,7 +163,7 @@ export function analytics(store, nav) {
   const head = el('header', { class: 'head an-head' },
     el('h1', {}, 'Analytics'),
     el('div', { class: 'seg', style: { marginLeft: '6px' } },
-      ...[['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['execution', 'Execution'], ['discipline', 'Discipline'], ['outlook', 'Outlook'], ['year', 'Year']].map(([k, label]) =>
+      ...[['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['execution', 'Execution'], ['discipline', 'Discipline'], ['outlook', 'Outlook']].map(([k, label]) =>
         el('button', { class: k === tab ? 'is-on' : '', onClick: () => { tab = k; nav.refresh(); } }, label))),
     /* The weekly page brings a wider control than the others, so it gives up
        the count here to make room for it. */
@@ -681,6 +717,23 @@ function yearChart(rows, ctx, width, height) {
                          'font-size': 10.5, fill: 'var(--grey-4)' }, '0'));
 
   /* ---- the months ---- */
+  /* Each figure is written to fit its own column, so two neighbours can
+     never run into each other however narrow the window: the full figure
+     when there is room, a short one (+$3.9k) when there is not, and none at
+     all on a phone, where the list beside the chart says every figure. */
+  const MONO_W = .62;                                   // a mono character, in ems
+  const fits = (txt, size) => txt.length * size * MONO_W <= gap - 6;
+  /* One way of writing them for the whole chart, the longest that every
+     column has room for, so the twelve read alike. */
+  const forms = [
+    (row, v) => ({ txt: c.fig(u, acct, row.net, row.r, { decimals: 0, rDecimals: 1 }), size: 12 }),
+    (row, v) => ({ txt: shortFig(u, v, acct?.currency), size: 11 }),
+    (row, v) => ({ txt: shortFig(u, v, acct?.currency).replace(/[^0-9.kKmM+\u2212-]/g, ''), size: 10.5 }),
+  ];
+  const form = forms.find(fm => rows.every((row, i) => vals[i] == null || (() => { const o = fm(row, vals[i]); return fits(o.txt, o.size); })()));
+  const label = (row, v) => (form ? form(row, v) : null);
+  const tight = gap < 30;                               // J F M … rather than JAN FEB MAR
+
   rows.forEach((row, i) => {
     const v = vals[i];
     const cx = cxOf(i);
@@ -693,10 +746,10 @@ function yearChart(rows, ctx, width, height) {
       const top = up ? zero - h : zero;
       g.append(svg('rect', { class: 'col-fill-svg', x: cx - bw / 2, y: top, width: bw, height: h, rx: 5,
                              fill: v === 0 ? 'var(--grey-6)' : up ? 'var(--profit)' : 'var(--loss)' }));
-      g.append(svg('text', { x: cx, y: up ? top - 10 : top + h + 17, 'text-anchor': 'middle',
-        'font-family': 'var(--mono)', 'font-size': 12,
-        fill: v === 0 ? 'var(--grey-3)' : up ? 'var(--profit-ink)' : 'var(--loss-ink)' },
-        c.fig(u, acct, row.net, row.r, { decimals: 0, rDecimals: 1 })));
+      const lb = label(row, v);
+      if (lb) g.append(svg('text', { class: 'yr-val', x: cx, y: up ? top - 10 : top + h + 17, 'text-anchor': 'middle',
+        'font-family': 'var(--mono)', 'font-size': lb.size,
+        fill: v === 0 ? 'var(--grey-3)' : up ? 'var(--profit)' : 'var(--loss)' }, lb.txt));
     } else {
       /* A month with nothing in it. A short dash on the zero line says so
          without pretending to be a result. */
@@ -705,7 +758,8 @@ function yearChart(rows, ctx, width, height) {
     }
 
     g.append(svg('text', { x: cx, y: MONTH_Y, 'text-anchor': 'middle', 'font-family': 'var(--mono)', 'font-size': 11,
-                           'letter-spacing': '.09em', fill: traded ? 'var(--grey-3)' : 'var(--grey-6)' }, row.label));
+                           'letter-spacing': tight ? '0' : '.09em', fill: traded ? 'var(--grey-3)' : 'var(--grey-6)' },
+                           tight ? row.label.slice(0, 1) : row.label));
     if (traded) g.append(svg('text', { x: cx, y: COUNT_Y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
                                        'font-size': 10, fill: 'var(--grey-5)' }, String(row.count)));
   });
@@ -748,9 +802,24 @@ function yearChart(rows, ctx, width, height) {
   g.append(svg('text', { x: padL, y: RUN_LABEL_Y, 'font-family': 'var(--mono)', 'font-size': 10,
                          'letter-spacing': '.11em', fill: 'var(--grey-5)' }, 'RUNNING TOTAL'));
   g.append(svg('text', { x: width - padR, y: RUN_LABEL_Y, 'text-anchor': 'end', 'font-family': 'var(--mono)',
-                         'font-size': 12, fill: `var(--${tone}-ink)` },
+                         'font-size': 12, fill: `var(--${tone})` },
     drawn.length ? c.fig(u, acct, yearNet(rows), yearR(rows), { decimals: 0, rDecimals: 1 }) : '—'));
   return g;
+}
+
+/* A figure in as few characters as it can be said in: +$3.9k, −$850,
+   +12R, +16.8%. Only for the year chart's bars, where the column is narrow. */
+function shortFig(u, v, currency) {
+  if (v == null || !isFinite(v)) return '—';
+  const sign = v > 0 ? '+' : v < 0 ? '\u2212' : '';
+  const a = Math.abs(v);
+  if (u === 'R') return sign + (a >= 10 ? Math.round(a) : a.toFixed(1)) + 'R';
+  if (u === '%') return sign + (a >= 100 ? Math.round(a) : a.toFixed(1)) + '%';
+  const sym = currency === 'EUR' ? '\u20ac' : currency === 'GBP' ? '\u00a3' : currency === 'JPY' ? '\u00a5' : '$';
+  const n = a >= 1e6 ? (a / 1e6).toFixed(a >= 1e7 ? 0 : 1) + 'm'
+          : a >= 1e3 ? (a / 1e3).toFixed(a >= 1e4 ? 0 : 1) + 'k'
+          : String(Math.round(a));
+  return sign + sym + n;
 }
 
 const yearNet = rows => rows.reduce((sum, r) => sum + r.net, 0);
@@ -773,15 +842,15 @@ function yearly(store, acct, all, ctx) {
   const rate = wins + losses ? wins / (wins + losses) : null;
 
   /* ---------- the strip along the top ---------- */
-  const cell = (label, value, colour, note) => el('div', { style: { flex: '1', minWidth: 0, padding: '0 22px' } },
+  const cell = (label, value, colour, note) => el('div', { class: 'yr-cell', style: { flex: '1', minWidth: 0, padding: '0 22px' } },
     el('div', { class: 'm', style: { fontSize: '10px', letterSpacing: '.1em', color: 'var(--grey-5)' } }, label),
     el('div', { class: 'm', style: { marginTop: '9px', fontSize: '19px', letterSpacing: '-.02em',
                                      color: colour || 'var(--ink)' } }, value),
     el('div', { class: 'm', style: { marginTop: '5px', fontSize: '10.5px', color: 'var(--grey-5)' } }, note || ''));
-  const rule = () => el('div', { style: { width: '1px', alignSelf: 'stretch', background: 'var(--grey-7)' } });
+  const rule = () => el('div', { class: 'yr-rule', style: { width: '1px', alignSelf: 'stretch', background: 'var(--grey-7)' } });
 
-  const strip = el('section', { class: 'card', style: { flex: 'none', padding: '20px 4px' } },
-    el('div', { style: { display: 'flex', alignItems: 'stretch' } },
+  const strip = el('section', { class: 'card yr-strip', style: { flex: 'none', padding: '20px 4px' } },
+    el('div', { class: 'yr-strip-in', style: { display: 'flex', alignItems: 'stretch' } },
       cell(year, traded.length ? f(net, netR) : '—',
         net > 0 ? 'var(--profit)' : net < 0 ? 'var(--loss)' : 'var(--ink)',
         `${count} trade${count === 1 ? '' : 's'} · ${traded.length} month${traded.length === 1 ? '' : 's'} traded`),
@@ -836,7 +905,7 @@ function yearly(store, acct, all, ctx) {
     el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-5)' } }, label),
     el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12px', color: colour || 'var(--ink-2)' } }, value));
 
-  const listCard = el('section', { class: 'card', style: { width: '340px', flex: 'none', padding: '22px 24px 14px' } },
+  const listCard = el('section', { class: 'card yr-list', style: { width: '340px', flex: 'none', padding: '22px 24px 14px' } },
     el('div', { style: { display: 'flex', alignItems: 'baseline' } },
       el('h2', {}, 'Month by month'),
       el('span', { class: 'note', style: { marginLeft: 'auto' } }, 'win rate · net')),
@@ -851,7 +920,7 @@ function yearly(store, acct, all, ctx) {
 
   return el('div', { style: { flex: '1', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 'var(--s-8)' } },
     strip,
-    el('div', { class: 'row', style: { flex: '1', minHeight: 0 } }, chartCard, listCard));
+    el('div', { class: 'row yr-row', style: { flex: '1', minHeight: 0 } }, chartCard, listCard));
 }
 
 const monthName = m => ['January', 'February', 'March', 'April', 'May', 'June',

@@ -8,6 +8,7 @@
 
 import { sessionFor, UNITS, todayISO, readableOn, lift, sink, inkOn } from './calc.js';
 import { findBackground, scrimFor } from './backgrounds.js';
+import { tidyName } from './clip.js';
 import { shotName, urlFor, forgetUrl } from './shots.js';
 import { fs, isTauri } from './fs.js';
 import { zip, unzip, bytesOfText, textOfBytes } from './vault.js';
@@ -15,6 +16,7 @@ import { blankSheet } from './lab.js';
 import { blankRules } from './ghost.js';
 import { KEEP_ITEMS } from './wire.js';
 import { healReplay } from './replaysessions.js';
+import { applyLook, normaliseLook, scheduledLook, themeOf } from './look.js';
 export { todayISO, isTauri };
 
 /* ============================================================
@@ -56,6 +58,12 @@ export function isSupported() { return fs.isSupported(); }
 
 export const DEFAULT_COLOURS = { profit: '#18AC65', loss: '#F4624A' };
 
+/* How the share sheet opens the first time (views/share.js). */
+export const SHARE_DEFAULTS = Object.freeze({
+  bg: 'original:night', tf: 'auto', unit: '', style: 'candles', clipStyle: 'line', candles: 'colour', stats: 'plain',
+  figure: 'white', corners: 'rounded', size: 'landscape', quality: 'std', length: 6, scope: 'trade',
+});
+
 /* Anything that needs the colour at partial opacity — a gradient under the
    equity curve, a shaded calendar day, a chip behind a direction — needs the
    channels, not the hex. Published alongside so `rgba(var(--profit-rgb), .3)`
@@ -69,40 +77,204 @@ function rgbTriplet(hex) {
 /* One place decides what the app looks like. The chosen profit and loss
    colours are written onto the root as the same variables the views already
    use, so nothing below has to know they are configurable. */
-/* The picture behind everything, and whether the panels let it through.
+/* The video behind everything, and whether the panels let it through.
 
    Both are written onto the root element so every screen inherits them without
-   a single view knowing they exist. A background is held down by a scrim tuned
-   to the picture and to the theme — a bright photo under a dark interface needs
-   more holding down than a dark one does. */
-export function applySurface(background, glass, theme) {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  const bg = findBackground(background);
-  root.dataset.glass = glass ? 'on' : 'off';
-  if (!bg) {
-    root.removeAttribute('data-bg');
-    root.style.removeProperty('--bg-image');
-    root.style.removeProperty('--bg-scrim');
-    return;
+   a single view knowing they exist. The clip plays in one <video> on <body>,
+   outside #app (which is rebuilt on every click, and would restart it), muted
+   and on a loop, under a scrim that holds it down behind the writing — the
+   Dim in Appearance → Custom.
+
+   Glass comes in two: Frosted blurs what is behind the panels heavily and
+   tints them dark (or white on the paper looks); Clear barely blurs and
+   barely tints, so the video shows through. `glass` is false, true
+   (frosted) or 'clear'. */
+let layer = null;
+function videoLayer() {
+  if (layer && layer.isConnected) return layer;
+  const wrap = document.createElement('div');
+  wrap.className = 'bg-layer';
+  wrap.setAttribute('aria-hidden', 'true');
+  const v = document.createElement('video');
+  v.muted = true; v.loop = true; v.playsInline = true; v.autoplay = true; v.preload = 'auto';
+  v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.disablePictureInPicture = true;
+  const scrim = document.createElement('div');
+  scrim.className = 'bg-scrim';
+  /* a soft shade down from the top, under the top bar and each page's
+     heading, dark under light writing and light under dark (data-shade) */
+  const shade = document.createElement('div');
+  shade.className = 'bg-shade';
+  wrap.append(v, scrim, shade);
+  document.body.prepend(wrap);
+  layer = wrap;
+  if (!videoLayer.listening) {
+    videoLayer.listening = true;
+    document.addEventListener('visibilitychange', syncBgPlay);
   }
-  /* Enough to hold the picture down behind small text, not so much that the
-     picture stops being a picture. It does not depend on the theme: Quire's
-     panels are dark and its writing is light in both, so what the scrim has to
-     protect is the same either way. */
-  const scrim = scrimFor(bg);
-  root.dataset.bg = bg.id;
-  root.style.setProperty('--bg-image', `url("${bg.url}")`);
-  root.style.setProperty('--bg-scrim', String(scrim));
+  return wrap;
+}
+/* Still while the window is hidden, and for Motion: Off or a system that
+   asks for less motion — the first frame stays, as a picture. */
+export function syncBgPlay() {
+  const v = layer?.querySelector('video');
+  if (!v || !v.getAttribute('src')) return;
+  const still = document.hidden || document.documentElement.dataset.motion === 'off'
+    || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  if (still) v.pause(); else v.play().catch(() => {});
+}
+/* ---------- the writing on the picture ----------
+   The top bar and each page's heading sit on the video, not on a panel. Its
+   colour is a setting (Appearance → Custom → Text): 'auto' reads how bright
+   the top of the picture is (its still, after Dim) and writes white on a
+   dark one and black on a light one; 'grey' does the same, softer; 'white'
+   and 'black' are what they say; 'theme' leaves the theme's own. The result
+   is data-pic-ink on <html> (look.css has the colours), and data-shade, the
+   soft shade behind it. */
+export const PIC_INKS = ['auto', 'white', 'black', 'grey', 'theme'];
+const lumas = new Map();   // still url -> Promise<{ top, all }|null>, 0 black … 1 white
+function topLuma(src) {
+  if (!src) return Promise.resolve(null);
+  if (!lumas.has(src)) lumas.set(src, new Promise(res => {
+    const im = new Image();
+    im.onload = () => {
+      try {
+        const W = 48, H = 27, c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(im, 0, 0, W, H);
+        /* the top third (where the top bar and the heading are), and the whole (where the panels are) */
+        const d = g.getImageData(0, 0, W, H).data, cut = Math.round(H * 0.36) * W;
+        let top = 0, all = 0;
+        for (let i = 0, n = 0; i < d.length; i += 4, n++) {
+          const y = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+          all += y; if (n < cut) top += y;
+        }
+        res({ top: top / cut, all: all / (d.length / 4) });
+      } catch { res(null); }
+    };
+    im.onerror = () => res(null);
+    im.src = src;
+  }));
+  return lumas.get(src);
+}
+/* the picture as it is seen: Dim lays black over it (a pale wash on a paper look) */
+const seenOf = (luma, paper, scrim) => (paper ? luma * (1 - 0.7 * scrim) + 0.93 * 0.7 * scrim : luma * (1 - scrim));
+/** Which writing a picture wants: 'white' | 'black' | 'grey-l' | 'grey-d', or null for the theme's.
+    `luma` is how bright the part of the picture in question is (0 black … 1 white), null if unknown. */
+export function picInkFor(mode, luma, paper, scrim) {
+  if (mode === 'theme') return null;
+  if (mode === 'white' || mode === 'black') return mode;
+  /* nothing to read yet: the theme's side */
+  const light = luma == null ? paper : seenOf(luma, paper, scrim) > 0.5;
+  if (mode === 'grey') return light ? 'grey-d' : 'grey-l';
+  return light ? 'black' : 'white';
+}
+/* The heading's writing is read off the top of the picture; whether Clear's
+   see-through panels are drawn the other way round from the theme (data-pic-
+   flip, look.js → clearFlip) off the whole of it — or, when you chose the
+   writing yourself, off your choice. */
+function paintPicInk(bg, mode, scrim) {
+  const root = document.documentElement;
+  const want = PIC_INKS.includes(mode) ? mode : 'auto';
+  const lightInk = k => k === 'white' || k === 'grey-l';
+  const set = L => {
+    if (root.dataset.bg !== bg.id) return;               // another background since
+    const paper = root.dataset.paper === 'on';
+    const ink = picInkFor(want, L ? L.top : null, paper, scrim);
+    if (ink) root.dataset.picInk = ink; else root.removeAttribute('data-pic-ink');
+    root.dataset.shade = ink ? (lightInk(ink) ? 'dark' : 'light') : (paper ? 'light' : 'dark');
+    /* Read off the picture, the panels only turn when it is well over on the
+       other side — a busy picture in between is better on the theme's own;
+       chosen by you, they follow your choice. */
+    let flip;
+    if (want === 'auto' || want === 'grey') {
+      const seen = L ? seenOf(L.all, paper, scrim) : null;
+      flip = seen != null && (paper ? seen < 0.38 : seen > 0.62);
+    } else flip = !!ink && (paper ? lightInk(ink) : !lightInk(ink));
+    if (flip) root.dataset.picFlip = ''; else root.removeAttribute('data-pic-flip');
+  };
+  if (want !== 'auto' && want !== 'grey') return set(null);
+  const src = bg.poster || null;
+  if (lumas.has(src)) lumas.get(src).then(set); else { set(null); topLuma(src).then(set); }
 }
 
-export function applyTheme(theme, colours) {
+/** How clear Clear glass is by default: 0 is nearly frosted, 1 is bare. */
+export const CLARITY = 0.65;
+export function applySurface(background, glass, theme, dim = null, clarity = CLARITY, picInk = 'auto') {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const dark = theme === 'dark';
-  root.dataset.theme = dark ? 'dark' : 'light';
+  const bg = findBackground(background) || yourBackground(background);
+  root.dataset.glass = glass ? 'on' : 'off';
+  root.dataset.glassKind = glass === 'clear' ? 'clear' : glass ? 'frosted' : 'off';
+  /* the tint and blur of Clear are worked out from this in CSS (look.js) */
+  root.style.setProperty('--clear-k', String(clampClarity(clarity)));
+  if (!bg) {
+    root.removeAttribute('data-bg');
+    root.removeAttribute('data-pic-ink'); root.removeAttribute('data-shade'); root.removeAttribute('data-pic-flip');
+    root.style.removeProperty('--bg-scrim');
+    if (layer) {
+      const v = layer.querySelector('video');
+      v.pause(); v.removeAttribute('src'); v.removeAttribute('poster'); v.load();
+      layer.hidden = true;
+    }
+    return;
+  }
+  root.dataset.bg = bg.id;
+  const scrim = dim == null ? scrimFor(bg) : Math.max(0, Math.min(0.9, Number(dim)));
+  root.style.setProperty('--bg-scrim', String(scrim));
+  paintPicInk(bg, picInk, scrim);
+  const L = videoLayer();
+  L.hidden = false;
+  const v = L.querySelector('video');
+  if (v.dataset.want !== bg.src) {
+    v.dataset.want = bg.src;
+    if (bg.poster) v.setAttribute('poster', bg.poster); else v.removeAttribute('poster');
+    playable(bg.src).then(url => {
+      if (v.dataset.want !== bg.src) return;            // another was chosen meanwhile
+      if (v.getAttribute('src') !== url) v.setAttribute('src', url);
+      syncBgPlay();
+    });
+  }
+  syncBgPlay();
+}
 
-  const { profit, loss } = { ...DEFAULT_COLOURS, ...(colours || {}) };
+export const clampClarity = v => (v == null || v === '' || !Number.isFinite(Number(v)) ? CLARITY : Math.max(0, Math.min(1, Number(v))));
+
+/* In the desktop app a clip of ours is read whole into memory and played
+   from there: the app's own file server does not answer the partial
+   requests a <video> makes to loop and seek. A browser plays it as it is. */
+const fetched = new Map();
+export function playable(src) {
+  if (!src || /^(blob:|data:)/.test(src) || !isTauri()) return Promise.resolve(src);
+  if (!fetched.has(src)) {
+    fetched.set(src, fetch(src).then(r => (r.ok ? r.blob() : null))
+      .then(b => (b ? URL.createObjectURL(b) : src)).catch(() => src));
+  }
+  return fetched.get(src);
+}
+
+/* A video of your own: kept in the vault (screenshots/bgvideo-*), read back
+   once into a url. */
+const yourUrls = new Map();
+/* your picture and banner, read from the vault once: file -> object url */
+const profileUrls = new Map();
+export function rememberYourBackground(id, url, poster) { yourUrls.set(id, { url, poster }); }
+function yourBackground(value) {
+  const id = String(value || '').startsWith('yours:') ? String(value).slice(6) : null;
+  const got = id && yourUrls.get(id);
+  return got ? { id: 'yours', src: got.url, poster: got.poster, scrim: 0.4 } : null;
+}
+
+/* `pale` says what the pale cards are in this look: pale on Graphite, dark on
+   everything else — which decides how a profit is written on one. */
+export function applyTheme(theme, colours, pale = theme !== 'dark') {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const dark = !pale;
+  root.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+
+  const { profit, loss, flat } = { ...DEFAULT_COLOURS, ...(colours || {}) };
+  if (flat) root.style.setProperty('--flat', flat); else root.style.removeProperty('--flat');
   root.style.setProperty('--green', profit);
   root.style.setProperty('--orange', loss);
   root.style.setProperty('--profit', profit);
@@ -227,8 +399,8 @@ class Store {
     this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings };
     this.heal();
     this.migrate();
-    applyTheme(this.theme, this.colours);
-    applySurface(this.background, this.glass, this.theme);
+    this.applyLookNow();
+    this.loadBgVideo();
 
     // A brand new folder gets its scaffolding written out immediately, so the
     // user can see real files appear rather than wondering if it worked.
@@ -293,7 +465,11 @@ class Store {
     const fromTrades = this.trades.flatMap(t => [...tradeShotsOf(t), ...reviewShotsOf(t)]);
     const fromOutlooks = Object.values(this.data.outlooks?.days || {})
       .flatMap(day => (day.instruments || []).flatMap(i => outlookShotsOf(i)));
-    return [...fromTrades, ...fromOutlooks].filter(Boolean);
+    const fromLook = this.data.accounts?.ownBackground ? [this.data.accounts.ownBackground] : [];
+    const fromShare = (this.data.accounts?.share?.clips || []).map(c => c.file);
+    const fromBg = (this.data.accounts?.bgVideos || []).map(v => v.file);
+    const fromProfile = [this.data.accounts?.avatar?.file, this.data.accounts?.banner?.file];
+    return [...fromTrades, ...fromOutlooks, ...fromLook, ...fromShare, ...fromBg, ...fromProfile].filter(Boolean);
   }
 
   async exportVault() {
@@ -394,6 +570,13 @@ class Store {
     if (!d.accounts || typeof d.accounts !== 'object') { d.accounts = defaultAccounts(); note(); }
     if (!Array.isArray(d.accounts.accounts)) { d.accounts.accounts = []; note(); }
     d.accounts.accounts = d.accounts.accounts.filter(a => a && a.id);
+    /* names your own videos were given from a wallpaper site's file name, tidied once */
+    for (const list of [d.accounts.bgVideos, d.accounts.share?.clips]) {
+      for (const v of Array.isArray(list) ? list : []) {
+        const tidy = v && tidyName(v.name);
+        if (v && tidy && tidy !== v.name) { v.name = tidy; note(); }
+      }
+    }
 
     if (!d.trades || typeof d.trades !== 'object') { d.trades = { version: 1, trades: [] }; note(); }
     if (!Array.isArray(d.trades.trades)) { d.trades.trades = []; note(); }
@@ -898,10 +1081,281 @@ class Store {
     await this.save('accounts');
   }
 
+  /* Your picture and your banner: a picture or a video of your own (a video
+     loops, muted), kept in the vault as screenshots/avatar-<id>.<ext> and
+     banner-<id>.<ext> so they go wherever the journal goes. Without one, the
+     initials on your colour and the drawn banner stand in.
+       accounts.avatar / accounts.banner = { file, kind: 'image'|'video', type, thumb } */
+  profileMedia(which) {
+    const m = this.data.accounts?.[which === 'banner' ? 'banner' : 'avatar'];
+    return m && m.file ? m : null;
+  }
+  /** Its url if it has been read already, else null (see profileUrl). */
+  profileUrlNow(which) { const m = this.profileMedia(which); return m ? profileUrls.get(m.file) || null : null; }
+  async profileUrl(which) {
+    const m = this.profileMedia(which);
+    if (!m) return null;
+    if (profileUrls.has(m.file)) return profileUrls.get(m.file);
+    try {
+      const b = await fs.readImage(m.file);
+      if (!b) return null;
+      const url = URL.createObjectURL(new Blob([b], { type: m.type || (m.kind === 'video' ? 'video/mp4' : 'image/jpeg') }));
+      profileUrls.set(m.file, url);
+      return url;
+    } catch { return null; }
+  }
+  async setProfileMedia(which, blob, meta = {}) {
+    const key = which === 'banner' ? 'banner' : 'avatar';
+    const kind = meta.kind === 'video' ? 'video' : 'image';
+    const ext = String(meta.ext || (kind === 'video' ? 'mp4' : 'jpg')).replace(/[^a-z0-9]/gi, '').toLowerCase() || 'jpg';
+    const file = `${SHOTS}/${key}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+    await fs.ensureDir(SHOTS);
+    await fs.writeImage(file, blob);
+    const old = this.data.accounts[key];
+    this.data.accounts[key] = { file, kind, type: meta.type || blob.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg'), thumb: meta.thumb || '' };
+    profileUrls.set(file, URL.createObjectURL(new Blob([blob], { type: this.data.accounts[key].type })));
+    await this.save('accounts');
+    if (old?.file) await this.dropProfileFile(old.file);
+    return this.data.accounts[key];
+  }
+  async removeProfileMedia(which) {
+    const key = which === 'banner' ? 'banner' : 'avatar';
+    const old = this.data.accounts[key];
+    delete this.data.accounts[key];
+    await this.save('accounts');
+    if (old?.file) await this.dropProfileFile(old.file);
+  }
+  async dropProfileFile(file) {
+    const url = profileUrls.get(file);
+    if (url) { try { URL.revokeObjectURL(url); } catch { /* fine */ } profileUrls.delete(file); }
+    await this.dropImage(file);
+  }
+
   /* Light or dark. A display preference, so it sits with the account list
      rather than inside any one account, and it is applied before the first
      paint so the app never flashes the wrong theme. */
-  get theme() { return this.data.accounts.theme === 'dark' ? 'dark' : 'light'; }
+  get theme() { return this.lookIsDark ? 'dark' : 'light'; }
+
+  /* ============================================================
+     The look — theme, accent, text, lines, font and motion (look.js).
+     Journals from before it have only `theme`: dark becomes Midnight, and
+     everything else opens on Light.
+     ============================================================ */
+  get look() { return normaliseLook(this.data.accounts.look, this.data.accounts.theme); }
+  get savedLooks() { return Array.isArray(this.data.accounts.looks) ? this.data.accounts.looks : []; }
+  get lookSchedule() { return { on: false, dayAt: '07:00', nightAt: '19:00', ...(this.data.accounts.lookSchedule || {}) }; }
+  /** The look on screen: the saved one, or the one the clock asks for. */
+  get effectiveLook() {
+    const s = scheduledLook(this.lookSchedule, this.savedLooks);
+    return s ? normaliseLook(s.look) : this.look;
+  }
+  get lookIsDark() { const th = themeOf(this.effectiveLook.theme); return !th.paper && !th.classic; }
+
+  applyLookNow() {
+    const eff = this.effectiveLook;
+    const s = scheduledLook(this.lookSchedule, this.savedLooks);
+    const colours = s?.colours ? { ...this.colours, ...s.colours } : this.colours;
+    const th = themeOf(eff.theme);
+    applyTheme(this.lookIsDark ? 'dark' : 'light', colours, !!th.classic);
+    /* the look first: it sets data-motion, which decides whether the video plays */
+    applyLook(eff, { glass: this.glassMode === 'clear' ? 'clear' : this.glass, bg: this.hasBackground });
+    applySurface(this.background, this.glassMode === 'clear' ? 'clear' : this.glass, this.theme, this.bgDim, this.clarity, this.picInk);
+  }
+
+  async setLook(patch) {
+    this.data.accounts.look = normaliseLook({ ...this.look, ...patch });
+    this.data.accounts.theme = this.lookIsDark ? 'dark' : 'light';
+    this.applyLookNow();
+    await this.save('accounts');
+  }
+  /** Everything a saved look carries, in one object. */
+  snapshotLook() {
+    return { look: this.look, colours: { ...this.colours }, background: this.background, glass: this.data.accounts.glass === 'clear' ? 'clear' : this.glass,
+             clarity: this.clarity, picInk: this.picInk };
+  }
+  async restoreLook(snap) {
+    if (!snap) return;
+    this.data.accounts.look = normaliseLook(snap.look);
+    if (snap.colours) this.data.accounts.colours = { ...DEFAULT_COLOURS, ...snap.colours };
+    if (snap.background !== undefined) this.data.accounts.background = snap.background || '';
+    if (snap.glass !== undefined) this.data.accounts.glass = snap.glass === 'clear' ? 'clear' : !!snap.glass;
+    if (snap.clarity != null) this.data.accounts.clarity = clampClarity(snap.clarity);
+    if (PIC_INKS.includes(snap.picInk)) this.data.accounts.picInk = snap.picInk;
+    this.data.accounts.theme = this.lookIsDark ? 'dark' : 'light';
+    this.applyLookNow();
+    await this.loadBgVideo();
+    await this.save('accounts');
+  }
+  async saveLook(name) {
+    const entry = { id: 'look_' + crypto.randomUUID().slice(0, 8), name: String(name || 'My look').trim().slice(0, 40) || 'My look',
+                    ...this.snapshotLook(), savedAt: new Date().toISOString() };
+    this.data.accounts.looks = [...this.savedLooks, entry];
+    await this.save('accounts');
+    return entry;
+  }
+  async importLook(obj) {
+    const src = obj && obj.look ? obj : null;
+    if (!src) throw new Error('That file is not a Laminar look');
+    const entry = { id: 'look_' + crypto.randomUUID().slice(0, 8), name: String(src.name || 'Imported look').slice(0, 40),
+                    look: normaliseLook(src.look), colours: { ...DEFAULT_COLOURS, ...(src.colours || {}) },
+                    background: /^(own|yours):/.test(String(src.background || '')) ? '' : (src.background || ''),
+                    glass: src.glass === 'clear' ? 'clear' : !!src.glass, savedAt: new Date().toISOString() };
+    this.data.accounts.looks = [...this.savedLooks, entry];
+    await this.save('accounts');
+    return entry;
+  }
+  async deleteLook(id) {
+    this.data.accounts.looks = this.savedLooks.filter(l => l.id !== id);
+    const sch = this.lookSchedule;
+    if (sch.day === id || sch.night === id) this.data.accounts.lookSchedule = { ...sch, on: false };
+    this.applyLookNow();
+    await this.save('accounts');
+  }
+  async setLookSchedule(patch) {
+    this.data.accounts.lookSchedule = { ...this.lookSchedule, ...patch };
+    this.applyLookNow();
+    await this.save('accounts');
+  }
+  async resetLook() {
+    this.data.accounts.look = normaliseLook({});
+    this.data.accounts.colours = { ...DEFAULT_COLOURS };
+    this.data.accounts.background = '';
+    this.data.accounts.glass = false;
+    this.data.accounts.theme = 'light';
+    this.applyLookNow();
+    await this.save('accounts');
+  }
+
+  /* ============================================================
+     Sharing a trade (views/share.js). Your own clips and pictures are kept
+     in the vault as screenshots/share-*.mp4 / .gif / .jpg, so they go
+     wherever the journal goes and a vault backup carries them. Each keeps
+     how you left it — trim, crop, dim, volume. The sheet's own choices
+     (size, style…) are kept beside them.
+     ============================================================ */
+  get share() {
+    const sh = this.data.accounts.share || {};
+    return { prefs: { ...SHARE_DEFAULTS, ...(sh.prefs || {}) }, clips: Array.isArray(sh.clips) ? sh.clips : [] };
+  }
+  async setSharePrefs(patch) {
+    const cur = this.share;
+    this.data.accounts.share = { ...cur, prefs: { ...cur.prefs, ...patch } };
+    await this.save('accounts');
+  }
+  /** Keep a clip or picture: `meta` is { name, kind: 'video'|'image', type, ext, dur, thumb }. */
+  async addShareClip(blob, meta) {
+    const id = 'clip_' + crypto.randomUUID().slice(0, 8);
+    const ext = String(meta.ext || 'mp4').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'mp4';
+    const file = `${SHOTS}/share-${id.slice(5)}.${ext}`;
+    await fs.ensureDir(SHOTS);
+    await fs.writeImage(file, blob);
+    const dur = Number(meta.dur) || 0;
+    const clip = {
+      id, file, name: String(meta.name || 'Clip').slice(0, 40), kind: meta.kind === 'image' ? 'image' : 'video',
+      type: meta.type || (meta.kind === 'image' ? 'image/jpeg' : 'video/mp4'), dur, thumb: meta.thumb || '',
+      start: 0, len: dur ? Math.min(dur, 10) : 6, fx: 0.5, fy: 0.5, dim: 0.25, sound: 0.7, addedAt: new Date().toISOString(),
+    };
+    const cur = this.share;
+    this.data.accounts.share = { ...cur, clips: [...cur.clips, clip], prefs: { ...cur.prefs, bg: id } };
+    await this.save('accounts');
+    return clip;
+  }
+  async updateShareClip(id, patch) {
+    const cur = this.share;
+    this.data.accounts.share = { ...cur, clips: cur.clips.map(c => (c.id === id ? { ...c, ...patch, id, file: c.file } : c)) };
+    await this.save('accounts');
+  }
+  async removeShareClip(id) {
+    const cur = this.share;
+    const gone = cur.clips.find(c => c.id === id);
+    const prefs = cur.prefs.bg === id ? { ...cur.prefs, bg: SHARE_DEFAULTS.bg } : cur.prefs;
+    this.data.accounts.share = { ...cur, clips: cur.clips.filter(c => c.id !== id), prefs };
+    await this.save('accounts');
+    if (gone) await this.dropImage(gone.file);
+  }
+  /** The clip's bytes, typed as what they are (the vault hands back pictures as JPEG). */
+  async shareClipBlob(clip) {
+    if (!clip?.file) return null;
+    try {
+      const b = await fs.readImage(clip.file);
+      return b ? new Blob([b], { type: clip.type || 'video/mp4' }) : null;
+    } catch { return null; }
+  }
+
+  /* ============================================================
+     Your own background videos (Appearance → Custom). Kept in the vault as
+     screenshots/bgvideo-<id>.<ext> so they go wherever the journal goes and
+     a backup carries them; listed in accounts.json → bgVideos with a name, a
+     still (`thumb`) and how long they run. The background's value for one
+     is 'yours:<id>'.
+     ============================================================ */
+  get bgVideos() { return Array.isArray(this.data.accounts.bgVideos) ? this.data.accounts.bgVideos : []; }
+  /** The url a video of yours plays from, read from the vault once. */
+  async bgVideoUrl(id) {
+    const v = this.bgVideos.find(x => x.id === id);
+    if (!v) return null;
+    if (yourUrls.has(id)) return yourUrls.get(id).url;
+    try {
+      const b = await fs.readImage(v.file);
+      if (!b) return null;
+      const url = URL.createObjectURL(new Blob([b], { type: v.type || 'video/mp4' }));
+      rememberYourBackground(id, url, v.thumb || '');
+      return url;
+    } catch { return null; }
+  }
+  async loadBgVideo() {
+    const b = this.background;
+    if (!b.startsWith('yours:')) return;
+    if (await this.bgVideoUrl(b.slice(6))) this.applyLookNow();
+  }
+  /** Keep a video and put it behind the journal. `meta` is { name, type, ext, dur, thumb }. */
+  async addBgVideo(blob, meta = {}) {
+    const id = 'bgv_' + crypto.randomUUID().slice(0, 8);
+    const ext = String(meta.ext || 'mp4').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'mp4';
+    const file = `${SHOTS}/bgvideo-${id.slice(4)}.${ext}`;
+    await fs.ensureDir(SHOTS);
+    await fs.writeImage(file, blob);
+    const entry = { id, file, name: String(meta.name || 'Video').slice(0, 40), type: meta.type || 'video/mp4',
+                    dur: Number(meta.dur) || 0, thumb: meta.thumb || '', addedAt: new Date().toISOString() };
+    this.data.accounts.bgVideos = [...this.bgVideos, entry];
+    rememberYourBackground(id, URL.createObjectURL(new Blob([blob], { type: entry.type })), entry.thumb);
+    const introduced = await this.setBackground('yours:' + id);
+    return { entry, introduced };
+  }
+  async removeBgVideo(id) {
+    const gone = this.bgVideos.find(v => v.id === id);
+    this.data.accounts.bgVideos = this.bgVideos.filter(v => v.id !== id);
+    if (this.background === 'yours:' + id) this.data.accounts.background = '';
+    const got = yourUrls.get(id);
+    if (got) { try { URL.revokeObjectURL(got.url); } catch { /* fine */ } yourUrls.delete(id); }
+    this.applyLookNow();
+    await this.save('accounts');
+    if (gone) await this.dropImage(gone.file);
+  }
+  /** Whether something is actually behind the app right now. */
+  get hasBackground() { return !!(findBackground(this.background) || yourBackground(this.background)); }
+  /** The writing on the picture: 'auto' | 'white' | 'black' | 'grey' | 'theme'. */
+  get picInk() { const v = this.data.accounts.picInk; return PIC_INKS.includes(v) ? v : 'auto'; }
+  async setPicInk(v) {
+    this.data.accounts.picInk = PIC_INKS.includes(v) ? v : 'auto';
+    this.applyLookNow();
+    await this.save('accounts');
+  }
+  /** How clear Clear glass is, 0–1 (1 is barely there). */
+  get clarity() { return clampClarity(this.data.accounts.clarity); }
+  async setClarity(v) {
+    this.data.accounts.clarity = clampClarity(v);
+    this.applyLookNow();
+    await this.save('accounts');
+  }
+  /** How dark the video sits behind the writing; null = the video's own. */
+  get bgDim() { const d = this.data.accounts.bgDim; return d == null || d === '' ? null : Number(d); }
+  async setBgDim(v) {
+    this.data.accounts.bgDim = v == null ? null : Math.max(0, Math.min(0.9, Number(v)));
+    this.applyLookNow();
+    await this.save('accounts');
+  }
+
   get colours() { return { ...DEFAULT_COLOURS, ...(this.data.accounts.colours || {}) }; }
 
   /* What is behind the app, and whether the panels are see-through. Display
@@ -909,16 +1363,16 @@ class Store {
      account. */
   get background() { return this.data.accounts.background || ''; }
   get glass()      { return !!this.data.accounts.glass; }
+  /** 'off', 'frosted' or 'clear'. */
+  get glassMode()  { const g = this.data.accounts.glass; return g === 'clear' ? 'clear' : g ? 'frosted' : 'off'; }
 
+  /* Light or dark, the old two-way switch: dark is Midnight, light is Light. */
   async setTheme(t) {
-    this.data.accounts.theme = t === 'dark' ? 'dark' : 'light';
-    applyTheme(this.theme, this.colours);
-    applySurface(this.background, this.glass, this.theme);
-    await this.save('accounts');
+    await this.setLook({ theme: t === 'dark' ? 'midnight' : 'light' });
   }
   async setColour(which, hex) {
     this.data.accounts.colours = { ...this.colours, [which]: hex };
-    applyTheme(this.theme, this.colours);
+    this.applyLookNow();
     await this.save('accounts');
   }
   /**
@@ -938,16 +1392,16 @@ class Store {
     const introduce = !!id && !this.data.accounts.glassNudged && !this.glass;
     this.data.accounts.background = id || '';
     if (id) this.data.accounts.glassNudged = true;
-    if (introduce) this.data.accounts.glass = true;
-    applySurface(this.background, this.glass, this.theme);
+    if (introduce) this.data.accounts.glass = 'clear';   // the first video comes with the glass you can see it through
+    this.applyLookNow();
     await this.save('accounts');
     return introduce;
   }
   async setGlass(on) {
-    this.data.accounts.glass = !!on;
+    this.data.accounts.glass = on === 'clear' ? 'clear' : on === 'frosted' ? true : on === 'off' ? false : !!on;
     /* Having an opinion about the glass counts as having met it. */
     this.data.accounts.glassNudged = true;
-    applySurface(this.background, this.glass, this.theme);
+    this.applyLookNow();
     await this.save('accounts');
   }
   async setDisplayUnit(u) {

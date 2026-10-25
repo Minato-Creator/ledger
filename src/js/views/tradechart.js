@@ -24,6 +24,7 @@
    Replay starts where you click, with pause, step and speed.
    ============================================================ */
 import { el, icon, toast } from '../ui.js';
+import { pairMark } from '../flags.js';
 import * as cd from '../candles.js';
 import { createCore, CHART_TFS, TV_FONT, withAlpha, svgIcon, niceTicks, spread } from '../chart/core.js';
 import { openMenu } from '../chart/menu.js';
@@ -48,7 +49,7 @@ export function tradeChart(store, nav, t, opts = {}) {
   const card = el('section', { class: 'card tc' + (opts.wide ? ' is-wide' : ''), style: { flex: 'none' } });
 
   const sub = el('span', { class: 'tc-sub' }, inst ? 'OANDA · mid' : '');
-  const title = el('h3', {}, t.pair || 'Chart', sub);
+  const title = el('h3', {}, t.pair ? pairMark(t.pair, 20) : null, t.pair || 'Chart', sub);
   const headOnly = () => el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }));
 
   /* ready: once it shows what it is going to show — a message, or the chart drawn */
@@ -64,7 +65,7 @@ export function tradeChart(store, nav, t, opts = {}) {
     if (!inst) return message(`No chart for ${t.pair || 'this trade'} — OANDA has no instrument that matches it.`);
     const cred = await cd.getKey();
     if (!cred) return message('Add your OANDA key in Settings to see the chart here.',
-      el('button', { class: 'tc-btn', onClick: () => nav.go('#/settings') }, 'Open Settings'));
+      el('button', { class: 'tc-btn', onClick: () => nav.go('#/settings/charts') }, 'Open Settings'));
     card.classList.remove('is-quiet');
     /* "Getting the prices…" only if it takes a while — prices from the vault come at once, and a flash of it is the glitch */
     const wait = el('div', { class: 'tc-plot is-loading is-wait', style: { height: height + 'px' } }, el('span', {}, 'Getting the prices…'));

@@ -10,6 +10,7 @@
    Everything here is a sum, a count or an order of trades you logged.
    ============================================================ */
 import { el, svg, fitted } from '../ui.js';
+import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
 import { ticks, hoverLayer, tipLayer, spark, unitKit } from './chartkit.js';
 
@@ -413,7 +414,7 @@ function pairsCard(rows, K) {
         const withR = gr.rows.filter(x => x.r != null && isFinite(x.r));
         const perR = withR.length ? withR.reduce((a, x) => a + x.r, 0) / withR.length : null;
         return el('div', { class: 'an-irow' },
-          el('div', { class: 'n' }, el('span', { class: 'nm' }, gr.key), el('span', { class: 'mt' }, `${gr.rows.length} trade${gr.rows.length === 1 ? '' : 's'}`)),
+          el('div', { class: 'n' }, el('span', { class: 'nm has-mark' }, pairMark(gr.key, 18), gr.key), el('span', { class: 'mt' }, `${gr.rows.length} trade${gr.rows.length === 1 ? '' : 's'}`)),
           el('div', { class: 'an-ispark' }, spark(curve, { height: 30, cls: gr.net < 0 ? 'is-neg' : 'is-pos' })),
           el('div', { class: 'an-iwin' }, el('span', {}, wr == null ? '—' : c.pct(wr, 0)),
             el('div', { class: 'an-wr' }, el('div', { class: 'bar-fill', style: { width: ((wr || 0) * 100) + '%' } }))),

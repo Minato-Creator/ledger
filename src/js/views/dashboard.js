@@ -1,4 +1,5 @@
 import { el, svg, icon, ft, fitted } from '../ui.js';
+import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
 import { hoverLayer, readRow, unitKit } from './chartkit.js';
 import { sequence, deepest, streaks } from './an-overview.js';
@@ -49,14 +50,14 @@ export function dashboard(store, nav) {
 
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Dashboard'),
-    el('span', { class: 'sub' }, acct.name),
+    el('span', { class: 'sub' }, new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }) + ' · ' + acct.name),
     el('div', { class: 'spacer' }),
     el('div', { class: 'seg' },
       ...Object.keys(DAYS).map(k => el('button', {
         class: k === period ? 'is-on' : '',
         onClick: () => { period = k; nav.refresh(); },
       }, k))),
-    el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, '#fff', 2), 'New trade'),
+    el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, 'currentColor', 2), 'New trade'),
   );
 
   if (!all.length) {
@@ -66,7 +67,7 @@ export function dashboard(store, nav) {
           icon('trades', 34, 'var(--grey-6)', 1.4),
           el('h2', { style: { fontSize: '16px' } }, 'No trades on ' + acct.name + ' yet'),
           el('p', {}, 'Log one and every number on this page starts working.'),
-          el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, '#fff', 2), 'Log your first trade'),
+          el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, 'currentColor', 2), 'Log your first trade'),
         )));
   }
 
@@ -189,27 +190,10 @@ function edgeCard(rows, s, K, f) {
       el('div', { class: 'db-note' },
         pf != null && !isFinite(pf) ? 'no losing trade yet — needs one to mean anything'
           : [el('b', {}, f(s.grossWin, s.grossWinR, { decimals: 0 })), ' won · ', el('b', {}, f(-s.grossLoss, s.grossLossR == null ? null : -s.grossLossR, { decimals: 0 })), ' lost'])),
-    cleanWins(rows, stat, f),
     stat(`Last ${tail.length} trade${tail.length === 1 ? '' : 's'}`,
       st.nowKind ? [el('span', { class: st.nowKind === 'win' ? 'is-pos' : 'is-neg' }, `${st.now}${st.nowKind === 'win' ? 'W' : 'L'}`), el('small', {}, ' in a row')] : '—', 'is-run',
       el('div', { class: 'db-tape', title: 'Oldest on the left, latest on the right' },
         ...tail.map(x => el('i', { class: x.o === 'win' ? 'w' : x.o === 'loss' ? 'l' : 'b' })))));
-}
-
-/* Winners with nothing wrong in them: no mistake ticked on New trade. Only
-   wins that were asked count — a win logged before the question is not
-   called clean or otherwise. */
-export function cleanWinsOf(rows) {
-  const wins = rows.filter(x => x.o === 'win' && Array.isArray(x.t.mistakes));
-  const clean = wins.filter(x => !x.t.mistakes.length);
-  return { asked: wins.length, n: clean.length, v: clean.reduce((a, x) => a + x.v, 0), r: clean.reduce((a, x) => a + (x.r ?? 0), 0),
-    allV: wins.reduce((a, x) => a + x.v, 0) };
-}
-function cleanWins(rows, stat, f) {
-  const W = cleanWinsOf(rows);
-  if (!W.asked) return stat('Clean wins', '—', '', el('div', { class: 'db-note' }, 'tick mistakes on New trade to see these'));
-  return stat('Clean wins', [String(W.n), el('small', {}, ` of ${W.asked} wins`)], W.n ? 'is-pos' : '',
-    el('div', { class: 'db-note' }, el('b', {}, f(W.v, W.r, { decimals: 0 })), ' from wins with no mistake'));
 }
 
 /* ---------- where it comes from ---------- */
@@ -240,7 +224,7 @@ function sourceCard(store, rows, K) {
           el('div', { class: 'db-colrows' }, ...col.groups.map(gr => {
             const w = Math.abs(gr.net) / reach * 50;
             return el('div', { class: 'db-srcrow' },
-              el('div', { class: 'top' }, el('span', { class: 'nm', title: gr.name }, gr.name),
+              el('div', { class: 'top' }, el('span', { class: 'nm', title: gr.name }, col.title === 'Instrument' ? pairMark(gr.key, 16) : null, gr.name),
                 el('span', { class: 'nv ' + sign(gr.net) }, K.fmt(gr.net))),
               el('div', { class: 'db-dbar' }, el('i', { class: 'z' }),
                 el('i', { class: 'f bar-fill ' + (gr.net >= 0 ? 'is-pos' : 'is-neg'),
@@ -263,6 +247,7 @@ function recentCard(store, acct, nav) {
       const tone = o === 'win' ? 'is-pos' : o === 'loss' ? 'is-neg' : '';
       return el('button', { class: 'db-tr', onClick: () => nav.go('#/trade/' + t.id) },
         el('span', { class: 'dot ' + (tone || 'is-flat') }),
+        pairMark(t.pair, 24),
         el('span', { class: 'p' }, t.pair || '—',
           el('i', { class: t.side === 'buy' ? 'up' : 'dn', title: t.side === 'buy' ? 'Long' : 'Short' }, t.side === 'buy' ? '↑' : '↓'),
           el('small', {}, [setup ? setup.name : 'No setup', c.shortDate(t.date) + (t.timeOpen ? ' ' + t.timeOpen : '')].join(' · '))),
@@ -281,7 +266,7 @@ export function tradeRow(t, acct, store, cols, nav) {
                      onClick: () => nav.go('#/trade/' + t.id) },
     el('span', { style: { display: 'flex', alignItems: 'center', gap: '9px' } },
       el('span', { class: 'bar-mark', style: { background: mark } }),
-      el('span', { class: 'ins' }, t.pair)),
+      el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair)),
     el('span', { class: 'td', style: { color: long ? 'var(--green)' : 'var(--orange)' } }, long ? '▲ Long' : '▼ Short'),
     el('span', { class: 'td' }, c.shortDate(t.date)),
     el('span', { style: { fontSize: '12px', color: 'var(--grey-3)' } }, setup ? setup.name : '—'),

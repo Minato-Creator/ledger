@@ -37,18 +37,27 @@ using Export & import for a single CSV.
 ## The shape of it
 
     index.html         the page
-    css/app.css        design tokens and components
+    css/app.css        components
+    css/look.css       the frame, the page, the sheets and the motion
+    fonts/             the four typefaces, bundled (all OFL)
     js/store.js        the folder — read and write the JSON files
     js/calc.js         every number the app shows, and nothing else
     js/csv.js          export and import
     js/replay.js       reading an FX Replay export
     js/ui.js           element helpers, icons, the line chart
-    js/views/*.js      one file per screen
-    js/app.js          boot, sidebar, routing
+    js/look.js         themes, accent, text, lines, font — as CSS variables
+    js/flags.js        instrument marks: a pair's two flags; gold, silver, Nasdaq, S&P and coins as one disc
+    js/share/          the share card (card.js), its MP4 (encode.js, mp4.js) and GIF (gif.js)
+    js/clip.js         small things done to a video file (length, best still, seeking, a tidy name)
+    media/backgrounds/ the looping background videos and their stills
+    js/shell.js        the top bar, the section tabs, the phone's bottom bar, your picture (profileFill)
+    js/sheet.js        panels that rise over the app
+    js/views/*.js      one file per screen (appearance.js is the look sheet)
+    js/app.js          boot, routing
 
 ## Money, percent, or R
 
-One switch in the sidebar changes the unit every screen reads in. Nothing is
+One switch in the top bar changes the unit every screen reads in. Nothing is
 recalculated behind your back — the same trades, said three ways:
 
     $   the money, exactly as you entered it
@@ -113,30 +122,31 @@ leaves the reading of it to you.
 
 ## Motion
 
-Two rules, and the code enforces both.
-
 **Nothing animates on a re-render.** The app rebuilds its DOM on every click,
 so an entrance tied to element creation would replay constantly. `app.js`
 compares view, trade id, unit and account against the last render and only
-then puts `enter` on `.main` — every animation is scoped to that class, and it
-is taken off again after 900ms. Filtering, stepping a month, switching an
-analytics tab: no replay.
+then marks the page as arrived (`enter` on `.main`, `arrive` on its cards) —
+and takes it off again after 2.8 seconds, once the slowest chart has drawn.
+Filtering, stepping a month, switching an analytics tab: no replay. The page
+header never moves; only the body under it does.
 
-**Cards never fade.** The ground is light grey and the cards are near-black,
-so fading a card up from zero flashes the background through it — on a dark
-app that reads as a strobe. The card paints instantly and only its *contents*
-animate, over the card's own surface, exposing nothing.
+What moves when a page is new: the cards rise into place one after another
+on the curve a phone sheet uses (the page behind them is close to their own
+colour now, so nothing strobes). The big figures write themselves in a glyph
+at a time where they already sit — they never count up, so the number is
+right from the first frame. Each chart waits until its card has landed, then
+bars grow from their baseline (1.1 s) and lines stroke themselves in (1.5 s;
+`pathLength="1"` normalises the dash maths). Monte Carlo and the prop-firm
+simulation replay every time their page is opened (`nav.fresh`).
 
-**Nothing you read moves.** Figures fade in where they already sit. They never
-slide into place and they never count up — a number you have to wait to read
-is a number you cannot check at a glance, which in a trading journal is the
-whole point.
+What moves on every click: the pill under the section you are on, the
+underline under a section's tab and the chosen segment of any switch slide to
+their new place instead of jumping (`glide` and `segGlide` in `shell.js`).
+Sheets rise and sink; a new theme spreads out as a circle from where you
+clicked (the View Transitions API, where the webview has it).
 
-What does move: bars grow from their baseline, the equity line strokes itself
-in (`pathLength="1"` normalises the dash maths so one keyframe draws any
-curve), and controls sink about 2% under the cursor on press.
-
-`prefers-reduced-motion: reduce` collapses every duration to 1ms.
+Appearance → Custom → Motion has Full, Calm (cards only) and Off.
+`prefers-reduced-motion: reduce` behaves as Off.
 
 ## Typing numbers
 
@@ -149,6 +159,15 @@ appear, whichever comes last is the decimal point, so `$1,234.56` and
 Because it guesses, it shows its work: the starting-balance field echoes back
 the figure it read (and what 1R will cost), and the trade form says when it
 cannot read an amount rather than just grey out the save button.
+
+## Sharing a trade
+
+**Share** on a closed trade (its page, or the icon on its row in Trades)
+opens a card you can save as a video with sound, a GIF or a picture: the
+instrument, the result counting up, the numbers, and the trade's own OANDA
+candles drawn straight over a background — one of your own clips (kept in
+the journal folder) or one of five drawn in code. Everything is set on the
+sheet and remembered. HANDOVER.md has how it is made.
 
 ## The one rule
 

@@ -5,7 +5,7 @@ import { accountActions } from './accountActions.js';
 
 const COLORS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
 
-export function accounts(store, nav) {
+export function accounts(store, nav, { formOnly = false } = {}) {
   const draft = { name: '', startingBalance: '', currency: 'USD', defaultRiskPercent: '1.00', color: COLORS[1] };
 
   /* The balance field takes 25000, 25 000, $25,000 — whatever you type. Since
@@ -53,13 +53,13 @@ export function accounts(store, nav) {
         el('span', { style: { width: '11px', height: '11px', borderRadius: '3px', background: a.color, flex: 'none' } }),
         el('div', { style: { minWidth: 0 } },
           el('div', { style: { display: 'flex', alignItems: 'center', gap: '9px' } },
-            el('span', { class: 'm', style: { fontSize: '14px', color: '#fff' } }, a.name),
+            el('span', { class: 'm', style: { fontSize: '14px', color: 'var(--ink)' } }, a.name),
             isActive ? el('span', { class: 'm', style: { fontSize: '9.5px', color: '#fff', background: 'var(--blue)', borderRadius: 'var(--r-pill)', padding: '2px 8px' } }, 'ACTIVE') : null,
             a.archived ? el('span', { class: 'm', style: { fontSize: '9.5px', color: 'var(--grey-3)', background: 'var(--grey-7)', borderRadius: 'var(--r-pill)', padding: '2px 8px' } }, 'ARCHIVED') : null),
           el('div', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)', marginTop: '5px' } },
             `Started ${c.money(a.startingBalance, { sign: false, currency: a.currency, decimals: 0 })} · opened ${c.longDate(a.openedAt)} · ${ts.length} trade${ts.length === 1 ? '' : 's'}`)),
         el('div', { style: { marginLeft: 'auto', textAlign: 'right' } },
-          el('div', { class: 'm', style: { fontSize: '16px', color: '#fff', lineHeight: 1 } },
+          el('div', { class: 'm', style: { fontSize: '16px', color: 'var(--ink)', lineHeight: 1 } },
             c.money(bal, { sign: false, currency: a.currency })),
           el('div', { class: 'm', style: { fontSize: '11px', marginTop: '5px', color: s.net > 0 ? 'var(--green)' : s.net < 0 ? 'var(--orange)' : 'var(--grey-5)' } },
             c.fig(store.displayUnit, a, s.net, s.netR)
@@ -151,7 +151,7 @@ export function accounts(store, nav) {
         balanceEcho),
       el('div', {}, lbl('Currency'),
         el('select', { class: 'field', style: { cursor: 'pointer' }, onchange: e => draft.currency = e.target.value },
-          ...['USD', 'EUR', 'GBP', 'AUD', 'JPY'].map(x => el('option', { value: x, style: { background: '#363636' } }, x))))),
+          ...['USD', 'EUR', 'GBP', 'AUD', 'JPY'].map(x => el('option', { value: x }, x))))),
     el('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' } },
       el('div', {}, lbl('Default risk %'),
         el('input', { class: 'field', inputmode: 'decimal', value: '1.00',
@@ -170,6 +170,9 @@ export function accounts(store, nav) {
       el('div', { style: { display: 'flex', gap: '7px' } }, cta),
       missingNote),
   );
+
+  /* Settings → Accounts holds the list now; it borrows just the form. */
+  if (formOnly) return create;
 
   /* First run is one decision, so the screen shows one thing: the form,
      centred, at a size you can take in at a glance. Everything else — the

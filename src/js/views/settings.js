@@ -8,17 +8,19 @@
 import { el, icon, toast } from '../ui.js';
 import * as c from '../calc.js';
 import { toCSV } from '../csv.js';
-import { BACKGROUNDS } from '../backgrounds.js';
+import { describeLook } from '../look.js';
 import { accountActions } from './accountActions.js';
+import { accounts } from './accounts.js';
 import { oandaKeyCard } from './oandakey.js';
+import { profileFill } from '../shell.js';
+import { probeVideo, probeImage } from '../clip.js';
+import { prepare as prepareImage } from '../shots.js';
 
-/* Which colour menu is open. Kept out here so a redraw does not shut it. */
-const openColour = { profit: false, loss: false };
 
 const COLOURS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'JPY'];
 
-export function settings(store, nav) {
+export function settings(store, nav, page = '', { openLook, newAccount = false } = {}) {
   /* The folder used to be named in a pill up here as well as in the Vault
      card below, and only the pill could move it — which is why nobody found
      it. One box owns the vault now: where it is, and everything you can do
@@ -40,7 +42,7 @@ export function settings(store, nav) {
   const numField = (label, value, suffix, onCommit, opts = {}) => {
     const input = el('input', { class: 'm', value,
       style: { width: opts.width || '96px', background: 'var(--grey-7)', borderRadius: '10px',
-               padding: '6px 9px', fontSize: '11.5px', color: '#fff' },
+               padding: '6px 9px', fontSize: '11.5px', color: 'var(--ink)' },
       onChange: e => {
         const n = c.parseNumber(e.target.value);
         if (n == null || n < 0 || (opts.positive && n <= 0)) { e.target.value = value; return toast('Not a number', 'warn'); }
@@ -69,7 +71,7 @@ export function settings(store, nav) {
       el('div', { style: { display: 'flex', alignItems: 'center', gap: '11px' } },
         el('span', { style: { width: '10px', height: '10px', borderRadius: '3px', background: a.color, flex: 'none' } }),
         el('input', { class: 'm', value: a.name, title: 'Rename this account',
-          style: { flex: '1', minWidth: 0, fontSize: '14px', color: '#fff', background: 'transparent' },
+          style: { flex: '1', minWidth: 0, fontSize: '14px', color: 'var(--ink)', background: 'transparent' },
           onChange: e => {
             const v = e.target.value.trim();
             if (!v) { e.target.value = a.name; return; }
@@ -89,9 +91,9 @@ export function settings(store, nav) {
         el('label', { style: { display: 'flex', flexDirection: 'column', gap: '5px' } },
           el('span', { class: 'm', style: { fontSize: '9.5px', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--grey-5)' } }, 'Currency'),
           el('select', { class: 'm', style: { background: 'var(--grey-7)', borderRadius: '10px', padding: '6px 9px',
-              fontSize: '11.5px', color: '#fff', cursor: 'pointer' },
+              fontSize: '11.5px', color: 'var(--ink)', cursor: 'pointer' },
             onChange: e => save({ currency: e.target.value }) },
-            ...CURRENCIES.map(x => el('option', { value: x, selected: x === a.currency, style: { background: '#363636' } }, x)))),
+            ...CURRENCIES.map(x => el('option', { value: x, selected: x === a.currency }, x)))),
         el('div', { style: { display: 'flex', gap: '5px', marginLeft: 'auto', paddingBottom: '6px' } },
           ...COLOURS.map(col => el('button', { title: 'Recolour',
             style: { width: '15px', height: '15px', borderRadius: '5px', background: col,
@@ -110,14 +112,20 @@ export function settings(store, nav) {
     );
   }
 
-  list.replaceChildren(
-    ...store.allAccounts.map(accountRow),
-    el('button', { style: { border: '1px dashed var(--grey-6)', borderRadius: '24px', padding: '15px 18px',
-                            display: 'flex', alignItems: 'center', gap: '11px', width: '100%' },
-      onClick: () => nav.go('#/accounts') },
-      icon('plus', 16, 'var(--grey-5)', 2),
-      el('span', { class: 'm', style: { fontSize: '12.5px', color: 'var(--grey-5)' } }, 'New account')),
-  );
+  /* New account opens the form right here, under the list — one page for
+     accounts, not two. Arriving from the account menu (#/accounts) opens it
+     already. */
+  const formSlot = el('div', { class: 'st-newacct', hidden: !newAccount });
+  const addBtn = el('button', { class: 'st-addacct', hidden: newAccount,
+      onClick: () => {
+        addBtn.hidden = true; formSlot.hidden = false;
+        if (!formSlot.firstChild) formSlot.append(accounts(store, nav, { formOnly: true }));
+        formSlot.querySelector('input')?.focus();
+      } },
+    icon('plus', 16, 'var(--grey-5)', 2),
+    el('span', {}, 'New account'));
+  if (newAccount) formSlot.append(accounts(store, nav, { formOnly: true }));
+  list.replaceChildren(...store.allAccounts.map(accountRow), addBtn);
 
   const accountsCard = el('section', { class: 'card', style: { flex: '1', minWidth: 0, display: 'flex',
                                                                flexDirection: 'column', minHeight: 0,
@@ -264,109 +272,11 @@ export function settings(store, nav) {
       icon('download', 12, 'var(--grey-5)', 1.8), 'Trades as a spreadsheet'),
   );
 
-  /* ============================================================
-     Appearance
-     ============================================================ */
-  /* One palette for both. Any colour can mean profit and any can mean loss —
-     a red profit is your call — so the two menus offer exactly the same
-     choices, grouped by family so the right one is quick to find. White and
-     Black keep the values they always had, so a saved choice still finds its
-     name. */
-  const PALETTE = [
-    ['Greens',  [['#34D399', 'Mint'], ['#22C55E', 'Bright green'], ['#18AC65', 'Green'], ['#00C48C', 'Emerald'],
-                 ['#84CC16', 'Lime'], ['#8FB996', 'Sage'], ['#6B8E23', 'Olive'], ['#15803D', 'Forest']]],
-    ['Blues',   [['#2DD4BF', 'Aqua'], ['#0EA5A5', 'Teal'], ['#0F766E', 'Sea'], ['#06B6D4', 'Cyan'],
-                 ['#38BDF8', 'Sky'], ['#0988F0', 'Blue'], ['#2563EB', 'Royal'], ['#1E3A8A', 'Navy']]],
-    ['Purples', [['#A78BFA', 'Lavender'], ['#7C5CFF', 'Purple'], ['#4F46E5', 'Indigo'], ['#6D28D9', 'Grape'],
-                 ['#A855F7', 'Violet'], ['#7E22CE', 'Plum'], ['#D946EF', 'Orchid'], ['#C084FC', 'Lilac']]],
-    ['Pinks',   [['#F9A8D4', 'Blush'], ['#FB7185', 'Pink'], ['#EC4899', 'Hot pink'], ['#DB2777', 'Magenta'],
-                 ['#F43F5E', 'Rose'], ['#BE185D', 'Berry']]],
-    ['Reds',    [['#FA8072', 'Salmon'], ['#F4624A', 'Coral'], ['#E5342B', 'Red'], ['#DC143C', 'Crimson'],
-                 ['#B3261E', 'Deep red'], ['#7F1D1D', 'Maroon']]],
-    ['Oranges', [['#FDBA74', 'Peach'], ['#FB923C', 'Tangerine'], ['#F97316', 'Orange'], ['#C2410C', 'Rust'],
-                 ['#F59E0B', 'Amber'], ['#FFB800', 'Yellow'], ['#FDE047', 'Lemon'], ['#EAB308', 'Gold'], ['#CA8A04', 'Mustard']]],
-    ['Browns',  [['#D2B48C', 'Tan'], ['#C2B280', 'Sand'], ['#A47148', 'Caramel'], ['#8C5A3C', 'Brown'], ['#5C3A21', 'Chocolate']]],
-    ['Greys',   [['#F5F5F5', 'Snow'], ['#E9E9E9', 'White'], ['#D4D4D4', 'Silver'], ['#B0B0B0', 'Light grey'],
-                 ['#A8A29E', 'Warm grey'], ['#94A3B8', 'Cool grey'], ['#9A9A9A', 'Grey'], ['#7A7A7A', 'Mid grey'],
-                 ['#64748B', 'Slate'], ['#5A5A5A', 'Steel'], ['#4A4A4A', 'Graphite'], ['#3D3D3D', 'Black'], ['#1F1F1F', 'Jet']]],
-  ];
-  const nameOfColour = hex => PALETTE.flatMap(([, xs]) => xs).find(([h]) => h.toLowerCase() === String(hex).toLowerCase())?.[1];
-
-  /* A dropdown each, built the same way as the profile colour's: the button
-     shows the colour, its name and a figure written in it; the menu is the
-     whole palette, and a click anywhere else closes it. */
-  const painters = {};
-  function colourPick(which) {
-    const wrap = el('div', { class: 'drop pnl-drop', 'data-which': which });
-    const away = e => {
-      if (!wrap.isConnected) return stop();
-      if (e.type === 'keydown' && e.key !== 'Escape') return;
-      if (e.type === 'pointerdown' && wrap.contains(e.target)) return;
-      openColour[which] = false; paint();
-    };
-    const stop = () => {
-      document.removeEventListener('pointerdown', away, true);
-      document.removeEventListener('keydown', away, true);
-    };
-    function paint() {
-      const current = store.colours[which];
-      const isOn = hex => hex.toLowerCase() === current.toLowerCase();
-      wrap.replaceChildren(
-        el('button', { type: 'button', class: 'b' + (openColour[which] ? ' is-open' : ''),
-          onClick: () => {
-            const was = openColour[which];
-            for (const k of Object.keys(openColour)) if (openColour[k]) { openColour[k] = false; if (k !== which) painters[k]?.(); }
-            openColour[which] = !was; paint();
-          } },
-          el('span', { class: 'pnl-sw', style: { background: current } }),
-          el('span', { class: 'n' }, nameOfColour(current) || current.toUpperCase()),
-          el('span', { class: 'pnl-ex', style: { color: current } }, which === 'profit' ? '+1.00R' : '−1.00R'),
-          el('span', { class: 'c' }, '▾')),
-        el('div', { class: 'drop-menu pnl-menu', hidden: !openColour[which] },
-          el('div', { class: 'pnl-now' }, el('span', { class: 'pnl-now-sw', style: { background: current } }),
-            el('span', { class: 'pnl-now-n' }, nameOfColour(current) || current.toUpperCase()),
-            el('span', { class: 'pnl-now-ex', style: { color: current } }, which === 'profit' ? '+$1,250' : '\u2212$1,250')),
-          ...PALETTE.map(([family, xs]) => el('div', { class: 'pnl-fam' },
-            el('span', { class: 'pnl-fam-n' }, family),
-            el('div', { class: 'pnl-grid' }, ...xs.map(([hex, name]) => el('button', {
-              type: 'button', title: name, class: 'pnl-opt' + (isOn(hex) ? ' is-on' : ''), style: { background: hex },
-              /* Pointing at one previews it at the top: its name, and a figure in it. */
-              onPointerenter: () => preview(hex, name),
-              onPointerleave: () => preview(current, nameOfColour(current) || current.toUpperCase()),
-              onClick: async () => {
-                openColour[which] = false;
-                if (!isOn(hex)) await store.setColour(which, hex);
-                nav.refresh();
-              } },
-              isOn(hex) ? icon('check', 11, c.inkOn(hex), 2.6) : null)))))));
-      stop();
-      function preview(hex, name) {
-        const now = wrap.querySelector('.pnl-now');
-        if (!now) return;
-        now.querySelector('.pnl-now-sw').style.background = hex;
-        now.querySelector('.pnl-now-n').textContent = name;
-        now.querySelector('.pnl-now-ex').style.color = hex;
-      }
-      if (openColour[which]) {
-        document.addEventListener('pointerdown', away, true);
-        document.addEventListener('keydown', away, true);
-      }
-    }
-    painters[which] = paint;
-    paint();
-    return wrap;
-  }
-
-  const colourRow = (label, which) =>
-    el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
-      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, label),
-      el('div', { style: { marginLeft: 'auto' } }, colourPick(which)));
-
   /* Whose journal this is. Saved as you leave the field rather than on every
      keystroke, so the sidebar does not redraw itself letter by letter. */
   const nameField = el('input', { class: 'm', value: store.userName, placeholder: 'Your name', maxLength: 32,
     style: { width: '150px', background: 'var(--grey-7)', borderRadius: '10px',
-             padding: '6px 9px', fontSize: '11.5px', color: '#fff', textAlign: 'right' },
+             padding: '6px 9px', fontSize: '11.5px', color: 'var(--ink)', textAlign: 'right' },
     onChange: async e => { await store.setUserName(e.target.value); nav.refresh(); } });
 
   /* ---------- the colour behind your initials ----------
@@ -434,60 +344,127 @@ export function settings(store, nav) {
   }
   paintColours();
 
-  const appearanceCard = el('section', { class: 'card', style: { flex: 'none' } },
-    el('h2', {}, 'Appearance'),
-    el('div', { style: { marginTop: '18px', display: 'flex', alignItems: 'center', gap: '10px' } },
-      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Name'),
+  /* ---------- your picture and your banner: a picture or a video ---------- */
+  const LIMIT = { avatar: 50, banner: 100 };   // MB, for a video
+  const picker = which => {
+    const input = el('input', { type: 'file', accept: 'image/*,video/*', hidden: true,
+      onChange: async e => {
+        const f = e.target.files[0]; e.target.value = '';
+        if (!f) return;
+        const kind = /^video\//.test(f.type) ? 'video' : /^image\//.test(f.type) ? 'image' : null;
+        if (!kind) return toast(`${f.name} is not a picture or a video`, 'warn');
+        if (kind === 'video' && f.size > LIMIT[which] * 1024 * 1024) return toast(`${f.name} is over ${LIMIT[which]} MB — trim it first`, 'warn');
+        try {
+          let blob = f, type = f.type, ext = (f.name.match(/\.([a-z0-9]+)$/i)?.[1] || (kind === 'video' ? 'mp4' : 'jpg')).toLowerCase();
+          if (kind === 'image' && type !== 'image/gif') { const p = await prepareImage(f); blob = p.blob; type = 'image/jpeg'; ext = 'jpg'; }
+          const info = kind === 'video' ? await probeVideo(blob) : await probeImage(blob);
+          if (!info) return toast(`${f.name} could not be ${kind === 'video' ? 'played' : 'read'} here`, 'warn');
+          await store.setProfileMedia(which, blob, { kind, type, ext, thumb: info.thumb });
+          toast(which === 'banner' ? 'Banner changed' : 'Picture changed');
+          nav.refresh();
+        } catch (err) { toast(err.message || 'That could not be used', 'bad'); }
+      } });
+    document.body.append(input);
+    input.click();
+    setTimeout(() => input.remove(), 60000);
+  };
+  const dropMedia = async which => { await store.removeProfileMedia(which); toast('Removed'); nav.refresh(); };
+  const mediaRow = (which, title, note) => {
+    const has = !!store.profileMedia(which);
+    const thumb = el('span', { class: 'st-pf-thumb' + (which === 'banner' ? ' is-banner' : '') });
+    profileFill(store, which, thumb);
+    return el('div', { class: 'st-field st-pf' },
+      el('span', { class: 'st-k' }, title, el('span', { class: 'st-kd' }, note)),
+      el('div', { class: 'st-pf-ctl' },
+        has ? thumb : null,
+        el('button', { class: 'btn btn-quiet', 'data-pick': which, onClick: () => picker(which) }, has ? 'Change' : 'Choose…'),
+        has ? el('button', { class: 'btn btn-quiet', 'data-drop': which, onClick: () => dropMedia(which) }, 'Remove') : null));
+  };
+
+  const profileCard = el('section', { class: 'card st-card' },
+    el('h2', {}, 'Profile'),
+    el('div', { class: 'st-field' },
+      el('span', { class: 'st-k' }, 'Name'),
       el('div', { style: { marginLeft: 'auto' } }, nameField)),
-    el('div', { style: { marginTop: '14px', display: 'flex', alignItems: 'center', gap: '10px' } },
-      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Profile colour'),
+    el('div', { class: 'st-field' },
+      el('span', { class: 'st-k' }, 'Profile colour'),
       el('div', { style: { marginLeft: 'auto' } }, colourWrap)),
-    el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
-    el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
-      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Theme'),
-      el('div', { class: 'theme-switch', style: { marginLeft: 'auto' } },
-        ...[['light', 'Light'], ['dark', 'Dark']].map(([v, label]) =>
-          el('button', { class: store.theme === v ? 'is-on' : '',
-            onClick: async () => { if (store.theme !== v) { await store.setTheme(v); nav.refresh(); } } }, label)))),
-    el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
+    mediaRow('avatar', 'Picture', 'A picture or a video — in place of your initials'),
+    mediaRow('banner', 'Banner', 'A picture or a video across the top of Settings'),
+    el('p', { class: 'st-help' }, 'Without a picture your initials wear this colour in the top bar. Pictures and videos are kept in your journal folder. Nothing here leaves this computer.'));
 
-    /* Glass and the picture behind it are one idea, so they sit together. */
-    el('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
-      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Liquid glass'),
-      el('div', { class: 'theme-switch', style: { marginLeft: 'auto' } },
-        ...[[false, 'Off'], [true, 'On']].map(([v, label]) =>
-          el('button', { class: store.glass === v ? 'is-on' : '',
-            onClick: async () => { if (store.glass !== v) { await store.setGlass(v); nav.refresh(); } } }, label)))),
-    el('div', { style: { marginTop: '18px' } },
-      el('span', { class: 'm', style: { display: 'block', marginBottom: '10px',
-                                        fontSize: '11.5px', color: 'var(--grey-5)' } }, 'Background'),
-      el('div', { class: 'bg-picks' },
-        el('button', { class: 'bg-pick none' + (store.background ? '' : ' is-on'), title: 'No picture',
-          onClick: async () => { if (store.background) { await store.setBackground(''); nav.refresh(); } } },
-          el('span', {}, 'None')),
-        ...BACKGROUNDS.map(b => el('button', {
-          class: 'bg-pick' + (store.background === b.id ? ' is-on' : ''), title: b.name,
-          style: { backgroundImage: `url("${b.url}")` },
-          onClick: async () => {
-            if (store.background === b.id) return;
-            const introduced = await store.setBackground(b.id);
-            nav.refresh();
-            if (introduced) toast('Liquid glass turned on to show it through — switch it off any time');
-          } },
-          el('span', { class: 'name' }, b.name))))),
+  /* ============================================================
+     The list — every setting, one row each, the way a phone does it.
+     ============================================================ */
+  const look = store.look;
+  const row = (ic, title, note, onClick, end) => el('button', { class: 'st-row', 'data-row': title, onClick },
+    el('span', { class: 'st-ic' }, icon(ic, 16, 'currentColor', 1.7)),
+    el('span', { class: 'st-t' }, el('span', { class: 'st-n' }, title), note ? el('span', { class: 'st-d' }, note) : null),
+    end || icon('chevright', 13, 'var(--ink-4)', 2));
+  const group = (label, ...rows) => el('div', { class: 'st-group', 'data-group': label },
+    el('div', { class: 'st-gk' }, label), el('div', { class: 'st-list' }, ...rows));
 
-    el('div', { style: { height: '1px', background: 'var(--grey-7)', margin: '18px 0' } }),
-    el('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
-      colourRow('Profit colour', 'profit'),
-      colourRow('Loss colour', 'loss')),
-  );
+  const who = store.userName;
+  const initials = initialsOf();
+  const cover = el('div', { class: 'st-cover', style: { '--uc': store.userColour } },
+    el('button', { class: 'st-cover-b', 'data-pick': 'banner', title: 'A picture or a video for your banner', onClick: () => picker('banner') },
+      icon('image', 13, 'currentColor', 1.9), store.profileMedia('banner') ? 'Change banner' : 'Add banner'));
+  profileFill(store, 'banner', cover);
+  const avatar = el('span', { class: 'st-avatar', style: { background: who ? store.userColour : 'var(--inset)', color: store.userInk } },
+    who ? initials : icon('user', 22, 'var(--ink-3)', 1.7));
+  profileFill(store, 'avatar', avatar);
+  const hero = el('section', { class: 'card st-hero' },
+    cover,
+    el('div', { class: 'st-hero-row' },
+      el('span', { class: 'st-avatar-w' }, avatar,
+        el('button', { class: 'st-avatar-b', 'data-pick': 'avatar', title: 'A picture or a video of your own', 'aria-label': 'Change your picture',
+          onClick: () => picker('avatar') }, icon('camera', 13, 'currentColor', 2))),
+      el('div', { class: 'st-hero-t' },
+        el('div', { class: 'st-hero-n' }, who || 'Your journal'),
+        el('div', { class: 'st-hero-d' }, store.folderName ? `${store.folderName} · ${store.accounts.length} account${store.accounts.length === 1 ? '' : 's'}` : `${store.accounts.length} accounts`)),
+      el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/settings/profile') }, icon('pencil', 13, 'currentColor', 1.9), 'Edit')));
 
-  return el('div', { class: 'view' }, head,
-    el('div', { class: 'row', style: { flex: '1', minHeight: 0 } },
-      accountsCard,
-      el('div', { style: { width: '380px', flex: 'none', display: 'flex', flexDirection: 'column',
-                           gap: '8px', alignSelf: 'flex-start', maxHeight: '100%', overflowY: 'auto' } },
-        vaultCard, appearanceCard, oandaKeyCard())));
+  const search = el('input', { class: 'field st-search', placeholder: 'Search settings', 'aria-label': 'Search settings',
+    onInput: e => {
+      const q = e.target.value.trim().toLowerCase();
+      for (const g of listEl.querySelectorAll('.st-group')) {
+        let any = false;
+        for (const r of g.querySelectorAll('.st-row')) {
+          const hit = !q || r.textContent.toLowerCase().includes(q);
+          r.hidden = !hit; any = any || hit;
+        }
+        g.hidden = !any;
+      }
+    } });
+
+  const listEl = el('div', { class: 'st-groups' },
+    group('Account',
+      row('user', 'Profile', 'Your name, picture, colour and banner', () => nav.go('#/settings/profile')),
+      row('firms', 'Accounts', `${store.accounts.length} active · balance, risk and weekly target`, () => nav.go('#/settings/accounts'))),
+    group('Trading',
+      row('shield', 'Risk rules', 'Daily loss cap, trades a day, default risk', () => nav.go('#/playbook')),
+      row('chart', 'Charts & prices', 'Your OANDA key for the trade chart', () => nav.go('#/settings/charts')),
+      row('upload', 'Import trades', 'From a broker or FX Replay CSV', () => nav.go('#/import'))),
+    group('App',
+      row('palette', 'Appearance', describeLook(look), () => openLook?.()),
+      row('vault', 'Vault & data',
+        store.isPreview ? 'A preview copy — nothing here is saved'
+        : store.isLocal ? 'Your journal is saved inside this browser — export it now and then'
+        : (store.folderName || 'Where your journal lives'), () => nav.go('#/settings/vault')),
+      row('download', 'Trades as a spreadsheet', 'A CSV of every trade — not a backup', doCsvExport)));
+
+  const back = el('button', { class: 'st-back', onClick: () => nav.go('#/settings') }, icon('chevleft', 13, 'currentColor', 2.2), 'Settings');
+  const sub = (title, note, ...cards) => el('div', { class: 'view st-view' },
+    el('header', { class: 'head st-subhead' }, back, el('h1', {}, title), note ? el('span', { class: 'sub' }, note) : null),
+    el('div', { class: 'st-col' }, ...cards));
+
+  if (page === 'profile') return sub('Profile', 'Your name, picture and banner', profileCard);
+  if (page === 'accounts') return sub('Accounts', 'Name, balance, risk and target', accountsCard, formSlot);
+  if (page === 'vault') return sub('Vault & data', 'Where your journal lives', vaultCard);
+  if (page === 'charts') return sub('Charts & prices', 'OANDA', oandaKeyCard());
+
+  return el('div', { class: 'view st-view' }, head,
+    el('div', { class: 'st-col' }, hero, search, listEl));
 }
 
 /* Where the journal lives, and — when that is a choice — the way to change it. */

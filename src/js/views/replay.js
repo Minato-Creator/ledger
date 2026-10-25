@@ -285,7 +285,7 @@ function dataCard(nav) {
   if (keyState === false) {
     card.append(el('div', { class: 'rp-nokey' },
       el('span', {}, 'Add your OANDA key in Settings — the prices come from OANDA.'),
-      el('button', { class: 'btn btn-quiet', onClick: () => nav.go('#/settings') }, 'Open Settings')));
+      el('button', { class: 'btn btn-quiet', onClick: () => nav.go('#/settings/charts') }, 'Open Settings')));
   }
 
   if (pairs.length) {

@@ -17,6 +17,7 @@
    What you say about a trade is kept on the trade, so it travels with it.
    ============================================================ */
 import { el, svg, icon, toast, lightbox, fitted } from '../ui.js';
+import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
 import * as P from '../periods.js';
 import { tradeShotsOf } from '../store.js';
@@ -363,6 +364,7 @@ function tradesTab(store, acct, trades, nav, paintProg) {
         const r = rOf(acct, t);
         return el('button', { class: 'rv-item' + (t.id === picked ? ' is-on' : ''), onClick: () => { picked = t.id; paintRail(); paintMain(); } },   // the page stays where it is scrolled (Minato)
           el('span', { class: 'dot ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }),
+          pairMark(t.pair, 22),
           el('span', { class: 'p' }, t.pair || '—', el('small', {}, `${dayOf(t.date)} ${Number(t.date.slice(8))} · ${t.timeOpen || '—'}`)),
           el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2)),
           el('span', { class: 'ok' + (isReviewed(t) ? ' is-done' : '') }, isReviewed(t) ? icon('check', 11, 'currentColor', 2.6) : null));
@@ -542,6 +544,7 @@ function reviewCard(store, acct, t, pb, on) {
   return el('section', { class: 'card rv-card' },
     el('div', { class: 'rv-top' },
       el('span', { class: 'dot ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }),
+      pairMark(t.pair, 32),
       el('div', { class: 'p' }, el('b', {}, t.pair || '—'),
         el('span', {}, [`${dayOf(t.date)} ${c.shortDate(t.date)}`, t.timeOpen, setup, t.side === 'sell' ? 'short' : 'long', session].filter(Boolean).join(' · '))),
       el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2))),
@@ -572,7 +575,7 @@ function reviewCard(store, acct, t, pb, on) {
       el('span', { class: 'rv-saved' }, isReviewed(t) ? 'Reviewed · saved as you go' : 'Pick what happened to mark it reviewed'),
       el('div', { class: 'spacer' }),
       el('button', { class: 'btn btn-quiet', onClick: on.prev }, icon('chevleft', 12, 'currentColor', 2.2), 'Previous'),
-      el('button', { class: 'btn btn-primary', onClick: on.next }, 'Next to review', icon('chevright', 12, '#fff', 2.2))));
+      el('button', { class: 'btn btn-primary', onClick: on.next }, 'Next to review', icon('chevright', 12, 'currentColor', 2.2))));
 }
 
 /* What you said about the trade when you logged it, read back so the review

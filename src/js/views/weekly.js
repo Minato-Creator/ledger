@@ -24,6 +24,7 @@
      than quietly understated, and a week with no trades is drawn as nothing.
    ============================================================ */
 import { el, icon, ft } from '../ui.js';
+import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
 import * as P from '../periods.js';
 
@@ -450,7 +451,7 @@ function tradeList(store, acct, trades, nav) {
             onClick: () => nav.go('#/trade/' + t.id) },
             el('span', { class: 'td' }, c.shortDate(t.date)),
             el('span', { class: 'td q' }, t.timeOpen || '—'),
-            el('span', { class: 'ins' }, t.pair || '—'),
+            el('span', { class: 'ins has-mark' }, pairMark(t.pair, 18), t.pair || '—'),
             el('span', { class: 'td' }, t.side === 'sell' ? 'Short' : 'Long'),
             el('span', { class: 'td wk-setup' }, setupName(t.setupId)),
             open ? el('span', { class: 'num wk-open-cell' }, 'open')

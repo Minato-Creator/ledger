@@ -1,4 +1,5 @@
 import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
+import { pairMark, instrumentName } from '../flags.js';
 import * as c from '../calc.js';
 import { tradeShotsOf } from '../store.js';
 import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName } from '../questions.js';
@@ -6,6 +7,7 @@ import { newsText, holidayText, dayRedFolders } from '../newsday.js';
 import { newsLabel, localTime } from '../news.js';
 import { heldAsked, heldOf, heldText } from '../questions.js';
 import { tradeChart } from './tradechart.js';
+import { openShare, canShare } from './share.js';
 
 export function tradeDetail(store, nav, id) {
   const acct = store.activeAccount;
@@ -35,9 +37,11 @@ export function tradeDetail(store, nav, id) {
   const head = el('header', { class: 'head' },
     el('button', { style: { width: '32px', height: '32px', borderRadius: '12px', background: 'var(--grey-8)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
       onClick: () => nav.go('#/trades') }, icon('chevleft', 15, 'var(--grey-1)', 2)),
+    pairMark(t.pair, 30),
     el('h1', {}, t.pair),
-    el('span', { class: 'sub' }, `${c.longDate(t.date)} · ${sessionName} · ${account.name}`),
+    el('span', { class: 'sub' }, [instrumentName(t.pair), c.longDate(t.date), sessionName, account.name].filter(Boolean).join(' · ')),
     el('div', { class: 'spacer' }),
+    canShare(t) ? el('button', { class: 'btn btn-quiet td-share', onClick: () => openShare(store, nav, t.id) }, icon('share', 14, 'currentColor', 1.9), 'Share') : null,
     open
       ? el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/edit/' + t.id) }, 'Close it')
       : el('button', { class: 'btn btn-quiet', onClick: () => nav.go('#/edit/' + t.id) }, 'Edit'),

@@ -34,7 +34,16 @@ export function countTo(node, key, to, fmt, { delay = 0, dur = 900, fresh = fals
  */
 export function whenSeen(node, start = () => {}) {
   node.classList.add('mo-wait');
-  const go = () => { node.classList.remove('mo-wait'); start(); };
+  /* A chart inside a card that is still arriving waits for its card to be
+     there — otherwise it plays while the card is fading in, and you only
+     ever see the end of it. */
+  const settle = () => {
+    const card = node.closest('.card.arrive');
+    if (!card) return 0;
+    const i = Number(getComputedStyle(card).getPropertyValue('--i')) || 0;
+    return i * 45 + 320;
+  };
+  const go = () => { const w = settle(); const run = () => { node.classList.remove('mo-wait'); start(); }; if (w) setTimeout(run, w); else run(); };
   if (typeof IntersectionObserver !== 'function') { requestAnimationFrame(go); return; }
   const io = new IntersectionObserver(es => {
     if (!es.some(e => e.isIntersecting)) return;

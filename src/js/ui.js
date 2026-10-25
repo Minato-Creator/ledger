@@ -67,6 +67,7 @@ const PATHS = {
   trash:     '<path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/>',
   pencil:    '<path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5z"/>',
   download:  '<path d="M12 4v12"/><path d="M7.5 11.5 12 16l4.5-4.5"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/>',
+  camera:    '<path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.6l1.3-1.8a1.5 1.5 0 0 1 1.2-.7h2.8a1.5 1.5 0 0 1 1.2.7L15.9 6h1.6A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.4" r="3.4"/>',
   image:     '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.5" cy="10" r="1.6"/><path d="M3.5 17l4.6-4.2a1.6 1.6 0 0 1 2.2 0L14 16"/><path d="M13.5 14.5l2.4-2.2a1.6 1.6 0 0 1 2.2 0l2.4 2.2"/>',
   expand:    '<path d="M14 4h6v6"/><path d="M10 20H4v-6"/><path d="M20 4l-7 7"/><path d="M4 20l7-7"/>',
   close:     '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -77,7 +78,28 @@ const PATHS = {
   /* A building with columns: a firm. */
   firms:     '<path d="M3.5 9 12 4.5 20.5 9"/><path d="M5.5 10v7.5M10 10v7.5M14 10v7.5M18.5 10v7.5"/><path d="M3.5 20h17"/>',
   lab:       '<path d="M9 3.5h6"/><path d="M10 3.5v5.8L4.6 18.6A1.7 1.7 0 0 0 6.1 21h11.8a1.7 1.7 0 0 0 1.5-2.4L14 9.3V3.5"/><path d="M7.3 15h9.4"/>',
+  /* The new shell's few extra marks, drawn on the same grid. */
+  gear:      '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  palette:   '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.8-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="10.5" cy="7" r="1.1"/><circle cx="15" cy="7.5" r="1.1"/>',
+  more:      '<path d="M5.5 12h.01M12 12h.01M18.5 12h.01" stroke-width="3"/>',
+  undo:      '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  redo:      '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+  bookmark:  '<path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/>',
+  sun:       '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+  moon:      '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  search:    '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
+  journal:   '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/>',
+  plan:      '<path d="M8 4.5H6a1.5 1.5 0 0 0-1.5 1.5v13.5A1.5 1.5 0 0 0 6 21h12a1.5 1.5 0 0 0 1.5-1.5V6A1.5 1.5 0 0 0 18 4.5h-2"/><rect x="8" y="3" width="8" height="3.5" rx="1"/><path d="M8.5 11.5h7M8.5 15.5h5"/>',
+  vault:     '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8v-1M12 16.2v-1M15.2 12h1M7.8 12h1"/>',
+  chart:     '<path d="M4 19.5h16"/><path d="M7 15.5V10M12 15.5V6M17 15.5v-3.5"/>',
+  shield:    '<path d="M12 3.5 5 6v5.5c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6z"/>',
   /* Six dots. Stroke-linecap is round, so a line of no length draws one. */
+  share:     '<path d="M12 3.5v11.5"/><path d="M8 7.5l4-4 4 4"/><path d="M6 11.5H5.5A1.5 1.5 0 0 0 4 13v6.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V13a1.5 1.5 0 0 0-1.5-1.5H18"/>',
+  film:      '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7.5 5v14M16.5 5v14M3 9.7h4.5M3 14.3h4.5M16.5 9.7H21M16.5 14.3H21"/>',
+  gif:       '<rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M10 10.1a2 2 0 1 0 0 3.8v-1.6H9"/><path d="M13 9.8v4.4"/><path d="M16 14.2V9.8h2.6M16 12h2"/>',
+  volume:    '<path d="M4 9.6v4.8h3.4L12 18.4V5.6L7.4 9.6z"/><path d="M15.6 9.2a4 4 0 0 1 0 5.6M18.2 6.6a7.6 7.6 0 0 1 0 10.8"/>',
+  mute:      '<path d="M4 9.6v4.8h3.4L12 18.4V5.6L7.4 9.6z"/><path d="M16 9.8l4.4 4.4M20.4 9.8L16 14.2"/>',
+  play:      '<path d="M8 5.5v13l10.5-6.5z"/>',
   grip:      '<path d="M9.5 6h.01M14.5 6h.01M9.5 12h.01M14.5 12h.01M9.5 18h.01M14.5 18h.01"/>',
 };
 export function icon(name, size = 17, stroke = 'currentColor', width = 1.6) {
@@ -115,6 +137,10 @@ export function brandMark(size = 26) {
   img.className = 'brand-img';
   return img;
 }
+
+/** The wordmark as an SVG file in one colour, for drawing on a canvas. */
+export const wordmarkSvg = (colour = '#fff') =>
+  WORDMARK_SVG.replace('<svg ', '<svg width="926" height="155" ').replace(/currentColor/g, colour);
 
 /** The L and the name, `height` px tall. */
 export function brandWordmark(height = 22) {
@@ -190,32 +216,30 @@ let toastTimer;
 export function toast(message, tone = 'ok') {
   let t = document.getElementById('toast');
   if (!t) {
-    t = el('div', { id: 'toast', style: {
+    t = el('div', { id: 'toast', role: 'status', 'aria-live': 'polite', style: {
       position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
       background: 'var(--grey-8)', color: 'var(--ink)', font: '400 12.5px var(--mono)',
-      padding: '12px 20px', borderRadius: 'var(--r-btn)', zIndex: 200,
+      padding: '12px 20px', borderRadius: 'var(--r-btn)', zIndex: 400,
       boxShadow: '0 12px 32px rgba(0,0,0,.4)', opacity: 0, pointerEvents: 'none',
-      transition: 'opacity var(--d-short) var(--e-out), transform var(--d-short) var(--e-out)',
     }});
     document.body.append(t);
   }
   t.textContent = message;
-  t.style.borderLeft = `3px solid ${tone === 'bad' ? 'var(--orange)' : tone === 'warn' ? 'var(--yellow)' : 'var(--green)'}`;
+  t.style.setProperty('--tone', tone === 'bad' ? 'var(--loss)' : tone === 'warn' ? 'var(--yellow)' : 'var(--profit)');
+  t.dataset.tone = tone;
 
-  /* The toast is one reused element, so the rise has to be replayed by hand:
-     put it back down, force a reflow so the browser sees the jump, then lift. */
-  t.style.transition = 'none';
-  t.style.opacity = '0';
-  t.style.transform = 'translate(-50%, 10px)';
+  /* One reused element, so the spring is replayed by hand: drop the class,
+     force a reflow so the browser sees it gone, then put it back. */
+  t.classList.remove('is-in', 'is-out');
   void t.offsetHeight;
-  t.style.transition = 'opacity var(--d-short) var(--e-out), transform var(--d-short) var(--e-out)';
   t.style.opacity = '1';
-  t.style.transform = 'translate(-50%, 0)';
+  t.classList.add('is-in');
 
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
-    t.style.opacity = '0';
-    t.style.transform = 'translate(-50%, 6px)';
+    t.classList.remove('is-in');
+    t.classList.add('is-out');
+    setTimeout(() => { if (t.classList.contains('is-out')) t.style.opacity = '0'; }, 240);
   }, 2600);
 }
 

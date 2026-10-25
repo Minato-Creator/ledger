@@ -1,8 +1,10 @@
 import { el, icon, ft } from '../ui.js';
+import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
 import { tradeRow } from './dashboard.js';
 import { CONFIDENCE, EXIT_REASONS, EXEC_TFS, MISTAKES, NEWS } from '../questions.js';
 import { newsDayOf } from '../newsday.js';
+import { openShare, canShare } from './share.js';
 
 const filters = { q: '', side: 'all', result: 'all', setupId: 'all', mistake: 'all', exit: 'all', conf: 'all', tf: 'all', news: 'all' };
 const FRESH = { ...filters };
@@ -55,7 +57,7 @@ export function trades(store, nav) {
         borderRadius: 'var(--r-btn)', padding: '8px 12px', cursor: 'pointer', appearance: 'none',
       },
       onChange: e => { filters[key] = e.target.value; nav.refresh(); },
-    }, ...options.map(o => el('option', { value: o.v, selected: o.v === value, style: { background: '#363636' } }, o.l)));
+    }, ...options.map(o => el('option', { value: o.v, selected: o.v === value }, o.l)));
     /* As wide as what it shows, not as wide as its longest option — seven
        of these share one row. */
     const shown = (options.find(o => o.v === value) || options[0]).l;
@@ -76,8 +78,8 @@ export function trades(store, nav) {
           `${open.length} still open`)
       : null,
     el('div', { class: 'spacer' }),
-    el('button', { class: 'btn btn-ghost', onClick: () => nav.go('#/settings') }, 'Export'),
-    el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, '#fff', 2), 'New trade'),
+    el('button', { class: 'btn btn-ghost', onClick: () => nav.go('#/settings/vault') }, 'Export'),
+    el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, 'currentColor', 2), 'New trade'),
   );
 
   const bar = el('section', { class: 'card tr-bar', style: { minHeight: '64px', flex: 'none', padding: '12px 24px', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
@@ -166,7 +168,9 @@ function fullRow(t, acct, store, cols, nav) {
   return el('div', { class: 'tbl-row', style: { gridTemplateColumns: cols, cursor: 'pointer' },
                      onClick: () => nav.go('#/trade/' + t.id) },
     el('span', { style: { display: 'flex', alignItems: 'center', gap: '9px' } },
-      el('span', { class: 'bar-mark', style: { background: mark } }), el('span', { class: 'ins' }, t.pair)),
+      el('span', { class: 'bar-mark', style: { background: mark } }), el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair),
+      canShare(t) ? el('button', { class: 'row-share', title: 'Share this trade', 'aria-label': 'Share this trade',
+        onClick: e => { e.stopPropagation(); openShare(store, nav, t.id); } }, icon('share', 13, 'currentColor', 1.9)) : null),
     el('span', { class: 'td', style: { color: long ? 'var(--green)' : 'var(--orange)' } }, long ? '▲ Long' : '▼ Short'),
     el('span', { class: 'td' }, c.shortDate(t.date)),
     el('span', { style: { fontSize: '12px', color: 'var(--grey-3)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' } },
@@ -199,7 +203,7 @@ function openRow(t, acct, store, nav) {
                      onClick: () => nav.go('#/trade/' + t.id) },
     el('span', { style: { display: 'flex', alignItems: 'center', gap: '9px' } },
       el('span', { style: { width: '3px', height: '17px', borderRadius: '2px', background: 'var(--yellow)' } }),
-      el('span', { class: 'ins' }, t.pair)),
+      el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair)),
     el('span', { class: 'm', style: { fontSize: '11.5px', color: long ? 'var(--profit)' : 'var(--loss)' } },
       long ? '▲ Long' : '▼ Short'),
     el('span', { class: 'td' }, `${c.shortDate(t.date)}${t.timeOpen ? '  ' + t.timeOpen : ''}`),

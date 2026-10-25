@@ -24,7 +24,7 @@ export function playbook(store, nav) {
 
     const name = el('input', {
       class: 'm', value: s.name,
-      style: { fontSize: '14px', color: '#fff', background: 'transparent', width: '100%' },
+      style: { fontSize: '14px', color: 'var(--ink)', background: 'transparent', width: '100%' },
       onChange: async e => {
         const v = e.target.value.trim();
         if (!v) { e.target.value = s.name; return; }
@@ -86,7 +86,7 @@ export function playbook(store, nav) {
     const box = el('div', { style: { background: 'var(--grey-7)', borderRadius: '24px', padding: '15px 18px',
                                      boxShadow: 'inset 0 0 0 1px var(--orange)' } },
       el('div', { style: { fontSize: '12.5px', lineHeight: 1.55, color: 'var(--ink-2)' } },
-        used ? [`Delete “${s.name}”? `, el('span', { class: 'm', style: { color: '#fff' } }, `${used} trade${used === 1 ? '' : 's'}`),
+        used ? [`Delete “${s.name}”? `, el('span', { class: 'm', style: { color: 'var(--ink)' } }, `${used} trade${used === 1 ? '' : 's'}`),
                 ' use it — they will be kept and left with no setup.']
              : [`Delete “${s.name}”?`]),
       el('div', { style: { marginTop: '12px', display: 'flex', gap: '7px' } },
@@ -262,7 +262,7 @@ export function playbook(store, nav) {
     const timeField = (val, set) => el('input', {
       type: 'time', value: val, class: 'm',
       style: { background: 'var(--grey-7)', borderRadius: '10px', padding: '5px 7px', fontSize: '11.5px',
-               color: '#fff', flex: 'none', width: '110px' },
+               color: 'var(--ink)', flex: 'none', width: '110px' },
       onChange: async e => { set(e.target.value); await save(); } });
 
     sessionsCard.replaceChildren(
@@ -271,7 +271,7 @@ export function playbook(store, nav) {
         ...pb.sessions.map((s, i) => el('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
           el('input', { class: 'm', value: s.name,
             title: s.name,
-            style: { fontSize: '12px', color: '#fff', background: 'transparent', width: '100px', flex: 'none' },
+            style: { fontSize: '12px', color: 'var(--ink)', background: 'transparent', width: '100px', flex: 'none' },
             onChange: async e => { s.name = e.target.value.trim() || s.name; await save(); } }),
           timeField(s.start, v => s.start = v),
           el('span', { class: 'm', style: { fontSize: '10px', color: 'var(--grey-5)' } }, '–'),

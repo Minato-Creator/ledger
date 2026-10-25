@@ -663,13 +663,7 @@ select.field:hover {
    is what keeps the stack looking like one material instead of solid boxes
    floating on a sheet of glass.
    ============================================================ */
-html[data-bg] body {
-  background-image:
-    linear-gradient(rgba(0,0,0,var(--bg-scrim,.5)), rgba(0,0,0,var(--bg-scrim,.5))),
-    var(--bg-image);
-  background-size:cover; background-position:center; background-repeat:no-repeat;
-  background-attachment:fixed;
-}
+html[data-bg] body { background:#050506; }
 /* With a picture behind it the ground is dark whatever the theme, so the page
    headings have to stop being dark-on-light. The pale cards are still pale,
    though, so they put their own dark ink back — unless glass has made them
@@ -3718,27 +3712,27 @@ button.ra-li:hover { background:var(--inset); }
 .mc-scan, .lab-scan { stroke:rgba(var(--profit-rgb), .9); stroke-width:1; filter:drop-shadow(0 0 6px rgba(var(--profit-rgb), .9)); }
 .lab-tiles.mo-play .lab-tile { animation:wi-in .7s cubic-bezier(.2,.8,.2,1) var(--d, 0ms) both; }
 .mc-fanwrap.mo-play .mc-cloud { animation:wi-fade .3s both; }
-.mc-fanwrap.mo-play .mc-path { animation:wi-fade 1s .9s both; }
-.mc-fanwrap.mo-play .mc-end, .mc-fanwrap.mo-play .mc-head-glow { animation:wi-fade .2s .6s both; }
-.lab-svgwrap.mc-hist.mo-play .mc-bin { animation:mo-rise .7s cubic-bezier(.2,.8,.2,1) var(--d, 0ms) both; transform-origin:bottom; transform-box:fill-box; }
-.mc-hist.mo-play .lab-mark, .mc-hist.mo-play .lab-mark-lbl, .mc-hist.mo-play .mc-limit { animation:wi-fade .6s 1s both; }
+.mc-fanwrap.mo-play .mc-path { animation:wi-fade 1.2s 1.4s both; }
+.mc-fanwrap.mo-play .mc-end, .mc-fanwrap.mo-play .mc-head-glow { animation:wi-fade .3s .9s both; }
+.lab-svgwrap.mc-hist.mo-play .mc-bin { animation:mo-rise 1.1s cubic-bezier(.22,1,.36,1) var(--d, 0ms) both; transform-origin:bottom; transform-box:fill-box; }
+.mc-hist.mo-play .lab-mark, .mc-hist.mo-play .lab-mark-lbl, .mc-hist.mo-play .mc-limit { animation:wi-fade .7s 1.4s both; }
 .mc-hist.mo-play .mc-val { animation:wi-fade .4s var(--d, 0ms) both; }
 .mc-facts.mo-play .mc-fact { animation:wi-in .6s cubic-bezier(.2,.8,.2,1) both; }
 .mc-facts.mo-play .mc-fact:nth-child(2) { animation-delay:.12s; }
 .mc-facts.mo-play .mc-fact:nth-child(3) { animation-delay:.24s; }
 .mc-facts.mo-play .mc-fact:nth-child(4) { animation-delay:.36s; }
-.mc-riskwrap.mo-play .mc-curve { stroke-dasharray:1; stroke-dashoffset:1; animation:wi-draw 1.1s cubic-bezier(.33,1,.68,1) .1s forwards; }
+.mc-riskwrap.mo-play .mc-curve { stroke-dasharray:1; stroke-dashoffset:1; animation:wi-draw 1.7s cubic-bezier(.65,0,.25,1) .1s forwards; }
 .mc-riskwrap.mo-play .mc-five { animation:wi-fade .6s both; }
-.mc-riskwrap.mo-play .mc-dot { transform-box:fill-box; transform-origin:center; animation:wi-pop .5s cubic-bezier(.3,1.4,.5,1) 1s both; }
+.mc-riskwrap.mo-play .mc-dot { transform-box:fill-box; transform-origin:center; animation:wi-pop .5s cubic-bezier(.3,1.4,.5,1) 1.6s both; }
 .mc-riskwrap.mo-play .mc-dot.is-sug { animation-delay:1.1s; } .mc-riskwrap.mo-play .mc-dot.is-you { animation-delay:1.2s; }
 .mc-table.mo-play .mc-row:not(.is-head) { animation:wi-in .55s cubic-bezier(.2,.8,.2,1) var(--d, 0ms) both; }
 
 /* Prop firm */
 .lab-pathswrap.mo-play .lab-end { transform-box:fill-box; transform-origin:center; animation:wi-pop .45s cubic-bezier(.3,1.4,.5,1) var(--d, 0ms) both; }
 .lab-pathswrap.mo-play .lab-level, .lab-pathswrap.mo-play .lab-level-lbl, .lab-pathswrap.mo-play .lab-level-val { animation:wi-fade .6s .1s both; }
-.lab-orows.mo-play .lab-orow .bar i { transform-origin:left center; animation:mo-grow .9s cubic-bezier(.2,.8,.2,1) var(--d, 0ms) both; }
+.lab-orows.mo-play .lab-orow .bar i { transform-origin:left center; animation:mo-grow 1.2s cubic-bezier(.22,1,.36,1) var(--d, 0ms) both; }
 .lab-orows.mo-play .lab-orow { animation:wi-in .5s cubic-bezier(.2,.8,.2,1) calc(var(--d, 0ms) - 150ms) both; }
-.lab-curvewrap.mo-play .lab-curve { stroke-dasharray:1; stroke-dashoffset:1; animation:wi-draw 1.2s cubic-bezier(.33,1,.68,1) .1s forwards; }
+.lab-curvewrap.mo-play .lab-curve { stroke-dasharray:1; stroke-dashoffset:1; animation:wi-draw 1.7s cubic-bezier(.65,0,.25,1) .1s forwards; }
 .lab-curvewrap.mo-play .lab-area, .lab-curvewrap.mo-play .lab-band { animation:wi-fade .9s .5s both; }
 .lab-curvewrap.mo-play .lab-mark, .lab-curvewrap.mo-play .lab-mark-lbl { animation:wi-fade .5s 1.1s both; }
 .lab-curvewrap.mo-play .lab-be, .lab-curvewrap.mo-play .lab-you { transform-box:fill-box; transform-origin:center; animation:wi-pop .5s cubic-bezier(.3,1.4,.5,1) 1.15s both; }

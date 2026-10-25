@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ledger reads and writes your journal folder through its own commands, so it needs nothing from the filesystem plugin. The only capability granted here is the folder picker.",
+  "description": "Ledger reads and writes your journal folder through its own commands, so it needs nothing from the filesystem plugin. The only capabilities granted here are the folder picker and the Save dialog (for a shared trade's video, GIF or picture).",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

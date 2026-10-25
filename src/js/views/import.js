@@ -8,6 +8,7 @@
    harmless.
    ============================================================ */
 import { el, icon, toast } from '../ui.js';
+import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
 import { parseBrokerCSV, instrumentsIn, moneyFor, suggestedPointValue, guessAssetClass } from '../broker.js';
 
@@ -92,7 +93,7 @@ export function importTrades(store, nav) {
       el('p', { class: 'm', style: { fontSize: '12px', color: 'var(--grey-4)', maxWidth: '430px', lineHeight: 1.6 } },
         'Export a CSV from your broker or prop firm and drop it here. Filled orders are matched into trades, first in first out. Nothing is saved until you have looked at it.'),
       el('button', { class: 'btn btn-primary', onClick: () => fileInput.click() },
-        icon('upload', 15, '#fff', 1.8), 'Choose a CSV'),
+        icon('upload', 15, 'currentColor', 1.8), 'Choose a CSV'),
       fileInput);
   }
 
@@ -163,7 +164,7 @@ export function importTrades(store, nav) {
         el('span', { class: 'td' }, c.shortDate(t.date)),
         el('span', { class: 'td' }, `${t.timeOpen || '—'} → ${t.timeClose || '—'}`),
         el('span', { style: { display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 } },
-          el('span', { class: 'ins' }, t.pair),
+          el('span', { class: 'ins has-mark' }, pairMark(t.pair, 18), t.pair),
           dup ? el('span', { class: 'm', style: { fontSize: '9.5px', color: 'var(--grey-5)', border: '1px solid var(--grey-7)', borderRadius: '5px', padding: '1px 5px' } }, 'already in') : null),
         el('span', { class: 'm', style: { fontSize: '11px', color: long ? 'var(--profit)' : 'var(--loss)' } }, long ? 'Long' : 'Short'),
         el('span', { class: 'num' }, fmt(t.entryPrice)),
@@ -271,9 +272,9 @@ export function importTrades(store, nav) {
 
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Import trades'),
-    el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--grey-8)', borderRadius: 'var(--r-btn)', padding: '7px 13px' } },
-      el('span', { style: { width: '7px', height: '7px', borderRadius: '2px', background: acct.color } }),
-      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-2)' } }, 'Adding to ', el('span', { style: { color: '#fff' } }, acct.name))),
+    el('span', { class: 'acct-pill' },
+      el('span', { class: 'acct-dot', style: { background: acct.color } }),
+      el('span', { class: 'm' }, 'Adding to ', el('b', {}, acct.name))),
     el('div', { class: 'spacer' }),
     actionNote,
     el('button', { class: 'btn btn-ghost', onClick: () => nav.go('#/new') }, 'Cancel'),

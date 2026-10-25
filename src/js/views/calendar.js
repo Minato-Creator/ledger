@@ -1,5 +1,7 @@
 import { el, icon } from '../ui.js';
+import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
+import { yearPanel } from './analytics.js';
 
 /* Which month is on screen, and what the cells show. Module-level so it
    survives a re-render without being written to disk — it is a view
@@ -7,6 +9,7 @@ import * as c from '../calc.js';
 let cursor = null;          // { y, m }  m is 0-11
 let cellMode = 'value';     // value (in the app's unit) | count
 let selected = null;        // the day whose trades are open in the rail
+let span = 'month';         // month | year — one calendar, two distances
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const iso = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -15,7 +18,17 @@ const todayISO = () => { const n = new Date(); return iso(n.getFullYear(), n.get
 /* Monday-first weekday index. */
 const dow = (y, m, d) => (new Date(y, m, d).getDay() + 6) % 7;
 
+const spanSwitch = nav => el('div', { class: 'seg cal-span', role: 'group', 'aria-label': 'Show' },
+  ...[['month', 'Month'], ['year', 'Year']].map(([k, label]) =>
+    el('button', { class: span === k ? 'is-on' : '', 'data-span': k, onClick: () => { if (span !== k) { span = k; nav.refresh(); } } }, label)));
+
 export function calendar(store, nav) {
+  if (span === 'year') {
+    const y = yearPanel(store, nav);
+    return el('div', { class: 'view' },
+      el('header', { class: 'head' }, el('h1', {}, 'Calendar'), spanSwitch(nav), y.stepper, y.sub, el('div', { class: 'spacer' })),
+      y.body);
+  }
   const acct = store.activeAccount;
   const all = store.tradesFor(acct.id);
   const cur = acct.currency;
@@ -55,9 +68,12 @@ export function calendar(store, nav) {
 
      The calendar's card is dark in both themes, which is why one surface value
      serves both. */
-  const SURFACE = [17, 19, 18];
   const readVar = name => (typeof getComputedStyle === 'function'
     ? getComputedStyle(document.documentElement).getPropertyValue(name).trim() : '');
+  /* The card is whatever the look makes it now — white on Light, near-black
+     on Midnight — so the tint is measured over the real thing. */
+  const cardHex = /^#[0-9a-f]{6}$/i.test(readVar('--card')) ? readVar('--card') : null;
+  const SURFACE = cardHex ? [1, 3, 5].map(i => parseInt(cardHex.slice(i, i + 2), 16)) : [17, 19, 18];
   const triplet = (name) => {
     const n = readVar(name).split(',').map(x => Number(x.trim()));
     return n.length === 3 && n.every(Number.isFinite) ? n : [128, 128, 128];
@@ -88,6 +104,15 @@ export function calendar(store, nav) {
 
   const cellText = (v) => cellMode === 'count' ? String(v.count)
                         : f(v.net, v.r, { decimals: 0, rDecimals: 1, pctDecimals: 2 });
+  /* A phone's day cell is about forty pixels wide, so the figure is said
+     short there: +1.1k, +2.7R, +0.9%. The full figure is on the day's rail. */
+  const shortText = (v) => {
+    if (cellMode === 'count') return String(v.count);
+    if (u === 'R') return c.rFmt(v.r, 1);
+    if (u === '%') return c.pctSigned(c.asPercent(acct, v.net), 1);
+    const a = Math.abs(v.net), sign = v.net > 0 ? '+' : v.net < 0 ? '−' : '';
+    return sign + (a >= 1000 ? (a / 1000).toFixed(a >= 10000 ? 0 : 1) + 'k' : Math.round(a));
+  };
 
   const step = (delta) => {
     let mm = m + delta, yy = y;
@@ -106,6 +131,7 @@ export function calendar(store, nav) {
 
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Calendar'),
+    spanSwitch(nav),
     el('div', { style: { display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '6px' } },
       navBtn('chevleft', () => step(-1), 'Previous month'),
       el('span', { class: 'm', style: { fontSize: '13px', color: 'var(--grey-8)', padding: '0 10px', minWidth: '150px', textAlign: 'center' } },
@@ -167,9 +193,10 @@ export function calendar(store, nav) {
       title: `${c.longDate(date)} · ${v.count} trade${v.count === 1 ? '' : 's'} · ${c.money(v.net, { currency: cur })} · ${c.rFmt(v.r)} · ${c.pctSigned(c.asPercent(acct, v.net))}`,
       onClick: () => openDay(date) },
       el('div', { style: { display: 'flex', alignItems: 'baseline' } },
-        el('span', { class: 'm', style: { fontSize: '11px', opacity: sh.strong ? 1 : .8, color: ink } }, String(d)),
-        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '9.5px', opacity: .6, color: ink } }, String(v.count))),
-      el('span', { class: 'm', style: { marginTop: 'auto', fontSize: '13px', letterSpacing: '-.01em', color: ink } }, cellText(v)),
+        el('span', { class: 'm cal-n', style: { fontSize: '11px', opacity: sh.strong ? 1 : .8, color: ink } }, String(d)),
+        el('span', { class: 'm cal-c', style: { marginLeft: 'auto', fontSize: '9.5px', opacity: .6, color: ink } }, String(v.count))),
+      el('span', { class: 'm cal-v', style: { marginTop: 'auto', fontSize: '13px', letterSpacing: '-.01em', color: ink } }, cellText(v)),
+      el('span', { class: 'm cal-vs', style: { marginTop: 'auto', color: ink } }, shortText(v)),
     ));
   }
   while (cells.length % 7) cells.push(el('div', {}));
@@ -297,7 +324,7 @@ export function calendar(store, nav) {
         : o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-2)';
       return el('button', { class: 'day-row', onClick: () => nav.go('#/trade/' + t.id) },
         el('span', { class: 'm t' }, t.timeOpen || '—'),
-        el('span', { class: 'm p' }, t.pair),
+        el('span', { class: 'm p has-mark' }, pairMark(t.pair, 16), t.pair),
         el('span', { class: 'm s', style: { color: t.side === 'buy' ? 'var(--green)' : 'var(--orange)' } },
           t.side === 'buy' ? '\u25B2' : '\u25BC'),
         el('span', { class: 'm v', style: { color: col } },

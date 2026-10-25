@@ -9,28 +9,44 @@ You never install Rust. GitHub builds the installers for you, free.
 **1. Make a GitHub account** at github.com if you don't have one. Free.
 
 **2. Make a new repository.** Green *New* button. Call it `ledger`.
-Private is fine — you get 2,000 free build minutes a month and a full
-build costs about 25 of them.
+Private is fine — you get 2,000 free build minutes a month. GitHub counts
+a Windows minute as two, so a Windows-only build costs about 15–25 of them
+(less once Rust is cached). A public repo builds for free.
 
-**3. Upload this whole folder.** On the empty repo page click
-*uploading an existing file*, then drag in **everything** —
-`src`, `src-tauri`, `.github`, `package.json`. Commit.
+**3. Upload the CONTENTS of the `ledger-desktop` folder.**
 
-> The `.github` folder is the one that matters and it is easy to miss,
-> because Windows Explorer hides folders starting with a dot. If the
-> Actions tab is empty later, that folder didn't make it.
+Unzip the download. You get a folder called `ledger-desktop` with six
+things inside it:
 
-**4. Build it.** Go to the **Actions** tab → *Build Ledger* →
+    ledger-desktop\
+    ├── .github\          the build instructions for GitHub
+    ├── src\              the app itself
+    ├── src-tauri\        the native shell
+    ├── package.json
+    ├── README.md
+    └── SETUP.md
+
+On the empty repo page click *uploading an existing file*. Then open the
+`ledger-desktop` folder, select all six items (Ctrl+A), and drag **those**
+onto the page. Commit.
+
+> **Do not drag the `ledger-desktop` folder itself.** Your repo needs
+> `.github` sitting at the very top, because that is the only place
+> GitHub looks for build instructions. Nest it one level deeper and the
+> Actions tab will simply be empty — no error, no explanation.
+>
+> Getting it right, your repo's file list starts with:
+> `.github` · `src` · `src-tauri` · `package.json`
+>
+> Getting it wrong, it shows a single folder called `ledger-desktop`.
+> If that happens, delete the files and upload them again one level up.
+
+**4. Build it.** Go to the **Actions** tab → *Build Laminar* →
 **Run workflow** → the green button.
 
-**5. Wait about ten minutes.** When the run goes green, scroll to the
-bottom of it. Under **Artifacts** there are three downloads:
-
-    ledger-windows-latest    ← yours
-    ledger-macos-latest
-    ledger-ubuntu-22.04
-
-Inside the Windows one: **`Ledger_1.0.0_x64-setup.exe`**. Run it. Done —
+**5. Wait about ten minutes** (a few, once Rust is cached). When the run
+goes green, scroll to the bottom of it. Under **Artifacts** there is one
+download, **laminar-windows**. Inside it: **`Laminar_<version>_x64-setup.exe`**. Run it. Done —
 Ledger is in your Start Menu with its own icon.
 
 ---
@@ -64,8 +80,9 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 
-The workflow then makes a draft release with all three installers attached,
-which is what you would hand to someone else.
+The workflow builds the Windows installer for that tag too. (It used to
+build macOS and Linux as well — macOS minutes count ten times on a private
+repo, which used the monthly allowance up; it is Windows only now.)
 
 ---
 

@@ -4,6 +4,10 @@
 import { store, isSupported, isTauri } from './store.js';
 import { fs } from './fs.js';
 import { el, icon, clear, toast, brandWordmark } from './ui.js';
+import { topbar, fitTopbar, bottombar, subnav, sectionOf, tabOf, accountMenu, moreSheet, arrive, settle, segMarks, segGlide } from './shell.js';
+import { closeSheets } from './sheet.js';
+import { applyLastLook } from './look.js';
+import { openAppearance } from './views/appearance.js';
 import * as c from './calc.js';
 import { dashboard } from './views/dashboard.js';
 import { trades } from './views/trades.js';
@@ -97,7 +101,7 @@ function gate({ mode }) {
         el('button', { class: 'btn btn-primary', onClick: async () => {
           try { if (await store.regrant()) boot(); else toast('Permission declined', 'warn'); }
           catch (e) { toast(e.message, 'bad'); }
-        } }, icon('folder', 15, '#fff', 1.8), 'Reconnect'),
+        } }, icon('folder', 15, 'currentColor', 1.8), 'Reconnect'),
         el('button', { class: 'btn btn-quiet', onClick: async () => { await store.forget(); boot(); } }, 'Choose a different folder')),
     );
     return el('div', { class: 'gate' }, card);
@@ -112,138 +116,10 @@ function gate({ mode }) {
       el('button', { class: 'btn btn-primary', onClick: async () => {
         try { if (await store.connect()) boot(); }
         catch (e) { if (e.name !== 'AbortError') toast(e.message, 'bad'); }
-      } }, icon('folder', 15, '#fff', 1.8), 'Choose folder'),
+      } }, icon('folder', 15, 'currentColor', 1.8), 'Choose folder'),
       el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-5)' } }, 'Chrome or Edge, desktop')),
   );
   return el('div', { class: 'gate' }, card);
-}
-
-/* ---------- sidebar ---------- */
-const NAV_ITEMS = [
-  ['#/', 'dashboard', 'Dashboard'],
-  ['#/outlook', 'outlook', 'Outlook'],
-  ['#/trades', 'trades', 'Trades'],
-  ['#/calendar', 'calendar', 'Calendar'],
-  ['#/review', 'review', 'Review'],
-  ['#/analytics', 'analytics', 'Analytics'],
-  ['#/lab', 'lab', 'The Lab'],
-  ['#/replay', 'replay', 'Replay'],
-  ['#/wire', 'wire', 'Newswire'],
-  ['#/playbook', 'playbook', 'Playbook'],
-  ['#/firms', 'firms', 'Prop firms'],
-];
-
-let menuOpen = false;
-
-function sidebar() {
-  const acct = store.activeAccount;
-  const hash = location.hash || '#/';
-  const base = '#/' + (hash.split('/')[1] || '');
-
-  const menu = el('div', { class: 'acct-menu', hidden: !menuOpen },
-    ...store.accounts.map(a => {
-      const s = c.summarise(a, store.tradesFor(a.id));
-      return el('button', { class: 'acct-item' + (acct && a.id === acct.id ? ' is-active' : ''),
-        onClick: async () => { menuOpen = false; await store.setActiveAccount(a.id); render(); } },
-        el('span', { class: 'acct-dot', style: { background: a.color } }),
-        el('span', { style: { minWidth: 0 } },
-          el('span', { class: 'n', style: { display: 'block' } }, a.name),
-          el('span', { class: 'b', style: { display: 'block' } }, c.money(a.startingBalance + s.net, { sign: false, currency: a.currency, decimals: 0 }))),
-        acct && a.id === acct.id ? el('span', { style: { marginLeft: 'auto' } }, icon('check', 13, '#fff', 2.4)) : null);
-    }),
-    el('div', { class: 'acct-sep' }),
-    el('button', { class: 'acct-item', onClick: () => { menuOpen = false; nav.go('#/accounts'); } },
-      icon('plus', 14, 'var(--grey-5)', 2),
-      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-3)' } }, 'Manage accounts')),
-  );
-
-  const stats = acct ? c.summarise(acct, store.tradesFor(acct.id)) : null;
-
-  return el('aside', { class: 'sidebar' },
-    el('div', { class: 'brand' }, brandWordmark(22)),
-
-    el('div', { class: 'acct-switch' },
-      el('button', { class: 'acct-btn', onClick: e => { e.stopPropagation(); menuOpen = !menuOpen; render(); } },
-        el('span', { class: 'acct-dot', style: { background: acct ? acct.color : 'var(--grey-5)' } }),
-        el('span', { style: { minWidth: 0 } },
-          el('span', { class: 'acct-name', style: { display: 'block' } }, acct ? acct.name : 'No account'),
-          el('span', { class: 'acct-meta', style: { display: 'block' } }, acct
-            ? c.money(acct.startingBalance + stats.net, { sign: false, currency: acct.currency, decimals: 0 })
-              + ' · ' + (store.displayUnit === '$'
-                  ? c.pctSigned(c.asPercent(acct, stats.net))
-                  : c.fig(store.displayUnit, acct, stats.net, stats.netR, { decimals: 0 }))
-            : 'create one to begin')),
-        el('span', { style: { marginLeft: 'auto', display: 'flex' } }, icon('switch', 14, 'var(--grey-3)', 2))),
-      menu),
-
-    /* One switch, every screen. $ is the money, % is that money against the
-       account's starting balance, R is the risk it was worth. */
-    el('div', { class: 'unit-switch' },
-      ...c.UNITS.map(u => el('button', { class: store.displayUnit === u ? 'is-on' : '',
-        title: u === '$' ? 'Show money' : u === '%' ? 'Show percent of starting balance' : 'Show R multiples',
-        onClick: async () => { if (store.displayUnit !== u) { await store.setDisplayUnit(u); render(); } } }, u))),
-
-    /* ============================================================
-       What the numbers are counting
-
-       The unit switch above says what a figure is measured in. This one says
-       which trades it is measured over. It only appears once there is a
-       forward test to include, because a switch with nothing on the other
-       side of it is furniture.
-       ============================================================ */
-    /* It appears once there is a forward test to count, and stays put while
-       the app is reading anything other than live — otherwise a journal whose
-       last test was deleted would be stuck on a view with nothing in it and
-       no switch to leave by. */
-    acct && (store.testCountFor(acct.id) || store.tradeScope !== 'live')
-      ? el('div', { class: 'unit-switch scope-switch', style: { marginTop: '6px' } },
-          ...[['live', 'Live', 'Only the trades you took for real'],
-              ['forward', 'Forward test', 'Only the forward tests'],
-              ['all', 'All', 'Both, counted together']]
-            .map(([v, label, why]) => el('button', {
-              class: store.tradeScope === v ? 'is-on' : '', title: why,
-              onClick: async () => {
-                if (store.tradeScope === v) return;
-                await store.setTradeScope(v); render();
-              } }, label)))
-      : null,
-
-    el('nav', { class: 'nav' },
-      ...NAV_ITEMS.map(([href, ic, label]) =>
-        el('a', { href, class: base === href || (href === '#/' && base === '#/') ? 'is-active' : '' },
-          icon(ic), el('span', { class: 'label' }, label),
-          href === '#/trades' && acct ? el('span', { class: 'count' }, String(store.tradesFor(acct.id).length)) : null,
-          base === href ? el('span', { class: 'dot' }) : null))),
-
-    el('div', { class: 'side-foot' },
-      /* Just the folder's name. What it is, and that copying it is the backup,
-         is on the tooltip rather than taking up three lines of the sidebar. */
-      store.isNative || fs.kind === 'browser'
-        ? el('div', { class: 'side-folder', title: 'Journal folder — copy it to back up' },
-            icon('folder', 13, 'var(--grey-5)', 1.8),
-            el('span', { class: 'm' }, store.folderName || '—'))
-        : null,
-      /* Your name if you have given one, and the row simply reads Settings if
-         you have not. Nobody should have to look at a stranger's initials. */
-      settingsRow(base),
-    ));
-}
-
-/* The foot of the sidebar. Two lines with a name, one line without. */
-function settingsRow(base) {
-  const who = store.userName;
-  const initials = who.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
-  return el('button', { class: 'acct-item', style: { background: base === '#/settings' ? 'var(--inset)' : 'transparent' },
-    onClick: () => nav.go('#/settings') },
-    el('span', { class: 'avatar', style: { background: who ? store.userColour : 'var(--inset-2, var(--grey-8))' } },
-      who ? el('span', { class: 'm', style: { fontSize: '11px', color: store.userInk } }, initials)
-          : icon('user', 15, 'var(--grey-4)', 1.7)),
-    who
-      ? el('span', { style: { minWidth: 0 } },
-          el('span', { style: { display: 'block', fontSize: '12px', color: '#fff', lineHeight: 1.2,
-                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, who),
-          el('span', { class: 'm', style: { display: 'block', fontSize: '10px', color: 'var(--grey-3)' } }, 'Settings'))
-      : el('span', { style: { fontSize: '12px', color: '#fff' } }, 'Settings'));
 }
 
 /* ---------- router ---------- */
@@ -259,8 +135,11 @@ function route() {
     case 'edit':      return addTrade(store, nav, arg);
     case 'import':    return importTrades(store, nav);
     case 'trade':     return tradeDetail(store, nav, arg);
-    case 'accounts':  return accounts(store, nav);
-    case 'settings':  return settings(store, nav);
+    /* One place for accounts: Settings. #/accounts is that page with the
+       new-account form open (and the whole of first run, before any exist). */
+    case 'accounts':  return store.accounts.length
+      ? settings(store, nav, 'accounts', { openLook, newAccount: true }) : accounts(store, nav);
+    case 'settings':  return settings(store, nav, arg, { openLook });
     case 'calendar':  return calendar(store, nav);
     case 'analytics': return analytics(store, nav);
     case 'playbook':  return playbook(store, nav);
@@ -279,6 +158,7 @@ function route() {
    month step re-renders without replaying anything. */
 let lastView = null;
 let wasSolo = false;
+const openLook = () => openAppearance(store, nav);
 function render() {
   const hash = location.hash || '#/';
   const [, seg, arg] = hash.split('/');
@@ -287,7 +167,7 @@ function render() {
   lastView = key;
 
   /* First run is one decision. Until an account exists there is nothing for a
-     sidebar to navigate to, so it is not drawn at all — the setup form has the
+     bar to navigate to, so it is not drawn at all — the setup form has the
      whole window. It arrives, once, the moment the account does. */
   const solo = !store.accounts.length && seg !== 'settings';
   const arriving = wasSolo && !solo;
@@ -295,29 +175,61 @@ function render() {
 
   /* the same page drawn again (a click, a filter, a row opened): every list stays scrolled where it was */
   const scrolled = entered ? [] : scrollMarks(root);
+  const segs = entered ? new Map() : segMarks(root, placeOf);
   const page = document.scrollingElement, pageY = entered ? 0 : page?.scrollTop || 0;
   clear(root);
-  const main = el('div', { class: 'main' + (entered ? ' enter' : '') }, route());
+  /* Whether this paint is a page being opened (rather than the same page
+     drawn again after a click) — the simulations replay their animation
+     on every visit, and only then. */
+  nav.fresh = entered;
+  const view = route();
+  const main = el('main', { class: 'main' + (entered ? ' enter' : '') }, view);
+  dressHead(view, hash);
   root.classList.toggle('is-solo', solo);
   if (solo) root.append(main);
   else {
-    const side = sidebar();
-    if (arriving) side.classList.add('is-new');
-    root.append(side, main);
+    const bar = topbar(store, nav, { hash,
+      onAccount: anchor => accountMenu(store, nav, anchor),
+      onYou: () => nav.go('#/settings') });
+    if (arriving) bar.classList.add('is-new');
+    root.append(bar, main, ...bottombar(store, nav, { hash, onMore: () => moreSheet(store, nav, { openLook }) }).filter(Boolean));
+    fitTopbar(bar);
   }
 
   restoreScroll(root, scrolled);
+  segGlide(root, segs, placeOf);
   if (page && pageY) page.scrollTop = pageY;
 
   /* Take the flag off once everything has played. Left on, it would animate
      anything inserted into the view later — an inline editor, a confirm box —
      which is exactly the twitchiness this gating exists to avoid. */
   if (entered) {
+    arrive(main);
     clearTimeout(enterTimer);
-    enterTimer = setTimeout(() => main.classList.remove('enter'), 900);
+    /* long enough for the last card's chart to finish drawing */
+    enterTimer = setTimeout(() => main.classList.remove('enter'), 2800);
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => settle(main), 2800);
   }
 }
-let enterTimer;
+
+/* A page inside a section that shares tabs (Journal, Plan, Lab) gets those
+   tabs where its title was. The title stays in the page for anything that
+   reads it, just out of sight. The Lab's own tool switch is the same row of
+   tabs, so it steps aside rather than appear twice. */
+function dressHead(view, hash) {
+  const [, seg = ''] = hash.split('/');
+  const section = sectionOf(seg);
+  if (!section.tabs || !tabOf(section, hash)) return;
+  const head = view.querySelector?.('.head');
+  if (!head) return;
+  const h1 = head.querySelector('h1');
+  const tabs = subnav(section, hash, nav);
+  if (h1) { h1.classList.add('sr-only'); h1.after(tabs); } else head.prepend(tabs);
+  head.classList.add('has-subnav');
+  head.querySelector('.lab-views')?.remove();
+}
+let enterTimer, settleTimer;
 
 /** Where each scrolled box is: by its place in the page (tags and positions, and its own first class). */
 const placeOf = (e, top) => {
@@ -341,6 +253,10 @@ function restoreScroll(top, marks) {
 
 async function boot() {
   document.querySelectorAll('.gate').forEach(n => n.remove());
+  if (!store.data) applyLastLook();
+  /* Under automation (the test suites) nothing rises or writes itself in:
+     a measurement taken mid-arrival would measure the animation. */
+  if (typeof navigator !== 'undefined' && navigator.webdriver) document.documentElement.dataset.auto = 'on';
   let state = 'none';
   try { state = await store.tryRestore(); }
   catch (e) { console.warn(e); state = 'none'; }
@@ -362,10 +278,15 @@ async function boot() {
   render();
 }
 
-window.addEventListener('hashchange', () => { menuOpen = false; render(); });
-document.addEventListener('click', e => {
-  if (menuOpen && !e.target.closest('.acct-switch')) { menuOpen = false; render(); }
-});
+window.addEventListener('hashchange', () => { closeSheets(); render(); });
+
+/* Day and night: when the look follows the clock, look at the clock. */
+setInterval(() => {
+  if (!store.data || !store.lookSchedule.on) return;
+  const before = document.documentElement.dataset.look;
+  store.applyLookNow();
+  if (document.documentElement.dataset.look !== before) render();
+}, 60000);
 store.onChange(() => { /* views re-render explicitly; this is the hook for future live updates */ });
 
 boot();

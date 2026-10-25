@@ -1,4 +1,5 @@
 import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
+import { pairMark, instrumentOf, instrumentName } from '../flags.js';
 import * as c from '../calc.js';
 import { todayISO, tradeShotsOf, newShotId } from '../store.js';
 import { prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
@@ -376,8 +377,8 @@ export function addTrade(store, nav, existingId = null) {
   function paintSessions() {
     const sel = el('select', { class: 'field',
       onChange: e => { f.sessionId = e.target.value || null; f.sessionAuto = false; paintSessions(); } },
-      ...pb.sessions.map(x => el('option', { value: x.id, selected: f.sessionId === x.id, style: { background: '#363636' } }, x.name)),
-      el('option', { value: '', selected: f.sessionId == null, style: { background: '#363636' } }, c.OUTSIDE));
+      ...pb.sessions.map(x => el('option', { value: x.id, selected: f.sessionId === x.id }, x.name)),
+      el('option', { value: '', selected: f.sessionId == null }, c.OUTSIDE));
     sessionWrap.replaceChildren(sel);
   }
   paintSessions();
@@ -390,9 +391,9 @@ export function addTrade(store, nav, existingId = null) {
         if (e.target.value === '__new') { addSetup(); return; }
         f.setupId = e.target.value || null;
       } },
-      el('option', { value: '', selected: !f.setupId, style: { background: '#363636' } }, 'No setup'),
-      ...pb.setups.map(s => el('option', { value: s.id, selected: f.setupId === s.id, style: { background: '#363636' } }, s.name)),
-      el('option', { value: '__new', style: { background: '#363636' } }, '＋ New setup…'));
+      el('option', { value: '', selected: !f.setupId }, 'No setup'),
+      ...pb.setups.map(s => el('option', { value: s.id, selected: f.setupId === s.id }, s.name)),
+      el('option', { value: '__new' }, '＋ New setup…'));
     setupWrap.replaceChildren(sel);
   }
   async function addSetup() {
@@ -513,7 +514,7 @@ export function addTrade(store, nav, existingId = null) {
   paintTags();
 
   /* ---------- result sign ---------- */
-  const signWrap = el('span', { style: { display: 'flex', gap: '4px' } });
+  const signWrap = el('span', { class: 'sign-wrap', style: { display: 'flex', gap: '4px', flexWrap: 'wrap' } });
   function paintSign() {
     const opts = [['win', 'Profit', 'var(--green)'], ['loss', 'Loss', 'var(--orange)'], ['breakeven', 'Break-even', 'var(--grey-4)']];
     signWrap.replaceChildren(...opts.map(([v, label, col]) =>
@@ -633,9 +634,9 @@ export function addTrade(store, nav, existingId = null) {
 
   const head = el('header', { class: 'head' },
     el('h1', {}, editing ? 'Edit trade' : 'New trade'),
-    el('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--grey-8)', borderRadius: 'var(--r-btn)', padding: '7px 13px' } },
-      el('span', { style: { width: '7px', height: '7px', borderRadius: '2px', background: acct.color } }),
-      el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-2)' } }, 'Saving to ', el('span', { style: { color: '#fff' } }, acct.name))),
+    el('span', { class: 'acct-pill' },
+      el('span', { class: 'acct-dot', style: { background: acct.color } }),
+      el('span', { class: 'm' }, 'Saving to ', el('b', {}, acct.name))),
     el('div', { class: 'spacer' }),
     /* Opening a running trade, the one thing you came to do is finish it.
        Rather than make you find the Closed switch further down the form, the
@@ -692,7 +693,14 @@ export function addTrade(store, nav, existingId = null) {
   const grid = (cols, ...kids) => el('div', { style: { display: 'grid', gridTemplateColumns: cols, gap: '14px' } }, ...kids);
 
   const classHint = el('span', { class: 'pair-class' });
-  const paintClass = () => { const k = classOf(f.pair); classHint.textContent = k || ''; classHint.hidden = !k; };
+  /* the instrument's flags inside the field, as soon as it reads as one */
+  const markSlot = el('span', { class: 'pair-mark' });
+  const paintClass = () => {
+    const k = classOf(f.pair); classHint.textContent = k || ''; classHint.hidden = !k;
+    const known = instrumentOf(f.pair).kind !== 'none';
+    markSlot.replaceChildren(...(known ? [pairMark(f.pair, 22)] : []));
+    markSlot.title = instrumentName(f.pair);
+  };
   paintClass();
 
   const direction = el('div', { style: { display: 'flex', gap: '5px' } },
@@ -919,7 +927,7 @@ export function addTrade(store, nav, existingId = null) {
 
   const colLeft = el('div', { class: 'col' },
     sec('The trade', grid('minmax(0,1.5fr) minmax(0,1.3fr)',
-      labelled('Instrument', el('div', { class: 'pair-wrap' }, field({ placeholder: 'XAUUSD', ...bind('pair', { onSet: () => { paintClass(); out.fromCalendar?.(); } }) }), classHint)),
+      labelled('Instrument', el('div', { class: 'pair-wrap' }, markSlot, field({ placeholder: 'XAUUSD', ...bind('pair', { onSet: () => { paintClass(); out.fromCalendar?.(); } }) }), classHint)),
       labelled('Direction', direction))),
 
     sec('Prices', grid('repeat(4,minmax(0,1fr))',
