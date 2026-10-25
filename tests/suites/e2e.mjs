@@ -125,10 +125,10 @@ await step('create an account', async () => {
 });
 
 await step('the account is listed and active', async () => {
-  await page.evaluate(() => location.hash = '#/accounts');
-  await page.waitForSelector('text=ACTIVE', { timeout: 4000 });
-  const t = await page.locator('.view').innerText();
-  if (!t.includes('Started $100,000')) throw new Error('starting balance not shown');
+  await page.evaluate(() => location.hash = '#/settings/accounts');
+  await page.waitForSelector('.ab-card.is-active', { timeout: 4000 });
+  const t = await page.locator('.ab-card.is-active').innerText();
+  if (!t.includes('$100,000 account')) throw new Error('starting balance not shown');
 });
 await page.screenshot({ path: '/tmp/shot-accounts.png' });
 

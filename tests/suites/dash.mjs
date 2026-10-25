@@ -115,6 +115,7 @@ console.log('windows and units');
 await p.evaluate(() => { location.hash = '#/'; }); await p.waitForTimeout(500);
 await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(x => x.textContent === '7D').click()); await p.waitForTimeout(500);
 t('a window with nothing in it says so rather than drawing an empty chart', /No trades in this window/.test(await txt('.db-hero')) && /Nothing in this window/.test(await txt('.db-src')));
+t('a recent trade leads with its instrument — no win/loss bar before the logo', await p.evaluate(() => [...document.querySelectorAll('.db-tr')].every(r => !r.querySelector('.dot') && r.firstElementChild.classList.contains('pmark'))));
 t('   while the recent trades are still there', await p.evaluate(() => document.querySelectorAll('.db-tr').length) === 6);
 await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(x => x.textContent === 'All').click()); await p.waitForTimeout(500);
 t('All reads every trade', (await txt('.db-big')) === $(ALL.reduce((a, x) => a + x.netResult, 0), 2) && /all time/i.test(await txt('.db-hero .db-k')));

@@ -9,16 +9,13 @@ import { el, icon, toast } from '../ui.js';
 import * as c from '../calc.js';
 import { toCSV } from '../csv.js';
 import { describeLook } from '../look.js';
-import { accountActions } from './accountActions.js';
-import { accounts } from './accounts.js';
+import { accountBoard } from './acctboard.js';
 import { oandaKeyCard } from './oandakey.js';
 import { profileFill } from '../shell.js';
 import { probeVideo, probeImage } from '../clip.js';
 import { prepare as prepareImage } from '../shots.js';
 
 
-const COLOURS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'JPY'];
 
 export function settings(store, nav, page = '', { openLook, newAccount = false } = {}) {
   /* The folder used to be named in a pill up here as well as in the Vault
@@ -30,111 +27,7 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
     el('div', { class: 'spacer' }),
   );
 
-  /* ============================================================
-     Accounts
-     ============================================================ */
-  const list = el('div', { style: { marginTop: '18px', display: 'flex', flexDirection: 'column',
-                                    gap: '8px', overflowY: 'auto', minHeight: 0 } });
-
-  /* A small labelled field that commits on blur or Enter, and only when the
-     value actually reads as a number — a half-typed balance must never be
-     written, because every R on the account is measured against it. */
-  const numField = (label, value, suffix, onCommit, opts = {}) => {
-    const input = el('input', { class: 'm', value,
-      style: { width: opts.width || '96px', background: 'var(--grey-7)', borderRadius: '10px',
-               padding: '6px 9px', fontSize: '11.5px', color: 'var(--ink)' },
-      onChange: e => {
-        const n = c.parseNumber(e.target.value);
-        if (n == null || n < 0 || (opts.positive && n <= 0)) { e.target.value = value; return toast('Not a number', 'warn'); }
-        onCommit(n);
-      },
-      onKeydown: e => { if (e.key === 'Enter') e.target.blur(); } });
-    return el('label', { style: { display: 'flex', flexDirection: 'column', gap: '5px' } },
-      el('span', { class: 'm', style: { fontSize: '9.5px', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--grey-5)' } }, label),
-      el('span', { style: { display: 'flex', alignItems: 'center', gap: '5px' } },
-        input, suffix ? el('span', { class: 'm', style: { fontSize: '11px', color: 'var(--grey-5)' } }, suffix) : null));
-  };
-
-  function accountRow(a) {
-    const isActive = store.activeAccount && a.id === store.activeAccount.id;
-    const ts = store.tradesFor(a.id);
-    const s = c.summarise(a, ts);
-    const oneR = a.startingBalance * (Number(a.defaultRiskPercent) || 0) / 100;
-
-    const save = async patch => { await store.updateAccount(a.id, patch); nav.refresh(); };
-
-    return el('div', { style: {
-        background: 'var(--grey-9)', borderRadius: '24px', padding: '15px 18px',
-        display: 'flex', flexDirection: 'column', gap: '13px',
-        boxShadow: isActive ? 'inset 0 0 0 1px var(--blue)' : 'none', opacity: a.archived ? .55 : 1 } },
-
-      el('div', { style: { display: 'flex', alignItems: 'center', gap: '11px' } },
-        el('span', { style: { width: '10px', height: '10px', borderRadius: '3px', background: a.color, flex: 'none' } }),
-        el('input', { class: 'm', value: a.name, title: 'Rename this account',
-          style: { flex: '1', minWidth: 0, fontSize: '14px', color: 'var(--ink)', background: 'transparent' },
-          onChange: e => {
-            const v = e.target.value.trim();
-            if (!v) { e.target.value = a.name; return; }
-            save({ name: v });
-          } }),
-        isActive ? el('span', { class: 'm', style: { fontSize: '9.5px', color: '#fff', background: 'var(--blue)',
-          borderRadius: 'var(--r-pill)', padding: '2px 8px', flex: 'none' } }, 'ACTIVE') : null,
-        a.archived ? el('span', { class: 'm', style: { fontSize: '9.5px', color: 'var(--grey-3)', background: 'var(--grey-7)',
-          borderRadius: 'var(--r-pill)', padding: '2px 8px', flex: 'none' } }, 'ARCHIVED') : null,
-        accountActions(store, nav, a)),
-
-      el('div', { style: { display: 'flex', alignItems: 'flex-end', gap: '10px', flexWrap: 'wrap' } },
-        numField('Starting balance', a.startingBalance, null,
-          n => save({ startingBalance: n }), { positive: true, width: '104px' }),
-        numField('Risk', a.defaultRiskPercent, '%', n => save({ defaultRiskPercent: n }), { width: '62px' }),
-        numField('Weekly target', a.weeklyTargetPercent || 0, '%', n => save({ weeklyTargetPercent: n }), { width: '62px' }),
-        el('label', { style: { display: 'flex', flexDirection: 'column', gap: '5px' } },
-          el('span', { class: 'm', style: { fontSize: '9.5px', letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--grey-5)' } }, 'Currency'),
-          el('select', { class: 'm', style: { background: 'var(--grey-7)', borderRadius: '10px', padding: '6px 9px',
-              fontSize: '11.5px', color: 'var(--ink)', cursor: 'pointer' },
-            onChange: e => save({ currency: e.target.value }) },
-            ...CURRENCIES.map(x => el('option', { value: x, selected: x === a.currency }, x)))),
-        el('div', { style: { display: 'flex', gap: '5px', marginLeft: 'auto', paddingBottom: '6px' } },
-          ...COLOURS.map(col => el('button', { title: 'Recolour',
-            style: { width: '15px', height: '15px', borderRadius: '5px', background: col,
-                     boxShadow: a.color === col ? '0 0 0 2px var(--grey-9), 0 0 0 3px #fff' : 'none' },
-            onClick: () => save({ color: col }) })))),
-
-      el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '14px', paddingTop: '2px' } },
-        el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } },
-          `1R = ${c.money(oneR, { sign: false, currency: a.currency })}`),
-        el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } },
-          `${ts.length} trade${ts.length === 1 ? '' : 's'}`),
-        el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12px',
-            color: s.net > 0 ? 'var(--green)' : s.net < 0 ? 'var(--orange)' : 'var(--grey-5)' } },
-          c.money(a.startingBalance + s.net, { sign: false, currency: a.currency, decimals: 0 })
-          + '  ' + c.pctSigned(c.asPercent(a, s.net)))),
-    );
-  }
-
-  /* New account opens the form right here, under the list — one page for
-     accounts, not two. Arriving from the account menu (#/accounts) opens it
-     already. */
-  const formSlot = el('div', { class: 'st-newacct', hidden: !newAccount });
-  const addBtn = el('button', { class: 'st-addacct', hidden: newAccount,
-      onClick: () => {
-        addBtn.hidden = true; formSlot.hidden = false;
-        if (!formSlot.firstChild) formSlot.append(accounts(store, nav, { formOnly: true }));
-        formSlot.querySelector('input')?.focus();
-      } },
-    icon('plus', 16, 'var(--grey-5)', 2),
-    el('span', {}, 'New account'));
-  if (newAccount) formSlot.append(accounts(store, nav, { formOnly: true }));
-  list.replaceChildren(...store.allAccounts.map(accountRow), addBtn);
-
-  const accountsCard = el('section', { class: 'card', style: { flex: '1', minWidth: 0, display: 'flex',
-                                                               flexDirection: 'column', minHeight: 0,
-                                                               alignSelf: 'flex-start', maxHeight: '100%' } },
-    el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
-      el('h2', {}, 'Accounts'),
-      el('span', { class: 'note', title: 'Changing a starting balance re-measures every R and every % on that account' },
-        'name, balance, risk and target')),
-    list);
+  /* Accounts have a page of their own now: views/acctboard.js. */
 
   /* ============================================================
      The vault
@@ -440,7 +333,7 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
   const listEl = el('div', { class: 'st-groups' },
     group('Account',
       row('user', 'Profile', 'Your name, picture, colour and banner', () => nav.go('#/settings/profile')),
-      row('firms', 'Accounts', `${store.accounts.length} active · balance, risk and weekly target`, () => nav.go('#/settings/accounts'))),
+      row('firms', 'Accounts', `${store.accounts.length} active · evals, funded and live, payouts`, () => nav.go('#/settings/accounts'))),
     group('Trading',
       row('shield', 'Risk rules', 'Daily loss cap, trades a day, default risk', () => nav.go('#/playbook')),
       row('chart', 'Charts & prices', 'Your OANDA key for the trade chart', () => nav.go('#/settings/charts')),
@@ -459,7 +352,7 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
     el('div', { class: 'st-col' }, ...cards));
 
   if (page === 'profile') return sub('Profile', 'Your name, picture and banner', profileCard);
-  if (page === 'accounts') return sub('Accounts', 'Name, balance, risk and target', accountsCard, formSlot);
+  if (page === 'accounts') return accountBoard(store, nav, { openNew: newAccount });
   if (page === 'vault') return sub('Vault & data', 'Where your journal lives', vaultCard);
   if (page === 'charts') return sub('Charts & prices', 'OANDA', oandaKeyCard());
 

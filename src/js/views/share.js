@@ -202,7 +202,7 @@ export function openShare(store, nav, tradeId) {
   /* ============================================================
      The background
      ============================================================ */
-  const clipOf = id => store.share.clips.find(x => x.id === id);
+  const clipOf = id => store.share.clips.find(x => x.id === id) || store.builtinClips.find(x => x.id === id);
   async function useBg(id, { quiet = false } = {}) {
     pauseAll();
     if (String(id).startsWith('original:')) {
@@ -426,7 +426,8 @@ export function openShare(store, nav, tradeId) {
       cl.kind === 'video' ? el('span', { class: 'sh-tdur' }, secs(cl.dur)) : null));
     const add = el('button', { class: 'sh-tile sh-add', onClick: () => file.click() }, icon('plus', 16, 'currentColor', 2), el('span', {}, 'Add video or picture'));
     const originals = ORIGINALS.map(([k, name]) => tile('original:' + k, name, originalThumb(k, store.colours, tone)));
-    const on = clipOf(st.prefs.bg);
+    const builtins = store.builtinClips.map(cl => tile(cl.id, cl.name, cl.thumb, el('span', { class: 'sh-tdur' }, secs(cl.dur))));
+    const on = store.share.clips.find(x => x.id === st.prefs.bg);    // only your own can be removed
     return el('div', { class: 'sh-pane' },
       el('div', { class: 'sh-sec' }, el('h3', {}, 'Yours'),
         el('p', {}, clips.length ? 'Kept in your journal folder, so they go wherever it goes.' : 'Your own clips and pictures — they stay in your journal folder.')),
@@ -441,6 +442,8 @@ export function openShare(store, nav, tradeId) {
             await store.removeShareClip(on.id);
             st.prefs.bg = store.share.prefs.bg; await useBg(st.prefs.bg); paintTab(); toast('Removed');
           } })) : null,
+      builtins.length ? el('div', { class: 'sh-sec' }, el('h3', {}, 'With sound'), el('p', {}, 'Your clips, cut clean — they come with Laminar.')) : null,
+      builtins.length ? el('div', { class: 'sh-grid', 'data-grid': 'builtin' }, ...builtins) : null,
       el('div', { class: 'sh-sec' }, el('h3', {}, 'Laminar'), el('p', {}, 'Drawn here, moving, no files.')),
       el('div', { class: 'sh-grid' }, ...originals));
   }
@@ -474,7 +477,13 @@ export function openShare(store, nav, tradeId) {
     }
     const save = patch => store.updateShareClip(clip.id, patch);
     const parts = [];
-    if (clip.kind === 'video') parts.push(row('Trim', trimmer(clip)));
+    if (clip.kind === 'video') {
+      const dur = clip.dur || 0, whole = !(clip.start > 0) && Math.abs((clip.len || dur) - dur) < 0.05;
+      parts.push(row('Trim', trimmer(clip), whole ? 'the whole clip' : null));
+      if (!whole) parts.push(row('', el('button', { class: 'btn btn-quiet sh-whole', onClick: () => {
+        clip.start = 0; clip.len = dur; save({ start: 0, len: dur }); paintTab(); restart();
+      } }, 'Use the whole clip')));
+    }
     else parts.push(row('Length', slider(5, 20, 0.5, Number(st.prefs.length) || 6, v => `${v.toFixed(1)}s`, v => { st.prefs.length = v; }, v => setPref({ length: v })), 'how long the video runs'));
     parts.push(row('Position', el('div', { class: 'sh-posrow' },
       el('span', {}, 'Drag the card to move the background.'),
@@ -736,7 +745,7 @@ export function openShare(store, nav, tradeId) {
   loadChart();
   st.raf = requestAnimationFrame(frame);
   api.__share = {
-    get state() { return { load: st.load, tf: tfMinutes(), bars: st.chart?.bars.length || 0, bg: st.prefs.bg, busy: st.busy, prefs: { ...st.prefs } }; },
+    get state() { return { load: st.load, tf: tfMinutes(), bars: st.chart?.bars.length || 0, bg: st.prefs.bg, busy: st.busy, prefs: { ...st.prefs }, length: lengthOf() }; },
     model, restart, useBg, addFiles, setMonitor,
     /* what is heard, for the tests: each clip open here, playing or not, and at what level */
     get sound() {

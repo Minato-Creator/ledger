@@ -246,7 +246,6 @@ function recentCard(store, acct, nav) {
       const setup = store.playbook.setups.find(x => x.id === t.setupId);
       const tone = o === 'win' ? 'is-pos' : o === 'loss' ? 'is-neg' : '';
       return el('button', { class: 'db-tr', onClick: () => nav.go('#/trade/' + t.id) },
-        el('span', { class: 'dot ' + (tone || 'is-flat') }),
         pairMark(t.pair, 24),
         el('span', { class: 'p' }, t.pair || '—',
           el('i', { class: t.side === 'buy' ? 'up' : 'dn', title: t.side === 'buy' ? 'Long' : 'Short' }, t.side === 'buy' ? '↑' : '↓'),
@@ -260,12 +259,10 @@ export function tradeRow(t, acct, store, cols, nav) {
   const o = c.outcome(t);
   const r = c.rMultiple(acct, t);
   const setup = store.playbook.setups.find(s => s.id === t.setupId);
-  const mark = o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-4)';
   const long = t.side === 'buy';
   return el('div', { class: 'tbl-row', style: { gridTemplateColumns: cols, cursor: 'pointer' },
                      onClick: () => nav.go('#/trade/' + t.id) },
     el('span', { style: { display: 'flex', alignItems: 'center', gap: '9px' } },
-      el('span', { class: 'bar-mark', style: { background: mark } }),
       el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair)),
     el('span', { class: 'td', style: { color: long ? 'var(--green)' : 'var(--orange)' } }, long ? '▲ Long' : '▼ Short'),
     el('span', { class: 'td' }, c.shortDate(t.date)),

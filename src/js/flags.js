@@ -95,9 +95,11 @@ FLAG.CNH = FLAG.CNY;
 const MARKET = { US: 'USD', GB: 'GBP', JP: 'JPY', AU: 'AUD', HK: 'HKD', EU: 'EUR', CN: 'CNY', CA: 'CAD', CH: 'CHF' };
 
 /* ---------- metals, indices, energy, coins ---------- */
-/* Three bars stacked two-and-one on the metal's own colour. */
+/* Three bars stacked two-and-one on the metal's own colour, in the middle
+   of the mark the way TradingView's gold sits (the stack is 11.2 tall, so it
+   is lifted to run from 9.4 to 20.6 around the centre at 15). */
 const bars = (bg, ink, o = .9) => `<rect width="30" height="30" fill="${bg}"/>
-  <g fill="${ink}" fill-opacity="${o}" stroke="${ink}" stroke-opacity="${o}" stroke-width=".5" stroke-linejoin="round">
+  <g transform="translate(0 -2.3)" fill="${ink}" fill-opacity="${o}" stroke="${ink}" stroke-opacity="${o}" stroke-width=".5" stroke-linejoin="round">
   <polygon points="5.2,22.9 14.6,22.9 12.8,17.9 7,17.9"/>
   <polygon points="15.4,22.9 24.8,22.9 23,17.9 17.2,17.9"/>
   <polygon points="10.3,16.7 19.7,16.7 17.9,11.7 12.1,11.7"/></g>`;

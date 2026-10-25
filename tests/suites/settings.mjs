@@ -62,48 +62,46 @@ ok('the sheet is one quiet line', (await txt()).match(/Trades as a spreadsheet/g
 ok('export and import are the vault\'s', (await txt()).match(/^Export$|^Import$/gm)?.length, 2);
 await go();
 ok('accounts have a page of their own', /Accounts/.test(await txt()), true);
-ok('both accounts are listed', await page.evaluate(() =>
-  [...document.querySelectorAll('.main input')].filter(i => ['Main funded','Personal'].includes(i.value)).length), 2);
+ok('both accounts are listed, each as a card', await page.evaluate(() =>
+  [...document.querySelectorAll('.ab-card .ab-name')].filter(n => ['Main funded','Personal'].includes(n.textContent)).length), 2);
 await page.screenshot({ path: OUT + '/shot-settings.png' });
 
+/* everything about one account is in its edit sheet, saved with Save */
+const edit = async (id, fill) => {
+  await go();
+  await page.evaluate(x => document.querySelector(`.ab-card[data-account="${x}"] .ab-edit`).click(), id);
+  await page.waitForTimeout(450);
+  await page.evaluate(f => {
+    for (const [sel, v] of Object.entries(f)) {
+      const i = sel.startsWith('label:')
+        ? [...document.querySelectorAll('.sheet.is-ab label')].find(l => new RegExp(sel.slice(6), 'i').test(l.textContent)).querySelector('input')
+        : document.querySelector('.sheet.is-ab ' + sel);
+      i.value = v; i.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    document.querySelector('.sheet.is-ab .ab-go').click();
+  }, fill);
+  await page.waitForTimeout(500);
+  const left = await page.evaluate(() => document.querySelector('.sheet.is-ab .missing-note')?.textContent || '');
+  if (left) { await page.keyboard.press('Escape'); await page.waitForTimeout(350); }
+  return left;
+};
+
 console.log('  -- renaming --');
-await page.evaluate(() => {
-  const i = [...document.querySelectorAll('.main input')].find(x => x.value === 'Main funded');
-  i.value = 'Prop 100k'; i.dispatchEvent(new Event('change', { bubbles: true }));
-});
-await page.waitForTimeout(500);
+await edit('acc_1', { '.ab-namein': 'Prop 100k' });
 ok('the rename is written', (await acctOnDisk('acc_1')).name, 'Prop 100k');
 ok('and the top bar follows', await page.evaluate(() => document.querySelector('.acct-name')?.textContent), 'Prop 100k');
 ok('trades are untouched by a rename', await page.evaluate(() =>
   JSON.parse(new Map(JSON.parse(localStorage.getItem('fakefs'))).get('data/trades.json')).trades.length), 1);
-
-await go();
-await page.evaluate(() => {
-  const i = [...document.querySelectorAll('.main input')].find(x => x.value === 'Prop 100k');
-  i.value = '   '; i.dispatchEvent(new Event('change', { bubbles: true }));
-});
-await page.waitForTimeout(400);
-ok('a blank name is refused', (await acctOnDisk('acc_1')).name, 'Prop 100k');
+ok('a blank name is refused', /a name/.test(await edit('acc_1', { '.ab-namein': '   ' })) && (await acctOnDisk('acc_1')).name === 'Prop 100k', true);
 
 console.log('  -- the number fields take money the same way --');
-const setField = async (label, value) => {
-  await go();
-  await page.evaluate(([lbl, v]) => {
-    const wrap = [...document.querySelectorAll('.main label')].find(l => new RegExp(lbl, 'i').test(l.textContent));
-    const i = wrap.querySelector('input');
-    i.value = v; i.dispatchEvent(new Event('change', { bubbles: true }));
-  }, [label, value]);
-  await page.waitForTimeout(450);
-};
-await setField('Starting balance', '$250 000');
+await edit('acc_1', { '.ab-sizein': '$250 000' });
 ok('"$250 000" is accepted', (await acctOnDisk('acc_1')).startingBalance, 250000);
-await setField('Starting balance', 'banana');
-ok('rubbish is refused, the old value stands', (await acctOnDisk('acc_1')).startingBalance, 250000);
-await setField('Starting balance', '0');
-ok('zero is refused — it would break every R', (await acctOnDisk('acc_1')).startingBalance, 250000);
-await setField('Risk', '0.5');
+ok('rubbish is refused, the old value stands', /size|balance/.test(await edit('acc_1', { '.ab-sizein': 'banana' })) && (await acctOnDisk('acc_1')).startingBalance === 250000, true);
+ok('zero is refused — it would break every R', /size|balance/.test(await edit('acc_1', { '.ab-sizein': '0' })) && (await acctOnDisk('acc_1')).startingBalance === 250000, true);
+await edit('acc_1', { 'label:Risk': '0.5' });
 ok('risk % saves', (await acctOnDisk('acc_1')).defaultRiskPercent, 0.5);
-await setField('Weekly target', '3');
+await edit('acc_1', { 'label:Weekly target': '3' });
 ok('weekly target saves', (await acctOnDisk('acc_1')).weeklyTargetPercent, 3);
 ok('and the calendar picks it up', await (async () => {
   await page.evaluate(() => { location.hash = '#/calendar'; }); await page.waitForTimeout(400);
@@ -112,11 +110,9 @@ ok('and the calendar picks it up', await (async () => {
 
 console.log('  -- archiving --');
 await go();
-await page.evaluate(() => {
-  const rows = [...document.querySelectorAll('.main input')].find(x => x.value === 'Personal').closest('div').parentElement;
-  /* The archive button is a word now, beside Delete, rather than a bin. */
-  [...rows.querySelectorAll('.acct-actions button')].find(b => b.textContent.trim() === 'Archive').click();
-});
+await page.evaluate(() => document.querySelector('.ab-card[data-account="acc_2"] .ab-edit').click());
+await page.waitForTimeout(450);
+await page.evaluate(() => [...document.querySelectorAll('.sheet.is-ab .acct-actions button')].find(b => b.textContent.trim() === 'Archive').click());
 await page.waitForTimeout(450);
 ok('archived flag is written', (await acctOnDisk('acc_2')).archived, true);
 ok('and it leaves the switcher', await (async () => {

@@ -48,35 +48,43 @@ const disk = () => p.evaluate(() => ({
   trades: JSON.parse(window.__files.get('data/trades.json')).trades,
   files: [...window.__files.keys()],
 }));
-/* The two buttons in the row a name is in. In Settings the name is in an
-   input, so its value is read as well as the text. The nearest ancestor that
-   holds the name, without holding a second pair of buttons, is the row. */
-const FIND = `(n) => {
-  const says = el => (el.innerText + ' ' + [...el.querySelectorAll('input')].map(i => i.value).join(' ')).includes(n);
-  for (const box of document.querySelectorAll('.acct-actions')) {
-    for (let a = box.parentElement; a; a = a.parentElement) {
-      if (a.querySelectorAll('.acct-actions').length > 1) break;      // left the row
-      if (says(a)) return box;
-    }
+/* An account's Archive and Delete: on its card once it is put away, in its
+   edit sheet while it is in use. These open whichever is needed. */
+const closeSheets = async () => { for (let i = 0; i < 4 && await p.evaluate(() => !!document.querySelector('.sheet:not(.is-out)')); i++) { await p.keyboard.press('Escape'); await settle(320); } };
+const showAway = async () => {
+  if (await p.evaluate(() => !!document.querySelector('.ab-shelf.is-folded[data-shelf="archived"]'))) {
+    await p.evaluate(() => document.querySelector('.ab-shelf[data-shelf="archived"] .ab-shelf-t').click()); await settle(250);
   }
-  return null;
-}`;
-const buttons = name => p.evaluate(({ n, F }) => {
-  const box = eval(F)(n);
-  return box ? [...box.querySelectorAll('button')].map(b => b.textContent.trim()) : null;
-}, { n: name, F: FIND });
-const click = (name, label) => p.evaluate(({ n, l, F }) => {
-  const box = eval(F)(n);
-  [...box.querySelectorAll('button')].find(b => b.textContent.trim().startsWith(l)).click();
-}, { n: name, l: label, F: FIND });
+};
+const cardOf = `(n) => [...document.querySelectorAll('.ab-card')].find(c => c.querySelector('.ab-name')?.textContent === n)`;
+const reach = async name => {
+  if (await p.evaluate(n => document.querySelector('.sheet.is-ab:not(.is-out) .sheet-title h2')?.textContent === 'Edit ' + n, name)) return 'sheet';
+  await closeSheets(); await showAway();
+  const st = await p.evaluate(({ n, F }) => { const c = eval(F)(n); return !c ? null : c.classList.contains('is-away') ? 'card' : 'on'; }, { n: name, F: cardOf });
+  if (st !== 'on') return st;
+  await p.evaluate(({ n, F }) => eval(F)(n).querySelector('.ab-edit').click(), { n: name, F: cardOf }); await settle(450);
+  return 'sheet';
+};
+const BOX = `({ w, n, F }) => w === 'card' ? eval(F)(n)?.querySelector('.acct-actions') : document.querySelector('.sheet.is-ab:not(.is-out) .ab-away .acct-actions')`;
+const buttons = async name => {
+  const w = await reach(name);
+  if (!w) return null;
+  return p.evaluate(({ w, n, F, B }) => { const box = eval(B)({ w, n, F }); return box ? [...box.querySelectorAll('button')].map(b => b.textContent.trim()) : null; },
+    { w, n: name, F: cardOf, B: BOX });
+};
+const click = async (name, label) => {
+  const w = await reach(name);
+  await p.evaluate(({ w, n, l, F, B }) => { const box = eval(B)({ w, n, F }); [...box.querySelectorAll('button')].find(b => b.textContent.trim().startsWith(l)).click(); },
+    { w, n: name, l: label, F: cardOf, B: BOX });
+};
 
 await p.evaluate(() => { location.hash = '#/settings/accounts'; }); await settle(600);
 
 /* ---------- the two buttons ---------- */
-t('an account in Settings offers Archive and Delete', JSON.stringify(await buttons('Funded 100k')) === '["Archive","Delete"]', JSON.stringify(await buttons('Funded 100k')));
-t('an archived one offers Restore and Delete', JSON.stringify(await buttons('Old one')) === '["Restore","Delete"]', JSON.stringify(await buttons('Old one')));
+t('an account in use offers Archive and Delete (in its edit sheet)', JSON.stringify(await buttons('Funded 100k')) === '["Archive","Delete"]', JSON.stringify(await buttons('Funded 100k')));
+t('an archived one offers Restore and Delete (on its card)', JSON.stringify(await buttons('Old one')) === '["Restore","Delete"]', JSON.stringify(await buttons('Old one')));
 t('the bin icon that only ever archived is gone', await p.evaluate(() =>
-  ![...document.querySelectorAll('.main button')].some(b => /Archive — it stays/.test(b.title))));
+  ![...document.querySelectorAll('.main button, .sheet button')].some(b => /Archive — it stays/.test(b.title))));
 
 /* ---------- archive keeps everything ---------- */
 await click('Challenge 50k', 'Archive'); await settle();

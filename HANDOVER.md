@@ -1610,3 +1610,152 @@ Theme (`accounts.picInk`, default 'auto'; saved looks carry it).
   accent). Frosted and Solid panels never turn.
 
 Tests: picink.mjs (23) is new.
+
+## Accounts as cards — evals, funded, live (2.37.0 — his "2.18.0", 25 Oct)
+
+He sent LiquidJournal's accounts page as the model: prop-firm accounts as
+cards with the firm's logo, a FUNDED badge, Account / Gross P&L / Payouts,
+the net after payouts, Log payout, Update balance, balance and peak, and a
+line of the balance. Settings → Accounts (`#/settings/accounts`, and
+`#/accounts` with the New account sheet open) is now `views/acctboard.js`;
+the old list in settings.js is gone (the first-run form in accounts.js is
+unchanged).
+
+- **The account carries** `kind` ('eval' | 'funded' | 'live'), `firm` (an id
+  from `acctfirms.js`, or 'other' with `firmName`), `payouts`
+  [{ id, amount, date, at, note }], `adjustments` [{ id, amount, date, at }],
+  and, once put away by the page, `status` ('passed' | 'blown') and
+  `closedAt`. Accounts from before have no kind: `kindOf` reads it from the
+  name (Combine/Challenge/Eval… → eval, Funded/PA/Express → funded, else live).
+- **The money** is `calc.accountMoney(a, closedLiveTrades)` → `{ start,
+  gross, paid, after, balance, peak, series }` (forward tests are not money;
+  corrections count as P&L; payouts and withdrawals come out). `store.moneyOf`
+  / `balanceOf`. **The top bar and the account switcher show the balance
+  after payouts now**, and it is the account's real money in every scope (a
+  forward-test view used to show the starting size; scope.mjs updated).
+  Returns (%) are still measured on the starting size and follow the scope.
+- **Store:** `addPayout`, `removePayout`, `setBalance` (a dated correction of
+  the difference), `removeAdjustment`, `passEval` (puts the eval away as
+  passed and starts the funded account it earned — same firm, size, risk —
+  and makes it active), `blowAccount`, `liveClosedFor`.
+- **Firms** (`acctfirms.js`): futures props Apex, Topstep, Lucid, Tradeify,
+  MyFundedFutures; forex props FTMO, The5ers, FundingPips, Alpha Capital;
+  brokers OANDA, Pepperstone, Fusion Markets; plus Other. Each has a short
+  name for the chip, its sizes, a tint for the card's glow and a monogram.
+  **The logos are not drawn or fetched by us** — each firm has a logo slot
+  ("Add logo" in the account sheet): his own image of the logo goes through
+  `logo.js squareLogo` (background read from the corners and kept; the mark
+  found, centred at 72%, or edge to edge for an icon that fills its box; a
+  dark mark on no background gets white, a light one near-black; a photo is
+  cut square) to a 256-px PNG in `screenshots/logo-<firm>-*.png`,
+  `accounts.firmLogos[firmKey]`, in `shotNames`. Every account at the firm
+  wears it; until then its initials on its tint.
+- **The page:** a summary (across accounts, paid out, counts), "Add another
+  account", shelves EVALS / FUNDED / LIVE / PUT AWAY (folds remembered in
+  localStorage; Put away folded by default). Cards (`.card.ab-card`, so the
+  glass rules and Clear's turn apply): logo, firm, badge, "On" for the active
+  one, size, chip with the name; stats; the big figure; Log payout (funded),
+  Withdraw (live), Passed (eval, confirm); Balance · Peak; Update balance;
+  the sparkline. Pressing a card switches to it; the pencil edits. "Select
+  for payout/withdrawal" ticks cards and logs the same amount on each. A
+  payout just logged counts the card down and floats the amount off.
+- **The sheet** (new/edit): Type, the firm tiles for that type, the firm's
+  logo row, the firm's sizes as chips (or any amount), the name (made up
+  until you type one: "Apex 50K", "Apex 50K #2"), currency, risk, opened /
+  weekly target, colour; editing adds the payouts and corrections (each can
+  be taken back) and Blown / Archive / Delete.
+
+Tests: acctboard.mjs (36) is new; acct, acctdel and settings were rewritten
+for the cards and the sheet.
+
+## His clips with sound built in; the whole clip by default (2.38.0 — his "2.19.0", 25 Oct)
+
+- The four clips he sent for sharing (cut clean earlier: Luffy, Levi, Asta,
+  Wall Street — TikTok marks, black openings and the TikTok end cards off)
+  now come with the app: `src/media/clips/*.mp4` + a lively still each
+  (`*.jpg`, the most contrasty of nine frames), listed in
+  `share/clips.js` (`BUILTIN_CLIPS`, ids `builtin:<name>`). The share
+  sheet's Background tab shows them under **With sound**, between his own
+  and the drawn ones. `store.builtinClips` merges how he left each one
+  (trim, position, dim, sound) from `share.prefs.builtin[id]`;
+  `updateShareClip` writes there for a built-in; `shareClipBlob` fetches the
+  file once. They cannot be removed. The preview strips the list (the
+  single-file build carries the mp4s only with `--with-media`).
+- **The whole clip by default.** A new clip's trim is its full length (it
+  was the first ten seconds). Clips left at that old ten-second default are
+  healed to their full length on open; Adjust shows "the whole clip" or a
+  **Use the whole clip** button. The card is as long as the trim, so the
+  video runs to the end.
+
+Tests: share.mjs gained the built-in clips (62).
+
+**Logos he made, built in (same version).** He sent images of the firms'
+and brokers' logos he made himself: FTMO, The5ers, FundingPips, Alpha
+Capital, Topstep, Lucid, Tradeify, Apex, MyFundedFutures, OANDA,
+Pepperstone, Fusion Markets, and Tradovate (added as a broker for it). Each
+went through `logo.js squareLogo` (Pepperstone's was cut inside its border
+first) to `src/media/firms/<id>.png` and is the firm's `logo` in
+acctfirms.js — the tile uses his own in-app image if he has added one, else
+this, else the initials (`logoTile`). The account sheet's logo row says
+"Change" for these and "Use the first one" once he has put his own in.
+`squareLogo` now also treats an app icon saved on white, filling most of the
+picture, as an icon (edge to edge).
+
+**Add account, one question at a time (same version).** He pointed at
+LiquidJournal's Add account: it first asks *Prop firm* or *Live*, then for a
+prop firm *Futures or CFD?*, then the firm; for live, the broker. New
+account (and "Add another account", and `#/accounts`) now opens that,
+in `views/acctnew.js` (`newAccount(store, nav, { path })`):
+
+- **Start** — two cards, Prop firm (an office block) and Live (the
+  columns), each with its firms' logos in a row.
+- **Prop firm:** *Futures or CFD?* (big word, what it trades, "5 firms" /
+  "4 firms" — `MARKETS` and `firmsIn()` in acctfirms.js; the forex firms
+  are the CFD ones) → *Choose a firm* (big logo tiles on the firm's tint,
+  the sizes it sells, a search, "Another firm") → *Pick a plan* (Stage:
+  Evaluation / Funded, then the sizes as cards, or "Another size") → *Name
+  this account* (a suggested name and two others to tap, **Current balance
+  (optional)** for an account he is already trading — kept as a dated
+  correction through `store.setBalance` — and how the card will look; More
+  holds currency, risk, opened, colour) → *Confirm* (every field, and the
+  logo row) → Create account.
+- **Live:** *Choose your broker* (logo, name, what it trades — `trades` on
+  each broker; Other to type one) → *Account details* (name, starting
+  balance, journaling from) → *Confirm*.
+
+Picking a card moves on by itself; steps with typing have Continue, which
+says what is missing. A rail on the left shows the steps, what was picked
+under each, and goes back to a done one; on a phone the rail hides and the
+head says "2 of 4". Editing an account is still the one sheet
+(`accountSheet` in acctboard.js). `logoTile` and the logo row moved to
+`views/acctlogo.js` so both can use them. Nothing about LiquidJournal's
+rule sets (targets, drawdowns) is copied — Laminar does not keep firm rules.
+
+Tests: acctboard.mjs walks both paths (50); acct.mjs checks the first
+question.
+
+**The firm's logo in the top bar (same version).** He asked for the logo
+of the prop firm or broker in place of the colour dot top right. `acctMark`
+(views/acctlogo.js) is the logo tile for an account at a firm — the one he
+picked, else one read from its name (`guessFirm` in acctfirms.js: whole
+words like "Apex", "Topstep", "OANDA", or a long name run together like
+"fundingpips10k"; "Alpha" alone is not enough) — and the old colour dot
+for an account at none. It is in the top bar's account button, every row
+of its menu (dots are spaced to line up with the logos), and the "Saving
+to" / "Adding to" pill on New trade and Import. Editing an older account
+now starts with the firm its name says picked.
+
+Tests: acctboard.mjs (53) — the guesses, the top bar and its menu.
+
+**Three fixes from his screenshots (same version).**
+- Plan (Outlook): the instrument's chart now sits in a soft-cornered panel
+  like the notes beside it (`--r-inset`, the notes' fill when the glass is
+  off, the glass card fill when it is on), with room round the name — it
+  was flush to the block with square corners and the name on the edge.
+- Gold and silver: the stack of bars was 2.3 low on the disc; `bars()` in
+  flags.js lifts it so it is centred like TradingView's gold.
+- No win/loss bar before the instrument's logo — gone from Recent trades
+  on the Dashboard, the trades table, and the Review list and card head
+  (the result still says it, coloured, at the end of the row).
+
+Tests: marks (27), dash (33), outlook (28).

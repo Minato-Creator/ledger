@@ -269,6 +269,32 @@ await p.click(`.sh-tile[data-bg="${clip.id}"]`); await settle(800);
 await p.click('.sh-sound'); await settle(200);
 await close();
 
+/* ===================== the clips that come with Laminar ===================== */
+console.log('with sound');
+await go('#/trade/g1', 800);
+await p.click('.td-share'); await ready(); await settle(600);
+await p.click('.sh-tabs [data-tab="background"]'); await settle(300);
+const built = await p.evaluate(() => [...document.querySelectorAll('.sh-grid[data-grid="builtin"] .sh-tile')].map(x => x.dataset.bg));
+t('four clips with sound come with Laminar', JSON.stringify(built) === '["builtin:luffy","builtin:levi","builtin:asta","builtin:wall-street"]', JSON.stringify(built));
+await p.click('.sh-tile[data-bg="builtin:luffy"]');
+await p.waitForFunction(() => document.querySelector('.sh').__share.model().bg.el?.readyState >= 2, null, { timeout: 15000 }).catch(() => {});
+await settle(600);
+let S3 = await sh();
+t('one plays behind the card, the whole of it', S3.bg === 'builtin:luffy' && Math.abs(S3.length - 21.3) < 0.2, JSON.stringify({ bg: S3.bg, length: S3.length }));
+await p.click('.sh-sound'); await settle(500);
+S3 = await p.evaluate(() => document.querySelector('.sh').__share.sound);
+t('…with its sound', S3.clips.some(c => c.id === 'builtin:luffy' && c.playing && !c.muted && c.gain > 0), JSON.stringify(S3));
+await p.click('.sh-sound'); await settle(200);
+await p.click('.sh-tabs [data-tab="adjust"]'); await settle(400);
+t('its trim is the whole clip to begin with', /the whole clip/.test(await p.locator('.sh-pane').innerText()) && /0:00\.0 to 0:21\.3/.test(await p.locator('.sh-trimk').innerText()), await p.locator('.sh-trimk').innerText());
+await p.evaluate(() => { const r = [...document.querySelectorAll('.sh-pane .sh-range')].pop(); r.value = '0.4'; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); });
+await settle(400);
+t('how it is left is kept for it', (await accounts()).share.prefs.builtin?.['builtin:luffy']?.sound === 0.4, JSON.stringify((await accounts()).share.prefs.builtin));
+t('…and it cannot be removed', await p.locator('.sh-remove').count() === 0);
+await p.click('.sh-tabs [data-tab="background"]'); await settle(300);
+await p.click(`.sh-tile[data-bg="${clip.id}"]`); await settle(800);     // back to his own for what follows
+await close();
+
 /* ===================== removing a clip ===================== */
 console.log('removing');
 await p.evaluate(k => localStorage.setItem('quire:setting:oandaKey', k), KEY);

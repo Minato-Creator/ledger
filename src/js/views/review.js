@@ -363,7 +363,6 @@ function tradesTab(store, acct, trades, nav, paintProg) {
       el('div', { class: 'rv-list' }, ...trades.map(t => {
         const r = rOf(acct, t);
         return el('button', { class: 'rv-item' + (t.id === picked ? ' is-on' : ''), onClick: () => { picked = t.id; paintRail(); paintMain(); } },   // the page stays where it is scrolled (Minato)
-          el('span', { class: 'dot ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }),
           pairMark(t.pair, 22),
           el('span', { class: 'p' }, t.pair || '—', el('small', {}, `${dayOf(t.date)} ${Number(t.date.slice(8))} · ${t.timeOpen || '—'}`)),
           el('span', { class: 'res ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }, rr(r, 2)),
@@ -543,7 +542,6 @@ function reviewCard(store, acct, t, pb, on) {
 
   return el('section', { class: 'card rv-card' },
     el('div', { class: 'rv-top' },
-      el('span', { class: 'dot ' + (r > 0 ? 'is-pos' : r < 0 ? 'is-neg' : '') }),
       pairMark(t.pair, 32),
       el('div', { class: 'p' }, el('b', {}, t.pair || '—'),
         el('span', {}, [`${dayOf(t.date)} ${c.shortDate(t.date)}`, t.timeOpen, setup, t.side === 'sell' ? 'short' : 'long', session].filter(Boolean).join(' · '))),

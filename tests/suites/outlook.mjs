@@ -99,6 +99,9 @@ t('and totals the R', /\+1\.93R|\+1\.9/.test(strip), strip);
 t('the block has the instrument’s chart, not a picture to add', await p.evaluate(()=>
   !!document.querySelector('.outlook-block .ob-chart .tc') && !document.querySelector('.outlook-block input[type=file]')
   && !document.querySelector('.outlook-shot, .ob-shot-add')));
+t('the chart sits in a soft-cornered panel, its name off the edge', await p.evaluate(()=>{ const tc=document.querySelector('.ob-chart > .tc'), cs=getComputedStyle(tc);
+  const name=tc.querySelector('.tc-head h3').getBoundingClientRect(), box=tc.getBoundingClientRect();
+  return parseFloat(cs.borderTopLeftRadius) >= 10 && name.left - box.left >= 14 && name.top - box.top >= 12; }));
 t('without an OANDA key it says where to add one', await p.evaluate(()=>/Add your OANDA key/.test(document.querySelector('.ob-chart .tc-msg')?.innerText || '')));
 t('writing and chart are half and half', await p.evaluate(()=>{
   const a=document.querySelector('.ob-text').getBoundingClientRect(), c=document.querySelector('.ob-chart').getBoundingClientRect();

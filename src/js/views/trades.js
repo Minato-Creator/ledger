@@ -160,7 +160,6 @@ function fullRow(t, acct, store, cols, nav) {
   const fwd = c.isForward(t);
   const r = c.rMultiple(acct, t);
   const setup = store.playbook.setups.find(s => s.id === t.setupId);
-  const mark = o === 'win' ? 'var(--green)' : o === 'loss' ? 'var(--orange)' : 'var(--grey-4)';
   const long = t.side === 'buy';
   const allTags = store.playbook.tagGroups.flatMap(g => g.tags);
   const tags = (t.tagIds || []).map(id => allTags.find(x => x.id === id)).filter(Boolean);
@@ -168,7 +167,7 @@ function fullRow(t, acct, store, cols, nav) {
   return el('div', { class: 'tbl-row', style: { gridTemplateColumns: cols, cursor: 'pointer' },
                      onClick: () => nav.go('#/trade/' + t.id) },
     el('span', { style: { display: 'flex', alignItems: 'center', gap: '9px' } },
-      el('span', { class: 'bar-mark', style: { background: mark } }), el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair),
+      el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair),
       canShare(t) ? el('button', { class: 'row-share', title: 'Share this trade', 'aria-label': 'Share this trade',
         onClick: e => { e.stopPropagation(); openShare(store, nav, t.id); } }, icon('share', 13, 'currentColor', 1.9)) : null),
     el('span', { class: 'td', style: { color: long ? 'var(--green)' : 'var(--orange)' } }, long ? '▲ Long' : '▼ Short'),

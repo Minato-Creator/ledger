@@ -15,6 +15,7 @@
 import { el, icon, brandWordmark, toast } from './ui.js';
 import * as c from './calc.js';
 import { sheet, popover, closeSheets } from './sheet.js';
+import { acctMark } from './views/acctlogo.js';
 
 export const SECTIONS = [
   { id: 'dashboard', label: 'Dashboard', ic: 'dashboard', href: '#/', segs: [''] },
@@ -86,11 +87,12 @@ export function topbar(store, nav, { hash, onAccount, onYou }) {
   glide(navEl, 'top', tabs.find(t => t.classList.contains('is-on')), glider);
 
   const stats = acct ? c.summarise(acct, store.tradesFor(acct.id)) : null;
-  const acctBtn = acct ? el('button', { class: 'tb-acct', title: 'Switch account',
+  const mark = acct ? acctMark(store, acct, 20) : null;
+  const acctBtn = acct ? el('button', { class: 'tb-acct' + (mark.classList.contains('ab-logo') ? ' has-logo' : ''), title: 'Switch account',
       onClick: e => onAccount(e.currentTarget) },
-    el('span', { class: 'acct-dot', style: { background: acct.color } }),
+    mark,
     el('span', { class: 'acct-name tb-acct-n' }, acct.name),
-    el('span', { class: 'acct-meta tb-acct-b' }, c.money(acct.startingBalance + stats.net, { sign: false, currency: acct.currency, decimals: 0 })
+    el('span', { class: 'acct-meta tb-acct-b' }, c.money(store.balanceOf(acct), { sign: false, currency: acct.currency, decimals: 0 })
       + ' · ' + (store.displayUnit === '$' ? c.pctSigned(c.asPercent(acct, stats.net)) : c.fig(store.displayUnit, acct, stats.net, stats.netR, { decimals: 0 }))),
     icon('chevdown', 12, 'currentColor', 2)) : null;
 
@@ -243,9 +245,9 @@ export function accountMenu(store, nav, anchor) {
       const isOn = acct && a.id === acct.id;
       return el('button', { class: 'pop-item' + (isOn ? ' is-on' : ''), role: 'menuitem',
           onClick: async () => { close(); if (!isOn) { await store.setActiveAccount(a.id); nav.refresh(); toast('Switched to ' + a.name); } } },
-        el('span', { class: 'acct-dot', style: { background: a.color } }),
+        acctMark(store, a, 18),
         el('span', { class: 'pop-n' }, a.name),
-        el('span', { class: 'pop-b' }, c.money(a.startingBalance + s.net, { sign: false, currency: a.currency, decimals: 0 })),
+        el('span', { class: 'pop-b' }, c.money(store.balanceOf(a), { sign: false, currency: a.currency, decimals: 0 })),
         isOn ? icon('check', 13, 'currentColor', 2.4) : el('span', { style: { width: '13px' } }));
     }),
     el('div', { class: 'pop-sep' }),

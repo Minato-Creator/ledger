@@ -82,8 +82,8 @@ t('the nav count agrees', v.nav === '2', v.nav);
 await pick('Forward test'); await p.waitForTimeout(700);
 v = await state();
 t('forward test counts the tests and nothing else', v.n === 2 && v.pairs === 'MNQ,XAUUSD', JSON.stringify(v));
-t('and the account balance does not move, because no money was at stake',
-  /100,000/.test(v.meta), v.meta);
+t('the balance is still the money in the account, and the tests add nothing to it',
+  /100,500 · 0\.00%/.test(v.meta), v.meta);
 t('the nav count follows', v.nav === '2', v.nav);
 t('the switch shows where you are', (await sw()).on === 'Forward test');
 

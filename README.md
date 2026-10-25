@@ -50,6 +50,7 @@ using Export & import for a single CSV.
     js/share/          the share card (card.js), its MP4 (encode.js, mp4.js) and GIF (gif.js)
     js/clip.js         small things done to a video file (length, best still, seeking, a tidy name)
     media/backgrounds/ the looping background videos and their stills
+    media/clips/       the clips with sound the share sheet comes with (share/clips.js)
     js/shell.js        the top bar, the section tabs, the phone's bottom bar, your picture (profileFill)
     js/sheet.js        panels that rise over the app
     js/views/*.js      one file per screen (appearance.js is the look sheet)

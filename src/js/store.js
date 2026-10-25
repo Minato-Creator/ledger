@@ -6,9 +6,10 @@
    This file only knows about accounts, trades, playbook and replay.
    ============================================================ */
 
-import { sessionFor, UNITS, todayISO, readableOn, lift, sink, inkOn } from './calc.js';
+import { sessionFor, UNITS, todayISO, readableOn, lift, sink, inkOn, accountMoney } from './calc.js';
 import { findBackground, scrimFor } from './backgrounds.js';
 import { tidyName } from './clip.js';
+import { BUILTIN_CLIPS, isBuiltinClip } from './share/clips.js';
 import { shotName, urlFor, forgetUrl } from './shots.js';
 import { fs, isTauri } from './fs.js';
 import { zip, unzip, bytesOfText, textOfBytes } from './vault.js';
@@ -238,6 +239,8 @@ export function applySurface(background, glass, theme, dim = null, clarity = CLA
   syncBgPlay();
 }
 
+/** The time now, HH:MM:SS — so two things done on one day keep their order. */
+const nowHMS = () => { const d = new Date(); return [d.getHours(), d.getMinutes(), d.getSeconds()].map(x => String(x).padStart(2, '0')).join(':'); };
 export const clampClarity = v => (v == null || v === '' || !Number.isFinite(Number(v)) ? CLARITY : Math.max(0, Math.min(1, Number(v))));
 
 /* In the desktop app a clip of ours is read whole into memory and played
@@ -258,6 +261,8 @@ export function playable(src) {
 const yourUrls = new Map();
 /* your picture and banner, read from the vault once: file -> object url */
 const profileUrls = new Map();
+/* the share sheet's own clips, read once: src -> Promise<Blob|null> */
+const builtinBlobs = new Map();
 export function rememberYourBackground(id, url, poster) { yourUrls.set(id, { url, poster }); }
 function yourBackground(value) {
   const id = String(value || '').startsWith('yours:') ? String(value).slice(6) : null;
@@ -468,7 +473,7 @@ class Store {
     const fromLook = this.data.accounts?.ownBackground ? [this.data.accounts.ownBackground] : [];
     const fromShare = (this.data.accounts?.share?.clips || []).map(c => c.file);
     const fromBg = (this.data.accounts?.bgVideos || []).map(v => v.file);
-    const fromProfile = [this.data.accounts?.avatar?.file, this.data.accounts?.banner?.file];
+    const fromProfile = [this.data.accounts?.avatar?.file, this.data.accounts?.banner?.file, ...Object.values(this.data.accounts?.firmLogos || {})];
     return [...fromTrades, ...fromOutlooks, ...fromLook, ...fromShare, ...fromBg, ...fromProfile].filter(Boolean);
   }
 
@@ -570,6 +575,11 @@ class Store {
     if (!d.accounts || typeof d.accounts !== 'object') { d.accounts = defaultAccounts(); note(); }
     if (!Array.isArray(d.accounts.accounts)) { d.accounts.accounts = []; note(); }
     d.accounts.accounts = d.accounts.accounts.filter(a => a && a.id);
+    /* a clip left at the old ten-second default trim plays whole now */
+    for (const cl of Array.isArray(d.accounts.share?.clips) ? d.accounts.share.clips : []) {
+      const dur = Number(cl?.dur) || 0;
+      if (cl && dur > 10.05 && !(Number(cl.start) > 0) && Math.abs((Number(cl.len) || 0) - 10) < 0.01) { cl.len = dur; note(); }
+    }
     /* names your own videos were given from a wallpaper site's file name, tidied once */
     for (const list of [d.accounts.bgVideos, d.accounts.share?.clips]) {
       for (const v of Array.isArray(list) ? list : []) {
@@ -1253,14 +1263,28 @@ class Store {
     const clip = {
       id, file, name: String(meta.name || 'Clip').slice(0, 40), kind: meta.kind === 'image' ? 'image' : 'video',
       type: meta.type || (meta.kind === 'image' ? 'image/jpeg' : 'video/mp4'), dur, thumb: meta.thumb || '',
-      start: 0, len: dur ? Math.min(dur, 10) : 6, fx: 0.5, fy: 0.5, dim: 0.25, sound: 0.7, addedAt: new Date().toISOString(),
+      start: 0, len: dur || 6, fx: 0.5, fy: 0.5, dim: 0.25, sound: 0.7, addedAt: new Date().toISOString(),   // the whole clip
     };
     const cur = this.share;
     this.data.accounts.share = { ...cur, clips: [...cur.clips, clip], prefs: { ...cur.prefs, bg: id } };
     await this.save('accounts');
     return clip;
   }
+  /** The clips with sound that come with Laminar (share/clips.js), as he has left each one. */
+  get builtinClips() {
+    const set = this.share.prefs.builtin || {};
+    return BUILTIN_CLIPS.map(b => ({ ...b, kind: 'video', type: 'video/mp4', builtin: true,
+      start: 0, len: b.dur, fx: 0.5, fy: 0.5, dim: 0.25, sound: 0.7, ...(set[b.id] || {}), id: b.id, src: b.src }));
+  }
   async updateShareClip(id, patch) {
+    if (isBuiltinClip(id)) {
+      const cur = this.share, set = { ...(cur.prefs.builtin || {}) };
+      const { id: _, file: __, src: ___, ...keep } = patch;
+      set[id] = { ...(set[id] || {}), ...keep };
+      this.data.accounts.share = { ...cur, prefs: { ...cur.prefs, builtin: set } };
+      await this.save('accounts');
+      return;
+    }
     const cur = this.share;
     this.data.accounts.share = { ...cur, clips: cur.clips.map(c => (c.id === id ? { ...c, ...patch, id, file: c.file } : c)) };
     await this.save('accounts');
@@ -1275,6 +1299,12 @@ class Store {
   }
   /** The clip's bytes, typed as what they are (the vault hands back pictures as JPEG). */
   async shareClipBlob(clip) {
+    if (clip?.builtin) {
+      if (!builtinBlobs.has(clip.src)) builtinBlobs.set(clip.src, fetch(clip.src).then(r => (r.ok ? r.blob() : null)).catch(() => null));
+      const b = await builtinBlobs.get(clip.src);
+      if (!b) builtinBlobs.delete(clip.src);
+      return b ? new Blob([b], { type: 'video/mp4' }) : null;
+    }
     if (!clip?.file) return null;
     try {
       const b = await fs.readImage(clip.file);
@@ -1425,7 +1455,12 @@ class Store {
       openedAt: acc.openedAt || todayISO(),
       weeklyTargetPercent: Number(acc.weeklyTargetPercent) || 0,   // 0 = no target set
       archived: false,
+      /* what kind of account, and where (acctfirms.js) */
+      kind: ['eval', 'funded', 'live'].includes(acc.kind) ? acc.kind : undefined,
+      firm: acc.firm || undefined, firmName: acc.firm === 'other' ? String(acc.firmName || '').trim().slice(0, 40) : undefined,
+      payouts: [], adjustments: [],
     };
+    for (const k of ['kind', 'firm', 'firmName']) if (account[k] === undefined) delete account[k];
     this.data.accounts.accounts.push(account);
     this.data.accounts.activeAccountId = account.id;
     await this.save('accounts');
@@ -1437,6 +1472,120 @@ class Store {
     if (!a) return;
     Object.assign(a, patch);
     await this.save('accounts');
+  }
+
+  /* ============================================================
+     An account's money: its trades, what has been paid out of it, and any
+     corrections made to match the firm's or the broker's own figure. Live
+     trades only — a forward test is not money. (calc.accountMoney)
+     ============================================================ */
+  liveClosedFor(accountId) {
+    return this.trades.filter(t => t.accountId === accountId && t.status !== 'open' && t.mode !== 'forward');
+  }
+  moneyOf(a) { return accountMoney(a, a ? this.liveClosedFor(a.id) : []); }
+  /** What the account holds now: the start, plus the P&L, less what has been paid out. */
+  balanceOf(a) { return this.moneyOf(a).balance; }
+
+  async addPayout(id, { amount, date, note } = {}) {
+    const a = this.data.accounts.accounts.find(x => x.id === id);
+    const v = Math.abs(Number(amount));
+    if (!a || !(v > 0)) return null;
+    const p = { id: 'po_' + crypto.randomUUID().slice(0, 8), amount: Math.round(v * 100) / 100, date: date || todayISO(),
+                at: nowHMS(), note: String(note || '').trim().slice(0, 80) };
+    a.payouts = [...(Array.isArray(a.payouts) ? a.payouts : []), p];
+    await this.save('accounts');
+    return p;
+  }
+  async removePayout(id, payoutId) {
+    const a = this.data.accounts.accounts.find(x => x.id === id);
+    if (!a) return;
+    a.payouts = (a.payouts || []).filter(p => p.id !== payoutId);
+    await this.save('accounts');
+  }
+  /** Make the balance read what the firm or broker says it is, by a dated correction. Returns the difference. */
+  async setBalance(id, actual, date) {
+    const a = this.data.accounts.accounts.find(x => x.id === id);
+    const want = Number(actual);
+    if (!a || !isFinite(want)) return 0;
+    const diff = Math.round((want - this.balanceOf(a)) * 100) / 100;
+    if (Math.abs(diff) < 0.005) return 0;
+    a.adjustments = [...(Array.isArray(a.adjustments) ? a.adjustments : []),
+      { id: 'adj_' + crypto.randomUUID().slice(0, 8), amount: diff, date: date || todayISO(), at: nowHMS() }];
+    await this.save('accounts');
+    return diff;
+  }
+  async removeAdjustment(id, adjId) {
+    const a = this.data.accounts.accounts.find(x => x.id === id);
+    if (!a) return;
+    a.adjustments = (a.adjustments || []).filter(x => x.id !== adjId);
+    await this.save('accounts');
+  }
+  /* An evaluation passed: it is put away as passed, and the funded account
+     it earned starts fresh beside it (same firm, size, risk), and is the one
+     you are on. Returns the new account. */
+  async passEval(id) {
+    const a = this.data.accounts.accounts.find(x => x.id === id);
+    if (!a) return null;
+    const base = String(a.name).replace(/\s*\b(eval(uation)?|challenge|combine|phase ?\d|step ?\d)\b\s*/ig, ' ').replace(/\s+/g, ' ').trim() || a.name;
+    const taken = new Set(this.allAccounts.map(x => x.name.toLowerCase()));
+    let name = base;
+    for (let i = 2; taken.has(name.toLowerCase()) && i < 200; i++) name = `${base} #${i}`;
+    a.archived = true; a.status = 'passed'; a.closedAt = todayISO();
+    const fresh = await this.addAccount({ name, kind: 'funded', firm: a.firm, firmName: a.firmName, currency: a.currency,
+      startingBalance: a.startingBalance, defaultRiskPercent: a.defaultRiskPercent, color: a.color,
+      weeklyTargetPercent: a.weeklyTargetPercent });
+    this.data.accounts.activeAccountId = fresh.id;
+    await this.save('accounts');
+    return fresh;
+  }
+  /** Blown: put away, marked as blown, every trade kept. */
+  async blowAccount(id) {
+    const a = this.data.accounts.accounts.find(x => x.id === id);
+    if (!a) return;
+    a.archived = true; a.status = 'blown'; a.closedAt = todayISO();
+    if (this.data.accounts.activeAccountId === id) this.data.accounts.activeAccountId = this.accounts[0]?.id || null;
+    await this.save('accounts');
+  }
+
+  /* ============================================================
+     The firms' logos: his own image of each, squared and centred (logo.js),
+     kept in the vault as screenshots/logo-<firm>-*.png and listed in
+     accounts.firmLogos by firm key (acctfirms.firmKey). Every account at
+     that firm wears it.
+     ============================================================ */
+  get firmLogos() { const m = this.data.accounts.firmLogos; return m && typeof m === 'object' ? m : {}; }
+  firmLogoUrlNow(key) { const f = key && this.firmLogos[key]; return f ? profileUrls.get(f) || null : null; }
+  async firmLogoUrl(key) {
+    const f = key && this.firmLogos[key];
+    if (!f) return null;
+    if (profileUrls.has(f)) return profileUrls.get(f);
+    try {
+      const b = await fs.readImage(f);
+      if (!b) return null;
+      const url = URL.createObjectURL(new Blob([b], { type: 'image/png' }));
+      profileUrls.set(f, url);
+      return url;
+    } catch { return null; }
+  }
+  async setFirmLogo(key, blob) {
+    if (!key || !blob) return null;
+    const file = `${SHOTS}/logo-${key.replace(/[^a-z0-9-]+/gi, '-').slice(0, 40)}-${crypto.randomUUID().slice(0, 6)}.png`;
+    await fs.ensureDir(SHOTS);
+    await fs.writeImage(file, blob);
+    const old = this.firmLogos[key];
+    this.data.accounts.firmLogos = { ...this.firmLogos, [key]: file };
+    profileUrls.set(file, URL.createObjectURL(new Blob([blob], { type: 'image/png' })));
+    await this.save('accounts');
+    if (old) await this.dropProfileFile(old);
+    return file;
+  }
+  async removeFirmLogo(key) {
+    const old = this.firmLogos[key];
+    if (!old) return;
+    const m = { ...this.firmLogos }; delete m[key];
+    this.data.accounts.firmLogos = m;
+    await this.save('accounts');
+    await this.dropProfileFile(old);
   }
 
   /* An account, for good — with every trade in it and every chart those

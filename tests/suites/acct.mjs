@@ -41,26 +41,26 @@ await p.waitForTimeout(500);
 await p.evaluate(() => { location.hash = '#/settings/accounts'; });
 await p.waitForTimeout(450);
 
-/* Accounts live in one place now: Settings → Accounts. */
-const listed = () => p.evaluate(() => [...document.querySelectorAll('.main .card input')].some(i => i.value === 'Main funded'));
+/* Accounts live in one place: Settings → Accounts, one card each. */
+const listed = () => p.evaluate(() => [...document.querySelectorAll('.ab-card .ab-name')].some(n => n.textContent === 'Main funded'));
 ok('now the list shows', await listed(), true);
 ok('the form is tucked away behind a button', await p.evaluate(() =>
   [...document.querySelectorAll('.main button')].some(x => /New account/.test(x.textContent))
-  && !document.querySelector('.main input[placeholder="Swing account"]')), true);
-const listBox = await p.evaluate(() => { const r = document.querySelector('.main .card').getBoundingClientRect();
-  return { h: Math.round(r.height), bottom: Math.round(r.bottom), viewport: window.innerHeight }; });
-console.log('  list card:', JSON.stringify(listBox));
-ok('the list hugs one account instead of filling the screen', listBox.h < 330, true);
-ok('so it stops well short of the bottom', listBox.bottom < listBox.viewport - 300, true);
+  && !document.querySelector('.sheet.is-ab')), true);
+const cardBox = await p.evaluate(() => { const r = document.querySelector('.ab-card').getBoundingClientRect();
+  return { w: Math.round(r.width), h: Math.round(r.height) }; });
+console.log('  card:', JSON.stringify(cardBox));
+ok('the account is a card, not the page', cardBox.h < 420 && cardBox.w < 700, true);
 
 // it opens on demand
 await p.evaluate(() => [...document.querySelectorAll('.main button')].find(x=>/New account/.test(x.textContent)).click());
-await p.waitForTimeout(300);
-ok('clicking New account reveals the form', await p.evaluate(() =>
-  !!document.querySelector('.main input[placeholder="Swing account"]')), true);
-await p.evaluate(() => { location.hash = '#/accounts'; }); await p.waitForTimeout(450);
+await p.waitForTimeout(400);
+ok('clicking New account opens the form, asking a prop firm or live first', await p.evaluate(() => document.querySelectorAll('.sheet.is-ab .aw-pick').length === 2), true);
+await p.keyboard.press('Escape'); await p.waitForTimeout(350);
+await p.evaluate(() => { location.hash = '#/accounts'; }); await p.waitForTimeout(600);
 ok('and #/accounts is the same page with the form already open', await p.evaluate(() =>
-  !!document.querySelector('.main input[placeholder="Swing account"]')) && await listed(), true);
+  document.querySelectorAll('.sheet.is-ab .aw-pick').length === 2) && await listed(), true);
+await p.keyboard.press('Escape'); await p.waitForTimeout(300);
 
 // many accounts should scroll, not stretch
 await p.evaluate(async () => {

@@ -1,6 +1,7 @@
 import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
 import { pairMark, instrumentOf, instrumentName } from '../flags.js';
 import * as c from '../calc.js';
+import { acctMark } from './acctlogo.js';
 import { todayISO, tradeShotsOf, newShotId } from '../store.js';
 import { prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
 import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS, holidayName, heldAsked, heldOf } from '../questions.js';
@@ -635,7 +636,7 @@ export function addTrade(store, nav, existingId = null) {
   const head = el('header', { class: 'head' },
     el('h1', {}, editing ? 'Edit trade' : 'New trade'),
     el('span', { class: 'acct-pill' },
-      el('span', { class: 'acct-dot', style: { background: acct.color } }),
+      acctMark(store, acct, 16),
       el('span', { class: 'm' }, 'Saving to ', el('b', {}, acct.name))),
     el('div', { class: 'spacer' }),
     /* Opening a running trade, the one thing you came to do is finish it.

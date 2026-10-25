@@ -10,6 +10,7 @@
 import { el, icon, toast } from '../ui.js';
 import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
+import { acctMark } from './acctlogo.js';
 import { parseBrokerCSV, instrumentsIn, moneyFor, suggestedPointValue, guessAssetClass } from '../broker.js';
 
 export function importTrades(store, nav) {
@@ -273,7 +274,7 @@ export function importTrades(store, nav) {
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Import trades'),
     el('span', { class: 'acct-pill' },
-      el('span', { class: 'acct-dot', style: { background: acct.color } }),
+      acctMark(store, acct, 16),
       el('span', { class: 'm' }, 'Adding to ', el('b', {}, acct.name))),
     el('div', { class: 'spacer' }),
     actionNote,

@@ -81,6 +81,18 @@ t('the share card gets one disc for gold', parts.xau.kind === 'one' && parts.xau
 t('…and the 500 with its weight for the S&P', parts.spx.discs[0].glyph === '500' && parts.spx.discs[0].weight === 800 && parts.spx.discs[0].track < 0);
 t('…and the coin alone for BTCUSD', parts.btc.kind === 'one' && parts.btc.discs[0].glyph === '₿');
 
+/* gold and silver: the stack of bars sits in the middle of the disc, like TradingView's gold */
+const mid = await p.evaluate(async () => {
+  const { pairMark } = await import('/js/flags.js');
+  return ['XAUUSD', 'XAGUSD'].map(sym => {
+    const m = pairMark(sym, 60); document.body.append(m);
+    const disc = m.querySelector('svg').getBoundingClientRect(), g = m.querySelector('svg g').getBoundingClientRect();
+    const out = [(g.left + g.right) / 2 - (disc.left + disc.right) / 2, (g.top + g.bottom) / 2 - (disc.top + disc.bottom) / 2].map(v => Math.round(v * 10) / 10);
+    m.remove(); return out;
+  });
+});
+t('gold and silver bars are centred on the disc', mid.every(([dx, dy]) => Math.abs(dx) < 1 && Math.abs(dy) < 1), JSON.stringify(mid));
+
 t('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 console.log(`${pass} passed, ${fail} failed`);
 await b.close();

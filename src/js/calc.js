@@ -656,6 +656,33 @@ export function targetToPercent(account, unit, n) {
    a scratch trade produces plenty of them. */
 const roundsToZero = str => Number(String(str).replace(/[^0-9.]/g, '')) === 0;
 
+/**
+ * An account's money over time. `trades` are its closed live trades. P&L
+ * comes from them and from any balance corrections ("Update balance");
+ * payouts (and withdrawals) take money out. Returns
+ *   { start, gross, paid, after, balance, peak, series }
+ * gross: trades + corrections; paid: total taken out; after: gross − paid;
+ * balance: start + after; peak: the highest the balance has been;
+ * series: the balance after each event, oldest first, from the start.
+ */
+export function accountMoney(a, trades = []) {
+  const start = Number(a?.startingBalance) || 0;
+  const ev = [];
+  for (const t of trades) ev.push([`${t.date || ''}T${t.timeClose || t.timeOpen || '23:59'}`, Number(t.netResult) || 0, 0]);
+  for (const x of a?.adjustments || []) ev.push([`${x.date || ''}T${x.at || '23:59:30'}`, Number(x.amount) || 0, 0]);
+  for (const p of a?.payouts || []) ev.push([`${p.date || ''}T${p.at || '23:59:59'}`, -Math.abs(Number(p.amount) || 0), 1]);
+  ev.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  let bal = start, peak = start, gross = 0, paid = 0;
+  const series = [start];
+  for (const [, v, out] of ev) {
+    bal += v;
+    if (out) paid -= v; else gross += v;
+    if (bal > peak) peak = bal;
+    series.push(bal);
+  }
+  return { start, gross, paid, after: gross - paid, balance: bal, peak, series };
+}
+
 export function money(n, { sign = true, currency = 'USD', decimals = 2 } = {}) {
   if (n == null || !isFinite(n)) return '—';
   const symbol = { USD: '$', EUR: '€', GBP: '£', AUD: 'A$', JPY: '¥' }[currency] || '$';
