@@ -303,8 +303,9 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
     el('button', { class: 'st-cover-b', 'data-pick': 'banner', title: 'A picture or a video for your banner', onClick: () => picker('banner') },
       icon('image', 13, 'currentColor', 1.9), store.profileMedia('banner') ? 'Change banner' : 'Add banner'));
   profileFill(store, 'banner', cover);
-  const avatar = el('span', { class: 'st-avatar', style: { background: who ? store.userColour : 'var(--inset)', color: store.userInk } },
-    who ? initials : icon('user', 22, 'var(--ink-3)', 1.7));
+  const frost = !store.data.accounts.userColour;
+  const avatar = el('span', { class: 'st-avatar' + (frost ? ' is-frost' : ''), style: frost ? {} : { background: who ? store.userColour : 'var(--inset)', color: store.userInk } },
+    who ? initials : icon('user', 22, 'currentColor', 1.7));
   profileFill(store, 'avatar', avatar);
   const hero = el('section', { class: 'card st-hero' },
     cover,

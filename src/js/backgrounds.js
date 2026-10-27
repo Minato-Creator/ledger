@@ -30,7 +30,10 @@ export const BACKGROUNDS = [
   { id: 'moon',     name: 'Moon',         src: 'media/backgrounds/moon.mp4',    poster: 'media/backgrounds/moon.jpg',    scrim: 0.42 },
   { id: 'rain',     name: 'Rain',         src: 'media/backgrounds/rain.mp4',    poster: 'media/backgrounds/rain.jpg',    scrim: 0.4 },
   { id: 'susanoo',  name: 'Susanoo',      src: 'media/backgrounds/susanoo.mp4', poster: 'media/backgrounds/susanoo.jpg', scrim: 0.5 },
-  { id: 'topo',     name: 'Topography',   src: 'media/backgrounds/topo.mp4',    poster: 'media/backgrounds/topo.jpg',    scrim: 0.3 },
+  /* his, added 26 Oct: a pale studio, so it is held down more than the dark ones */
+  { id: 'gt3',      name: 'GT3 RS',       src: 'media/backgrounds/gt3.mp4',     poster: 'media/backgrounds/gt3.jpg',     scrim: 0.55 },
+  /* his too (a Pexels clip by Rostislav Uzunov): 4K cut to 1080p, its last second faded into its first so it loops without a seam */
+  { id: 'water',    name: 'Water',        src: 'media/backgrounds/water.mp4',   poster: 'media/backgrounds/water.jpg',   scrim: 0.45 },
 ];
 
 /** One of ours, by id, or null (a picture from before is null too). */

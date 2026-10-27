@@ -38,9 +38,9 @@ export const ACCOUNT_FIRMS = [
   { id: 'fundingpips', logo: 'media/firms/fundingpips.png', name: 'FundingPips',     full: 'FundingPips',         group: 'forex',   mono: 'FP', tint: '#0EA5E9', sizes: [5000, 10000, 25000, 50000, 100000] },
   { id: 'alphacapital', logo: 'media/firms/alphacapital.png',name: 'Alpha Capital',   full: 'Alpha Capital Group', group: 'forex',   mono: 'AC', tint: '#16A34A', sizes: [5000, 10000, 25000, 50000, 100000, 200000], short: 'Alpha' },
   /* brokers, for live accounts */
-  { id: 'oanda', logo: 'media/firms/oanda.png',       name: 'OANDA',           full: 'OANDA',               group: 'broker',  mono: 'OA', tint: '#9CA3AF', trades: 'Forex and CFDs' },
+  { id: 'oanda', logo: 'media/firms/oanda.png',       name: 'OANDA',           full: 'OANDA',               group: 'broker',  mono: 'OA', tint: '#12305C', trades: 'Forex and CFDs' },
   { id: 'pepperstone', logo: 'media/firms/pepperstone.png', name: 'Pepperstone',     full: 'Pepperstone',         group: 'broker',  mono: 'PS', tint: '#2563EB', trades: 'Forex and CFDs' },
-  { id: 'tradovate', logo: 'media/firms/tradovate.png', name: 'Tradovate', full: 'Tradovate', group: 'broker', mono: 'TV', tint: '#12305C', trades: 'Futures' },
+  { id: 'tradovate', logo: 'media/firms/tradovate.png', name: 'Tradovate', full: 'Tradovate', group: 'broker', mono: 'TV', tint: '#2F7BEA', trades: 'Futures' },
   { id: 'fusion', logo: 'media/firms/fusion.png',      name: 'Fusion Markets',  full: 'Fusion Markets',      group: 'broker',  mono: 'FM', tint: '#E11D48', short: 'Fusion', trades: 'Forex and CFDs' },
 ];
 

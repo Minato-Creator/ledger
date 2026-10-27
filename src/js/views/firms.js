@@ -70,8 +70,8 @@ export function firmsPage(store, nav, sub) {
     el('div', { class: 'seg', style: { marginLeft: '6px' } },
       ...[['futures', 'Futures'], ['forex', 'Forex']].map(([k, l]) =>
         el('button', { class: k === market ? 'is-on' : '', onClick: () => { market = k; nav.refresh(); } }, `${l} · ${count(k)}`))),
-    el('span', { class: 'sub pf-sub' }, `rules checked ${CHECKED_TEXT} · confirm on the firm’s site before you buy`),
-    el('div', { class: 'spacer' }));
+    el('div', { class: 'spacer' }),
+    el('span', { class: 'head-meta pf-sub' }, `rules checked ${CHECKED_TEXT} · confirm on the firm’s site before you buy`));
 
   const rail = el('section', { class: 'card pf-rail' },
     el('div', { class: 'pf-k' }, el('span', {}, 'Most trusted first'), el('span', {}, 'from')),

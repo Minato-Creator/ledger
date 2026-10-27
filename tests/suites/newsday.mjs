@@ -138,7 +138,7 @@ t('every trade, the kind of day it was', TR.every(x => JSON.stringify(got(x.id).
 /* ===================== Analytics → Execution ===================== */
 console.log('analytics');
 await go('#/analytics', 400);
-const click = label => p.evaluate(l => [...document.querySelectorAll('.head .seg button')].find(b => b.textContent.trim() === l)?.click(), label);
+const click = label => p.evaluate(l => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === l)?.click(), label);
 await click('All'); await settle(200);
 await click('Execution'); await settle(500);
 const card = await p.evaluate(() => { const c = document.querySelector('.ex-newsdays'); if (!c) return null;

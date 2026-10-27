@@ -28,7 +28,6 @@ import { tradeChart } from './tradechart.js';
 import { isRedFolder, isBankHoliday, holidayCountry } from '../questions.js';
 import * as cd from '../candles.js';
 import * as oe from '../outlookedge.js';
-import { outlookStrip } from './an-outlook.js';
 
 /* The chart's height in an outlook block — half the block is chart. */
 const OB_CHART_H = 470;
@@ -151,12 +150,12 @@ export function outlook(store, nav, dateArg) {
      Typed changes are cheap JSON and are written a moment after you stop.
      Anything involving a picture writes immediately, because it is an
      explicit act and a large one. */
-  const stamp = el('span', { class: 'note m' });
+  const stamp = el('span', { class: 'head-meta ol-stamp' });
   function paintStamp(state) {
     const at = day.updatedAt ? day.updatedAt.slice(11, 16) : null;
     stamp.textContent = state === 'saving' ? 'saving…'
       : at ? 'saved ' + at
-      : 'nothing written yet';
+      : '';
   }
 
   async function commit() {
@@ -383,10 +382,10 @@ export function outlook(store, nav, dateArg) {
   const view = el('div', { class: 'view' },
     el('header', { class: 'head' },
       el('h1', {}, 'Daily outlook'),
-      stamp,
       el('div', { class: 'spacer' }),
+      stamp,
       dayNav),
-    el('div', { class: 'outlook-scroll' }, acct ? outlookStrip(store, acct, nav) : null, newsStrip(store, date, nav), list),
+    el('div', { class: 'outlook-scroll' }, newsStrip(store, date, nav), list),
   );
 
   paint();

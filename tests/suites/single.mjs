@@ -107,7 +107,7 @@ console.log('  -- the newest pages came with it --');
   const before = errors.length;
   await page.evaluate(() => { location.hash = '#/analytics'; });
   await page.waitForTimeout(300);
-  await page.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(b => /Weekly winrate/.test(b.textContent)).click());
+  await page.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => /Weekly winrate/.test(b.textContent)).click());
   await page.waitForTimeout(400);
   ok('Weekly winrate draws in the single file', await page.evaluate(() => !!document.querySelector('.wk-view .wk-card')), true);
   await page.evaluate(() => { location.hash = '#/lab'; });

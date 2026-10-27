@@ -56,7 +56,7 @@ await go('#/calendar');    ok('changing view plays', await entered(), true);
 await go('#/analytics');   ok('and again', await entered(), true);
 
 // ---- when it must NOT -----------------------------------------------------
-await page.evaluate(() => [...document.querySelectorAll('.seg button')].find(b=>b.textContent.trim()==='Timing').click());
+await page.evaluate(() => [...document.querySelectorAll(':is(.seg, .an-tabs) button')].find(b=>b.textContent.trim()==='Timing').click());
 await page.waitForTimeout(250);
 ok('switching analytics tab does not replay', await entered(), false);
 await page.evaluate(() => [...document.querySelectorAll('.seg button')].find(b=>b.textContent.trim()==='90D').click());
@@ -97,13 +97,13 @@ ok('with a normalised path length', wired.pathLen, '1');
 ok('and a tip', wired.tip, true);
 ok('the win-rate bar is tagged', wired.bars >= 1, true);
 await go('#/analytics');
-await page.evaluate(() => [...document.querySelectorAll('.seg button')].find(b=>b.textContent.trim()==='Overview').click());
+await page.evaluate(() => [...document.querySelectorAll(':is(.seg, .an-tabs) button')].find(b=>b.textContent.trim()==='Overview').click());
 await page.waitForTimeout(300);
 ok('overview has bars and columns', await page.evaluate(() =>
   document.querySelectorAll('.main .bar-fill').length > 3 && document.querySelectorAll('.main .col-fill-svg').length > 3), true);
 ok('and its equity line draws itself in', await page.evaluate(() =>
   [...document.querySelectorAll('.main .line-draw')].every(n => n.getAttribute('pathLength') === '1') && !!document.querySelector('.main .line-draw')), true);
-await page.evaluate(() => [...document.querySelectorAll('.seg button')].find(b=>b.textContent.trim()==='Timing').click());
+await page.evaluate(() => [...document.querySelectorAll(':is(.seg, .an-tabs) button')].find(b=>b.textContent.trim()==='Timing').click());
 await page.waitForTimeout(300);
 ok('timing has svg columns', await page.evaluate(() => document.querySelectorAll('.main .col-fill-svg').length > 3), true);
 

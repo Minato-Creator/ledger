@@ -47,7 +47,7 @@ let pass=0, fail=0; const t=(n,c,x='')=>{c?pass++:fail++;console.log(`  ${c?'ok 
 {
   const { b, p, errs } = await open(seed());
   const picks = await backgroundNames(p);
-  t('seven tiles: none plus six videos', picks.length === 7, picks.join(', '));
+  t('eight tiles: none plus seven videos (his GT3 RS and Water the last)', picks.length === 8 && /Water/.test(picks.at(-1)), picks.join(', '));
   await closeLook(p);
   t('starts with glass off', (await state(p)).glass === 'off');
 
@@ -81,7 +81,7 @@ let pass=0, fail=0; const t=(n,c,x='')=>{c?pass++:fail++;console.log(`  ${c?'ok 
   /* The whole point of the number: a brighter video is held down harder. */
   t('and a brighter video is held down harder than a darker one', await p.evaluate(async ()=>{
     const { BACKGROUNDS, scrimFor } = await import('/js/backgrounds.js');
-    return scrimFor(BACKGROUNDS.find(b => b.id === 'torii')) > scrimFor(BACKGROUNDS.find(b => b.id === 'topo'));
+    return scrimFor(BACKGROUNDS.find(b => b.id === 'torii')) > scrimFor(BACKGROUNDS.find(b => b.id === 'rain'));
   }));
   await pick(p, 'Torii');
   t('nor does the one after that', (await state(p)).glass === 'off');

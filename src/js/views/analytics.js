@@ -5,6 +5,7 @@ import { overviewTab } from './an-overview.js';
 import { timingTab } from './an-timing.js';
 import { executionTab } from './an-execution.js';
 import { outlookTab, takeWantedTab } from './an-outlook.js';
+import { glide } from '../shell.js';
 
 let tab = 'overview';       // overview | weekly | tags | timing | execution | discipline | outlook  (the year lives on the Calendar now)
 let year = null;            // resolved on first paint to the latest year traded
@@ -122,7 +123,7 @@ export function yearPanel(store, nav) {
     el('button', { onClick: () => stepYear(-1), 'aria-label': 'Previous year' }, icon('chevleft', 12, 'var(--grey-2)', 2.4)),
     el('span', { class: 'val', style: { minWidth: '52px' } }, year),
     el('button', { onClick: () => stepYear(1), 'aria-label': 'Next year' }, icon('chevright', 12, 'var(--grey-2)', 2.4)));
-  const sub = el('span', { class: 'sub' }, `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`);
+  const sub = el('span', { class: 'head-meta' }, `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`);
   const ctx = { unit: store.displayUnit, account: acct, cur: acct.currency, nav };
   const body = all.length ? yearly(store, acct, all, ctx)
     : el('div', { class: 'card', style: { flex: '1' } },
@@ -160,17 +161,23 @@ export function analytics(store, nav) {
     year = n; nav.refresh();
   };
 
-  const head = el('header', { class: 'head an-head' },
-    el('h1', {}, 'Analytics'),
-    el('div', { class: 'seg', style: { marginLeft: '6px' } },
-      ...[['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['execution', 'Execution'], ['discipline', 'Discipline'], ['outlook', 'Outlook']].map(([k, label]) =>
-        el('button', { class: k === tab ? 'is-on' : '', onClick: () => { tab = k; nav.refresh(); } }, label))),
-    /* The weekly page brings a wider control than the others, so it gives up
-       the count here to make room for it. */
-    isWeekly || tab === 'tags' ? null : el('span', { class: 'sub' }, isYear
+  /* The tabs read like the Journal's and the Lab's: words, the chosen one
+     underlined, the line sliding to the next (shell.glide). */
+  const tabLinks = [['overview', 'Overview'], ['weekly', 'Weekly winrate'], ['tags', 'Tags'], ['timing', 'Timing'], ['execution', 'Execution'], ['discipline', 'Discipline'], ['outlook', 'Outlook']].map(([k, label]) =>
+    el('button', { class: 'sn-tab' + (k === tab ? ' is-on' : ''), role: 'tab', 'aria-selected': String(k === tab), onClick: () => { if (tab !== k) { tab = k; nav.refresh(); } } }, label));
+  const tabGlide = el('span', { class: 'sn-glide', 'aria-hidden': 'true' });
+  const tabBar = el('nav', { class: 'subnav an-tabs', 'aria-label': 'Analytics', role: 'tablist' }, tabGlide, ...tabLinks);
+  glide(tabBar, 'sub-analytics', tabLinks.find(b => b.classList.contains('is-on')), tabGlide);
+  const head = el('header', { class: 'head an-head has-subnav' },
+    el('h1', { class: 'sr-only' }, 'Analytics'),
+    tabBar,
+    el('div', { class: 'spacer' }),
+    /* The count sits by the period it counts, not beside the tabs where it
+       read as one more. The weekly page brings a wider control than the
+       others, so it gives the count up to make room. */
+    isWeekly || tab === 'tags' ? null : el('span', { class: 'head-meta' }, isYear
       ? `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`
       : `${trades.length} closed trade${trades.length === 1 ? '' : 's'}`),
-    el('div', { class: 'spacer' }),
     tab === 'tags' ? tagMinControl(nav) : null,
     isWeekly
       ? weeklyControls(store, nav)

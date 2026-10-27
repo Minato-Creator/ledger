@@ -148,9 +148,9 @@ const seen = sel => p.evaluate(s => {
 }, sel);
 
 await p.evaluate(() => { location.hash = '#/analytics'; }); await settle(500);
-const tabs = await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].map(b => b.textContent.trim()));
+const tabs = await p.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].map(b => b.textContent.trim()));
 t('Analytics has a Weekly winrate tab, second along', tabs[1] === 'Weekly winrate', tabs.join(', '));
-await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(b => b.textContent.trim() === 'Weekly winrate').click());
+await p.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === 'Weekly winrate').click());
 await settle(500);
 
 /* ---------- where it opens ---------- */

@@ -267,7 +267,7 @@ export function wire(store, nav) {
     out.refresh.classList.toggle('is-spinning', busy);
   }
 
-  out.stamp = el('span', { class: 'm', style: { fontSize: '10.5px' } }, '');
+  out.stamp = el('span', { class: 'head-meta' }, '');
   out.err = el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--yellow)' } }, '');
   out.refresh = el('button', { class: 'btn btn-light', title: 'Read the feeds again now',
     onClick: () => pull([LIVE_FEED, ...DEEP_FEEDS]) },
@@ -275,10 +275,10 @@ export function wire(store, nav) {
 
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Newswire'),
-    el('span', { class: 'sub' }, 'investingLive'),
-    out.stamp,
-    out.err,
     el('div', { class: 'spacer' }),
+    out.err,
+    el('span', { class: 'sub head-meta' }, 'investingLive'),
+    out.stamp,
     out.refresh);
 
   /* ---------- the chips ----------

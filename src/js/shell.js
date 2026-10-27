@@ -15,6 +15,7 @@
 import { el, icon, brandWordmark, toast } from './ui.js';
 import * as c from './calc.js';
 import { sheet, popover, closeSheets } from './sheet.js';
+import { slidePill } from './glide.js';
 import { acctMark } from './views/acctlogo.js';
 
 export const SECTIONS = [
@@ -168,10 +169,12 @@ if (typeof window !== 'undefined') {
 export function you(store, onClick, size = 30) {
   const who = store.userName;
   const initials = who.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
-  const b = el('button', { class: 'tb-you', title: who ? `${who} — settings` : 'Settings', 'aria-label': 'Settings',
-      style: { width: size + 'px', height: size + 'px', background: who ? store.userColour : 'var(--inset)' },
+  /* No picture and no colour of your own: a frosted disc, like the glass */
+  const frost = !store.data.accounts.userColour;
+  const b = el('button', { class: 'tb-you' + (frost ? ' is-frost' : ''), title: who ? `${who} — settings` : 'Settings', 'aria-label': 'Settings',
+      style: { width: size + 'px', height: size + 'px', ...(frost ? {} : { background: who ? store.userColour : 'var(--inset)' }) },
       onClick: e => onClick(e.currentTarget) },
-    who ? el('span', { style: { color: store.userInk } }, initials) : icon('user', 15, 'var(--ink-3)', 1.8));
+    who ? el('span', { style: frost ? {} : { color: store.userInk } }, initials) : icon('user', 15, 'currentColor', 1.8));
   profileFill(store, 'avatar', b);
   return b;
 }
@@ -335,16 +338,10 @@ export function segGlide(root, marks, placeOf) {
     const m = marks.get(placeOf(s, root));
     const on = s.querySelector(':scope > .is-on');
     if (!m || !on || [...s.children].indexOf(on) === m.i) continue;
-    const pill = document.createElement('span');
-    pill.className = 'seg-pill';
-    const to = { x: on.offsetLeft, y: on.offsetTop, w: on.offsetWidth, h: on.offsetHeight };
-    const put = p => { pill.style.transform = `translate(${p.x}px, ${p.y}px)`; pill.style.width = p.w + 'px'; pill.style.height = p.h + 'px'; };
-    put(m);
-    s.classList.add('is-gliding');
-    s.prepend(pill);
-    void pill.offsetWidth;
-    pill.classList.add('go');
-    put(to);
-    setTimeout(() => { pill.remove(); s.classList.remove('is-gliding'); }, 300);
+    /* m is where the old choice sat inside its bar (offset box); as a viewport rect: */
+    const gr = s.getBoundingClientRect();
+    const op = on.offsetParent === s ? { x: gr.left + s.clientLeft, y: gr.top + s.clientTop }
+      : (() => { const r = on.getBoundingClientRect(); return { x: r.left - on.offsetLeft, y: r.top - on.offsetTop }; })();
+    slidePill(s, on, { left: op.x + m.x, top: op.y + m.y, width: m.w, height: m.h });
   }
 }

@@ -238,7 +238,7 @@ export function playbook(store, nav) {
       el('button', { onClick: () => onChange(+(value + stepBy).toFixed(2)) }, icon('plus', 11, 'var(--grey-2)', 2.6)));
 
   const ruleRow = (label, node) => el('div', { style: { display: 'flex', alignItems: 'center' } },
-    el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-5)' } }, label), node);
+    el('span', { style: { fontSize: '13px', color: 'var(--ink-3)' } }, label), node);
 
   const rulesCard = el('section', { class: 'card', style: { flex: 'none', padding: '24px 26px' } },
     el('h2', {}, 'Risk rules'),

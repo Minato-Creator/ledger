@@ -69,7 +69,6 @@ export function trades(store, nav) {
 
   const head = el('header', { class: 'head' },
     el('h1', {}, 'Trades'),
-    el('span', { class: 'sub' }, `${store.tradesFor(acct.id).length} closed on ${acct.name}`),
     open.length
       ? el('span', { class: 'm', style: { display: 'inline-flex', alignItems: 'center', gap: '7px',
             fontSize: '11px', borderRadius: 'var(--r-pill)', padding: '5px 11px',

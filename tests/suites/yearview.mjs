@@ -70,7 +70,7 @@ await p.waitForSelector('.topbar');
 
 // ---- the hour chart first ----
 await p.evaluate(()=>location.hash='#/analytics'); await p.waitForTimeout(400);
-await p.evaluate(()=>[...document.querySelectorAll('.seg button')].find(x=>x.textContent==='Timing').click());
+await p.evaluate(()=>[...document.querySelectorAll(':is(.seg, .an-tabs) button')].find(x=>x.textContent==='Timing').click());
 await p.waitForTimeout(500);
 await p.evaluate(()=>[...document.querySelectorAll('.seg button')].find(x=>x.textContent==='All').click());
 await p.waitForTimeout(600);

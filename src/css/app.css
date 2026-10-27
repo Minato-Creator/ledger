@@ -1955,6 +1955,11 @@ html[data-theme="dark"] .lab-firmname, html[data-bg] .lab-firmname { background:
 .an-ddband { fill:rgba(var(--loss-rgb), .06); }
 .an-high { fill:var(--card); stroke:var(--profit); stroke-width:1.75; }
 .an-end { stroke:var(--card); stroke-width:2; }
+/* the Dashboard's curve: a touch heavier, its end lit */
+.db-hero .an-line { stroke-width:2.4; }
+.db-hero .an-end { stroke:none; }
+.db-hero .an-end.is-pos { filter:drop-shadow(0 0 6px rgba(var(--profit-rgb), .75)); }
+.db-hero .an-end.is-neg { filter:drop-shadow(0 0 6px rgba(var(--loss-rgb), .75)); }
 .an-end.is-pos { fill:var(--profit); } .an-end.is-neg { fill:var(--loss); }
 
 .an-marks { display:flex; flex-wrap:wrap; gap:4px 16px; font:400 10.5px var(--mono); color:var(--ink-4); margin-top:-2px; }
@@ -2051,7 +2056,10 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 /* the result */
 .db-top { display:flex; align-items:flex-end; flex-wrap:wrap; gap:8px 22px; margin-top:12px; }
 .db-big small { font-size:.42em; letter-spacing:-.01em; opacity:.7; }
-.db-big { font:300 clamp(40px, 3.6vw, 56px) var(--sans); letter-spacing:-.045em; line-height:.95; color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; }
+/* a soft glow in the figure's own colour — green, red, or the ink */
+.db-big { text-shadow:0 0 18px color-mix(in srgb, currentColor 42%, transparent), 0 0 42px color-mix(in srgb, currentColor 20%, transparent); }
+html[data-paper="on"] .db-big { text-shadow:0 0 16px color-mix(in srgb, currentColor 22%, transparent); }
+.db-big { font:700 clamp(40px, 3.6vw, 56px) var(--sans); letter-spacing:-.04em; line-height:.95; color:var(--ink); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .db-meta { display:flex; flex-wrap:wrap; gap:4px 18px; padding-bottom:5px; font:400 11px var(--mono); color:var(--ink-4); }
 .db-meta b { font:500 13px var(--sans); color:var(--ink); margin-right:1px; font-variant-numeric:tabular-nums; }
 .db-meta b.is-neg { color:var(--loss); }
@@ -2484,17 +2492,30 @@ b.an-inum { font:500 13px var(--sans); color:var(--ink); }
 .conf-x { margin-left:auto; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center;
   color:var(--ink-4); background:var(--grey-7); }
 .conf-x:hover { color:var(--ink); }
-.conf-track { position:relative; height:22px; display:flex; align-items:center; }
+.conf-track { position:relative; height:30px; display:flex; align-items:center; margin:0 6px; }
 .conf-range { -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:3px; margin:0; cursor:pointer;
   background:linear-gradient(90deg, var(--loss), rgba(128,128,128,.45) 50%, var(--profit)); }
 .conf.is-unset .conf-range { background:var(--grey-7); }
-.conf-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:20px; height:20px; border-radius:50%;
-  background:var(--ink); box-shadow:0 0 0 4px var(--card), 0 2px 8px rgba(0,0,0,.4); cursor:grab; }
-.conf-range::-moz-range-thumb { width:20px; height:20px; border:0; border-radius:50%; background:var(--ink); box-shadow:0 0 0 4px var(--card); }
-.conf.is-unset .conf-range::-webkit-slider-thumb { background:var(--grey-5); }
-.conf-ticks { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); }
-.conf-ticks button { display:flex; flex-direction:column; align-items:center; gap:3px; padding:2px 0; color:var(--ink-4); }
-.conf-ticks button:first-child { align-items:flex-start; } .conf-ticks button:last-child { align-items:flex-end; }
+/* the slider's own thumb stays (it is what you drag) but is not drawn */
+.conf-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:24px; height:24px; border-radius:50%; background:transparent; border:0; box-shadow:none; cursor:grab; }
+.conf-range::-moz-range-thumb { width:24px; height:24px; border:0; border-radius:50%; background:transparent; box-shadow:none; cursor:grab; }
+.conf.is-held .conf-range { cursor:grabbing; }
+/* the knob you see: no ring, a soft shadow; it glides from step to step with
+   a little spring, and swells with a halo while it is held */
+.conf-knob { position:absolute; top:50%; left:calc(12px + (100% - 24px) * var(--p, .5)); width:22px; height:22px; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--ink) 65%, #fff), var(--ink)); pointer-events:none;
+  transform:translate(-50%, -50%) scale(var(--ks, 1));
+  box-shadow:0 2px 10px rgba(0,0,0,.35), 0 0 0 0 color-mix(in srgb, var(--ink) 18%, transparent);
+  transition:left .26s cubic-bezier(.3, 1.35, .5, 1), transform .2s cubic-bezier(.3, 1.4, .5, 1), box-shadow .2s ease, background-color .2s; }
+.conf-track:hover .conf-knob { --ks:1.07; }
+.conf.is-held .conf-knob { --ks:1.22; box-shadow:0 4px 16px rgba(0,0,0,.4), 0 0 0 7px color-mix(in srgb, var(--ink) 16%, transparent); }
+.conf-range:focus-visible + .conf-knob { box-shadow:0 2px 10px rgba(0,0,0,.35), 0 0 0 4px color-mix(in srgb, var(--blue) 45%, transparent); }
+.conf.is-unset .conf-knob { background:var(--grey-5); }
+html[data-motion="off"] .conf-knob { transition:none; }
+/* each number sits under the knob's own place, not in an even fifth */
+.conf-ticks { position:relative; height:34px; margin:0 6px; }
+.conf-ticks button { position:absolute; top:0; left:calc(12px + (100% - 24px) * var(--i) / 4); transform:translateX(-50%);
+  display:flex; flex-direction:column; align-items:center; gap:3px; padding:2px 0; color:var(--ink-4); white-space:nowrap; }
 .conf-ticks b { font:400 11px var(--mono); }
 .conf-ticks span { font:400 9.5px var(--mono); letter-spacing:.04em; }
 .conf-ticks button:hover, .conf-ticks button.is-on { color:var(--ink); }

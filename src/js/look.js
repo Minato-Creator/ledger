@@ -56,8 +56,9 @@ export const LINES = [['theme', 'Theme'], ['text', 'Text colour'], ['accent', 'A
 export const FONTS = [
   { id: 'jakarta',    name: 'Jakarta',    stack: "'Plus Jakarta Sans Variable','Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',sans-serif" },
   { id: 'geist',      name: 'Geist',      stack: "'Geist Variable','Geist',system-ui,-apple-system,'Segoe UI',sans-serif" },
-  { id: 'newsreader', name: 'Newsreader', stack: "'Newsreader Variable','Newsreader',Georgia,'Times New Roman',serif" },
-  { id: 'mono',       name: 'Mono',       stack: "'Geist Mono Variable','Geist Mono','JetBrains Mono',ui-monospace,Menlo,monospace" },
+  { id: 'inter',      name: 'Inter',      stack: "'Inter Variable','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" },
+  { id: 'manrope',    name: 'Manrope',    stack: "'Manrope Variable','Manrope',system-ui,-apple-system,'Segoe UI',sans-serif" },
+  { id: 'plex',       name: 'IBM Plex Sans', stack: "'IBM Plex Sans Variable','IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif" },
 ];
 export const fontOf = id => FONTS.find(f => f.id === id) || FONTS[0];
 

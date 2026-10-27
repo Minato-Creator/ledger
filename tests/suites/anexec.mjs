@@ -127,11 +127,11 @@ t('grid: a trade with no feeling after is in no cell', H.gridN === 4 && H.g31.n 
 console.log('the page');
 await p.evaluate(() => { location.hash = '#/analytics'; });
 await p.waitForSelector('.head .seg');
-const click = label => p.evaluate(l => [...document.querySelectorAll('.head .seg button')].find(b => b.textContent.trim() === l)?.click(), label);
+const click = label => p.evaluate(l => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === l)?.click(), label);
 await click('All'); await p.waitForTimeout(200);
-t('there is an Execution tab, after Timing', await p.evaluate(() => [...document.querySelector('.head .seg').children].map(b => b.textContent.trim()).join(',')) === 'Overview,Weekly winrate,Tags,Timing,Execution,Discipline,Outlook');
+t('there is an Execution tab, after Timing', await p.evaluate(() => [...document.querySelectorAll('.head .an-tabs .sn-tab')].map(b => b.textContent.trim()).join(',')) === 'Overview,Weekly winrate,Tags,Timing,Execution,Discipline,Outlook');
 await click('Execution'); await p.waitForTimeout(500);
-t('it is the one lit', await p.evaluate(() => document.querySelector('.head .seg .is-on')?.textContent.trim()) === 'Execution');
+t('it is the one lit', await p.evaluate(() => document.querySelector('.head .an-tabs .is-on')?.textContent.trim()) === 'Execution');
 
 const tiles = await p.evaluate(() => [...document.querySelectorAll('.ex-tiles .lab-tile')].map(x => [x.querySelector('.k').textContent, x.querySelector('.v').textContent, x.querySelector('.s').textContent]));
 t('five tiles', tiles.length === 5, String(tiles.length));

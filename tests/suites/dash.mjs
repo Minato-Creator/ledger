@@ -43,7 +43,7 @@ await p.addInitScript(({ ACCT, ALL, PB }) => {
 await p.addInitScript(FAKE_FS);
 await p.goto('http://127.0.0.1:8777/index.html', { waitUntil: 'domcontentloaded' });
 await p.waitForSelector('.topbar', { timeout: 8000 });
-await p.evaluate(() => { location.hash = '#/'; }); await p.waitForTimeout(800);
+await p.evaluate(() => { location.hash = '#/'; }); await p.waitForTimeout(2000);
 const txt = s => p.evaluate(sel => document.querySelector(sel)?.innerText.replace(/\s+/g, ' ').trim() ?? null, s);
 
 /* ---------- the result ---------- */
@@ -52,6 +52,22 @@ t('four cards, in a grid that fills the window', await p.evaluate(() =>
   document.querySelectorAll('.db-grid > .card').length === 4 && document.querySelector('.db-grid').getBoundingClientRect().bottom <= innerHeight));
 t('it says which window it is reading', /Net P&L · last 30 days/i.test(await txt('.db-hero .db-k')));
 t('the big number is every trade in the window, cents and all', (await txt('.db-big')) === $(net, 2), `${await txt('.db-big')} vs ${$(net, 2)}`);
+/* it counts up to that, quickly, when you arrive — and holds its width while it does */
+const num = x => parseFloat(String(x).replace(/[^0-9.\-−]/g, '').replace('−', '-'));
+await p.evaluate(() => { location.hash = '#/trades'; }); await p.waitForTimeout(500);
+const wBefore = await p.evaluate(() => { location.hash = '#/'; return 0; });
+await p.waitForTimeout(140);
+const mid = await p.evaluate(() => ({ t: document.querySelector('.db-big').innerText.replace(/\s+/g, ''), w: document.querySelector('.db-big').style.minWidth,
+  meta: Math.round(document.querySelector('.db-meta').getBoundingClientRect().left) }));
+await p.waitForTimeout(1800);
+const end = await p.evaluate(() => ({ t: document.querySelector('.db-big').innerText.replace(/\s+/g, ''), w: document.querySelector('.db-big').style.minWidth,
+  meta: Math.round(document.querySelector('.db-meta').getBoundingClientRect().left) }));
+t('the big number counts up to it when you arrive', Math.abs(num(mid.t)) < Math.abs(net) && Math.abs(num(mid.t)) > 0 && end.t === $(net, 2).replace(/\s+/g, ''), `${mid.t} → ${end.t}`);
+t('…with the figures beside it held still', /px$/.test(mid.w) && end.w === '' && Math.abs(mid.meta - end.meta) <= 1, JSON.stringify([mid, end]));
+await p.evaluate(() => { document.documentElement.dataset.motion = 'off'; location.hash = '#/trades'; }); await p.waitForTimeout(400);
+await p.evaluate(() => { location.hash = '#/'; }); await p.waitForTimeout(120);
+t('with motion off it simply reads', (await txt('.db-big')) === $(net, 2));
+await p.evaluate(() => { delete document.documentElement.dataset.motion; });
 const meta = await txt('.db-meta');
 t('then trades, days, the high and the deepest fall', meta.includes(`${N} trades`) && meta.includes(`${new Set(inWin.map(x => x.date)).size} days`)
   && meta.includes(`${$(Math.max(...cum))} high`) && meta.includes(`${$(worst)} max drawdown`), meta);
@@ -117,9 +133,9 @@ await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(
 t('a window with nothing in it says so rather than drawing an empty chart', /No trades in this window/.test(await txt('.db-hero')) && /Nothing in this window/.test(await txt('.db-src')));
 t('a recent trade leads with its instrument — no win/loss bar before the logo', await p.evaluate(() => [...document.querySelectorAll('.db-tr')].every(r => !r.querySelector('.dot') && r.firstElementChild.classList.contains('pmark'))));
 t('   while the recent trades are still there', await p.evaluate(() => document.querySelectorAll('.db-tr').length) === 6);
-await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(x => x.textContent === 'All').click()); await p.waitForTimeout(500);
+await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(x => x.textContent === 'All').click()); await p.waitForTimeout(1400);
 t('All reads every trade', (await txt('.db-big')) === $(ALL.reduce((a, x) => a + x.netResult, 0), 2) && /all time/i.test(await txt('.db-hero .db-k')));
-await p.evaluate(() => [...document.querySelectorAll('.unit-switch button')].find(b => b.textContent.trim() === 'R').click()); await p.waitForTimeout(600);
+await p.evaluate(() => [...document.querySelectorAll('.unit-switch button')].find(b => b.textContent.trim() === 'R').click()); await p.waitForTimeout(2000);
 const totR = ALL.reduce((a, x) => a + x.netResult / 1000, 0);
 t('in R the headline is R, with no cents split off', (await txt('.db-big')) === (totR >= 0 ? '+' : '−') + Math.abs(totR).toFixed(2) + 'R' && !(await p.evaluate(() => document.querySelector('.db-big small'))), await txt('.db-big'));
 t('   and so is every source line', await p.evaluate(() => [...document.querySelectorAll('.db-srcrow .nv')].every(n => /R$/.test(n.textContent))));

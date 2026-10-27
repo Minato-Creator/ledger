@@ -1759,3 +1759,152 @@ Tests: acctboard.mjs (53) — the guesses, the top bar and its menu.
   (the result still says it, coloured, at the end of the row).
 
 Tests: marks (27), dash (33), outlook (28).
+
+## The headline counts up (2.38.1 — his "2.19.1", 26 Oct)
+
+He asked for the Dashboard's big number to count up like LiquidJournal's,
+quicker. LiquidJournal's runs about three seconds, easing from roughly half
+the figure. Laminar's (`countUp` in views/dashboard.js) runs 1.6 s from zero (0.9 s at first; he asked for it slower)
+when you arrive on the Dashboard or switch unit or account (`nav.fresh`), and
+0.9 s from what it read before when the 7D / 30D / 90D / All window
+changes; ease-out (quart). $, % and R all count, cents included. The width is
+held at the final figure's (min-width, cleared at the end) so the trades and
+days beside it do not move. A re-render mid-count carries on from where it
+was. Motion off or reduced motion: no count. Only the headline counts.
+
+Tests: dash.mjs (36) — mid-count, final figure, width held, motion off.
+
+**OANDA and Tradovate logos swapped back (same version).** The two images
+had gone to the wrong brokers: the blue one with the white mark is
+Tradovate's, the dark blue one with green is OANDA's. The files are
+swapped, and so are the tints (OANDA #12305C, Tradovate #2F7BEA).
+
+**Fonts: Inter, Manrope and IBM Plex Sans in, Newsreader and Mono out
+(same version).** He kept Jakarta and Geist, asked for Inter
+(rsms.me/inter) and one or two more that suit a trading app. Added Manrope
+(rounded, the fintech feel) and IBM Plex Sans (technical, clear figures).
+Each is the latin variable woff2 from @fontsource-variable (5.3.0) in
+src/fonts, inlined by the bundler like the others. Newsreader's file and
+rules are gone; Geist Mono stays (it is still the --mono face). A saved look
+on 'newsreader' or 'mono' falls back to Jakarta (fontOf). Five options in
+the 2-column picker: the odd last one spans the row.
+
+**The − value + steppers redone (same version).** He said most of them
+looked heavy: a square box with a hairline ring and two dark tiles. Now one
+soft rounded field (36 px, radius 12, the panel's inset), the − and + quiet
+until hovered, the figure in the sans at 600 with tabular numbers. Inside a
+card or sheet there is no second pane of glass and no ring; on the bare
+picture a stepper keeps its glass. Risk rules labels on the Playbook are
+the sans at 13 px in --ink-3 (they were tiny grey mono).
+(clarity.mjs's "dragging it clearer" check is flaky under load — it fails
+now and then with or without this change; worth a longer wait one day.)
+
+**A glow on the headline (same version).** The Dashboard's Net P&L has a
+soft text-shadow glow in its own colour (green, red, or the ink): two
+layers, 18 px at 42% and 42 px at 20% (color-mix with currentColor); on the
+light paper themes one gentler layer, 16 px at 22%.
+
+**The Dashboard curve runs smooth (same version).** Like LiquidJournal's:
+`smoothPath` in dashboard.js draws a monotone cubic (Fritsch–Carlson)
+through the same points, so it never overshoots — a peak drawn is a peak
+reached. The green/red split at zero, the fill, the draw-in and the hover
+are as they were; the line is 2.4 px and its end dot glows in its colour,
+with no ring round it and no figure beside it (he asked for both gone).
+
+**No page scrollbar (same version).** He spotted the page widening for a
+moment as Analytics arrived: the page's scrollbar showed while a card rose
+past the bottom edge, then went, and the page grew back. The page (.main,
+and html/body for the phone layout) now has no scrollbar at all
+(scrollbar-width:none and ::-webkit-scrollbar display:none) and still
+scrolls with the wheel, trackpad and keys; the old scrollbar-gutter rule is
+gone. Lists and sheets inside keep their own thin bars.
+Then his video showed it was not the page at all: Analytics scrolls inside
+its own body (.an-body), and that bar flashed as the cards rose. The same
+no-bar rule now covers every page that scrolls inside itself — .an-body,
+.lab-body, .rv-body, .rp-body, .wk-scroll, .tg-scroll, .outlook-scroll.
+
+**No 30-day strip on the Plan (Outlook) page (same version).** He asked for
+the "Last 30 days · bias right · with it · against it · no bias" line at the
+top of the page to go. outlook.js no longer puts `outlookStrip` there (the
+function stays in an-outlook.js, unused); the same figures are on
+Analytics → Outlook. outlookedge.mjs checks it is gone (16).
+
+**His GT3 RS video as a background (same version).** The seventh built-in
+background, "GT3 RS" (id gt3): his 10 s studio clip of the car, 1080p H.264
+as he sent it (re-wrapped with faststart, no audio), poster = its first
+frame at 960×540. It is pale, so its scrim is 0.55 (the dark ones sit at
+0.3–0.6). bgfirst and glass count eight tiles now.
+**…and his water clip (same version).** "Water" (id water): a Pexels clip
+(Rostislav Uzunov, 4K, 6 s) scaled to 1920×1080 30 fps, H.264 CRF 27 like
+the others, no sound; its last second is cross-faded into its first (1 s
+xfade), so the 5 s loop has no seam (the join differs from its neighbour by
+about as much as any two frames do). Scrim 0.45 (bright glints, dark
+water, like Moon). Nine tiles now.
+
+**Topography removed (same version).** He asked for it to go: out of
+BACKGROUNDS, its mp4 and poster deleted. A journal still set to 'topo'
+simply opens with no background (findBackground → null). Seven videos now;
+bgfirst/glass count eight tiles with None; the scrim check compares Torii
+with Rain instead.
+
+**The default picture is frosted glass (same version).** With no picture
+and no colour of his own chosen (accounts.userColour unset), the avatar in
+the top bar and on Settings is a frosted disc — the ink at 12–16% with a
+14 px backdrop blur, no ring — with the initials (or the person icon) in
+the ink. Choosing a colour in Settings still paints it that colour; a
+picture or video still covers it. avatar.mjs expects the frost now.
+
+**Confidence and Feeling after sliders (same version).** Three things he
+asked for on New trade:
+- The numbers sit under the knob: each tick is placed at the knob's own
+  centre for that step (12 px + (100% − 24 px) × i/4) instead of in even
+  fifths, so 2 and 4 line up (they were off by ~10 px).
+- No ring round the knob: the slider's own thumb is now invisible (it is
+  still what you drag and what the keys move) and a `.conf-knob` is drawn
+  over it — the ink with a soft highlight and shadow, no dark ring.
+- It moves: the knob glides to each step with a small spring (left, .26 s),
+  swells a little on hover, and while held (`.is-held`, pointerdown →
+  pointerup) grows to 1.22× with a soft halo. Motion off: no transitions.
+
+**The sliding highlight everywhere (same version).** He liked the top bar's
+pill sliding between tabs and wanted it on most buttons. The bars the whole
+app redraws already had it (segGlide). New `glide.js` (started once in
+app.js, `initGlide`) covers the groups that update in place or redraw only
+themselves: the chart timeframes (.tc-seg/.tv-seg/.rv-seg), the share sheet
+(.sh-seg), the trade form's single-choice chips (.exit-reasons, not
+Mistakes, which is several-at-once), the Appearance tiles (.lk-opts), and
+any switch inside a sheet or popover (Add account's Stage among them). On a
+press it notes where the chosen one is; after the click (polled for up to
+0.6 s, so a save-then-redraw still counts) it finds the group again — the
+same element or the one drawn where it was — and a pill in the new choice's
+own colour, radius and shadow slides from old to new (.seg-pill.go, .28 s),
+with the buttons above it (.has-glide). Skipped when motion is off, when
+nothing was chosen before, or when segGlide is already gliding it.
+
+**The slide without the twitch (same version).** He saw the pill twitch on
+New trade, 7D…All and the Lab's trades-ahead. Measured frame by frame, the
+chosen button's brightness jumped, dipped and wobbled: the old pill was not
+dressed like the button (its own fill, radius and ring), and at the end the
+button's fill faded back in from nothing over its 150 ms transition as the
+pill vanished. Now one `slidePill` (glide.js) does both paths (segGlide in
+shell.js calls it too): the pill copies the chosen button's computed
+background, radius and shadow; the button's transition is held off while
+the pill runs and for the frame it hands back; an old choice that is the
+same element loses its fill at once instead of fading under the pill; the
+end is the pill's own transitionend (fallback 420 ms); a group whose chosen
+button has no fill gets no pill. The same measure now rises smoothly to the
+final value and stays there.
+
+**Analytics' tabs read like the Journal's and the Lab's (same version).**
+Overview · Weekly winrate · Tags · Timing · Execution · Discipline · Outlook
+were a boxed seg beside the "Analytics" title; now they are the subnav —
+words, the chosen one underlined, the line sliding (shell.glide, name
+'sub-analytics'), the title kept for screen readers only, the head marked
+has-subnav like the others. They are still buttons on the page's own tab
+state (not routes). Tests that clicked `.head .seg button` for them use
+`.head :is(.seg, .an-tabs) button` (anviz, weekly, anexec, theme, newsday,
+anal, outlookedge, yearview, motion).
+
+## Page notes moved off the title row (2.38.1)
+- A page's note (`.head .sub`, e.g. Playbook "Shared across every account") is now a caption under its title: app.js `stackTitle()` wraps the h1 and its `.sub` in `.head-title` after `dressHead`.
+- On pages whose title is a row of tabs, nothing sits beside the tabs any more: Trades' "N closed on <account>" is gone (the Journal badge and top bar already say it); the Outlook save stamp (`.ol-stamp`, blank until something is saved), the Newswire source/stamp, the Analytics and Calendar-year counts and the Prop-firms disclaimer moved to the right, by the controls, as `.head-meta`.

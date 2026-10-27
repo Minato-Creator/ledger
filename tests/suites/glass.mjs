@@ -61,7 +61,7 @@ t('and glass off', (await root()).glass !== 'on');
 
 await p.evaluate(()=>location.hash='#/settings'); await p.waitForTimeout(500);
 const picks = await backgroundNames(p);
-t('the pictures are gone: None plus six videos', picks.length === 7 && !picks.some(n => /Lounge|Ridge|Canopy/.test(n)), picks.join(', '));
+t('the pictures are gone: None plus seven videos', picks.length === 8 && !picks.some(n => /Lounge|Ridge|Canopy/.test(n)), picks.join(', '));
 await openLook(p, 'custom');
 t('None is selected', await p.evaluate(()=>document.querySelector('.lk-bg.is-none').classList.contains('is-on')));
 t('every video tile shows its still', await p.evaluate(()=>[...document.querySelectorAll('.lk-bg:not(.is-none):not(.is-add)')].every(n=>/url\(/.test(getComputedStyle(n).backgroundImage))));

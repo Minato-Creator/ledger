@@ -818,12 +818,20 @@ export function addTrade(store, nav, existingId = null) {
       /* A click on the thumb where it already sits fires no input, so an
          unrated slide takes the value it was released on. */
       onPointerup: e => { if (f[key] == null) set(Number(e.target.value)); } });
-    const ticks = scale.map(([v, name]) => el('button', { type: 'button', onClick: () => set(v) }, el('b', {}, String(v)), el('span', {}, name)));
-    box.append(el('div', { class: 'conf-head' }, n, word, x), el('div', { class: 'conf-track' }, range), el('div', { class: 'conf-ticks' }, ...ticks));
+    const ticks = scale.map(([v, name], i) => el('button', { type: 'button', style: { '--i': String(i) }, onClick: () => set(v) }, el('b', {}, String(v)), el('span', {}, name)));
+    /* The knob you see is drawn over the slider's own (which stays, invisible,
+       for the dragging and the keys), so it can glide from step to step and
+       swell while it is held. */
+    const knob = el('span', { class: 'conf-knob', 'aria-hidden': 'true' });
+    const hold = on => box.classList.toggle('is-held', on);
+    range.addEventListener('pointerdown', () => hold(true));
+    for (const ev of ['pointerup', 'pointercancel', 'blur']) range.addEventListener(ev, () => hold(false));
+    box.append(el('div', { class: 'conf-head' }, n, word, x), el('div', { class: 'conf-track' }, range, knob), el('div', { class: 'conf-ticks' }, ...ticks));
     function set(v) {
       f[key] = v;
       if (v != null && Number(range.value) !== v) range.value = v;
-      box.className = 'conf' + (v == null ? ' is-unset' : ' is-' + v);
+      box.className = 'conf' + (v == null ? ' is-unset' : ' is-' + v) + (box.classList.contains('is-held') ? ' is-held' : '');
+      box.style.setProperty('--p', String(((v ?? Number(range.value)) - 1) / 4));
       n.textContent = v == null ? '—' : String(v);
       word.textContent = v == null ? 'Not rated' : scale[v - 1][1];
       range.setAttribute('aria-valuetext', v == null ? 'not rated' : scale[v - 1][1]);

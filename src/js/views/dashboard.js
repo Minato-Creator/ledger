@@ -38,6 +38,39 @@ const bigFigure = (text, u) => {
   return at < 0 ? [text] : [text.slice(0, at), el('small', {}, text.slice(at))];
 };
 
+/* The headline counts up to its figure, the way LiquidJournal's does but
+   quicker: from nothing when you arrive on the page (or switch unit or
+   account), from what it read before when the window changes. Its width is
+   held at the final figure's, so the trades and days beside it never shift.
+   Motion off, or the system asking for less, and it simply reads. */
+let shown = null;                                   // { key, d, r } — what the headline last read
+const COUNT_IN = 1600, COUNT_CHANGE = 900;          // ms
+const still = () => document.documentElement.dataset.motion === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+function countUp(node, key, d, r, f, u, fresh) {
+  const from = fresh || !shown || shown.key !== key ? { d: 0, r: 0 } : { d: shown.d, r: shown.r };
+  shown = { key, d, r };
+  if (still() || (Math.abs(from.d - d) < 0.005 && Math.abs(from.r - r) < 0.0005)) return;
+  const paint = (dd, rr) => {
+    node.replaceChildren(...bigFigure(f(dd, rr), u));
+    node.classList.toggle('is-pos', dd > 1e-9); node.classList.toggle('is-neg', dd < -1e-9);
+  };
+  requestAnimationFrame(() => {
+    if (!node.isConnected) return;
+    node.style.minWidth = Math.ceil(node.getBoundingClientRect().width) + 'px';
+    const ms = fresh ? COUNT_IN : COUNT_CHANGE, t0 = performance.now();
+    paint(from.d, from.r);
+    const step = now => {
+      if (!node.isConnected) return;
+      const p = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - p, 4);
+      const dd = from.d + (d - from.d) * e, rr = from.r + (r - from.r) * e;
+      if (shown?.key === key) shown = { key, d: dd, r: rr };
+      if (p < 1) { paint(dd, rr); requestAnimationFrame(step); }
+      else { paint(d, r); node.style.minWidth = ''; if (shown?.key === key) shown = { key, d, r }; }
+    };
+    requestAnimationFrame(step);
+  });
+}
+
 export function dashboard(store, nav) {
   const acct = store.activeAccount;
   const all = store.tradesFor(acct.id);
@@ -73,23 +106,25 @@ export function dashboard(store, nav) {
 
   return el('div', { class: 'view' }, head,
     el('div', { class: 'db-grid' },
-      heroCard(rows, s, K, f, u, store),
+      heroCard(rows, s, K, f, u, store, nav),
       edgeCard(rows, s, K, f),
       sourceCard(store, rows, K),
       recentCard(store, acct, nav)));
 }
 
 /* ---------- the result, and the curve that got there ---------- */
-function heroCard(rows, s, K, f, u, store) {
+function heroCard(rows, s, K, f, u, store, nav) {
   const label = (u === 'R' ? 'Net R' : u === '%' ? 'Net return' : 'Net P&L') + ' · '
     + (period === 'All' ? 'all time' : `last ${DAYS[period]} days`);
   const days = new Set(rows.map(x => x.t.date)).size;
   const hi = Math.max(0, ...rows.map(x => x.eq));
   const dd = deepest(rows);
+  const big = el('div', { class: 'db-big ' + sign(s.net) }, ...bigFigure(f(s.net, s.netR), u));
+  countUp(big, `${store.activeAccount?.id}/${u}`, s.net, s.netR, f, u, nav.fresh);
   return el('section', { class: 'card db-hero' },
     el('div', { class: 'db-k' }, label),
     el('div', { class: 'db-top' },
-      el('div', { class: 'db-big ' + sign(s.net) }, ...bigFigure(f(s.net, s.netR), u)),
+      big,
       el('div', { class: 'db-meta' },
         el('span', {}, el('b', {}, String(s.count)), ` trade${s.count === 1 ? '' : 's'}`),
         el('span', {}, el('b', {}, String(days)), ` day${days === 1 ? '' : 's'}`),
@@ -98,6 +133,26 @@ function heroCard(rows, s, K, f, u, store) {
     rows.length
       ? fitted((w, h) => drawHero(rows, K, store, w, h), 160)
       : el('div', { class: 'db-none' }, 'No trades in this window — widen it, or log one.'));
+}
+
+/* A curve through every point that never overshoots them (monotone cubic,
+   Fritsch–Carlson): the line runs smooth like LiquidJournal's, but a peak it
+   draws is a peak you had, never a bulge between two trades. */
+function smoothPath(pts) {
+  const f = v => v.toFixed(1), n = pts.length;
+  if (n < 3) return pts.map(([x, y], i) => `${i ? 'L' : 'M'}${f(x)},${f(y)}`).join('');
+  const dx = [], m = [], t = new Array(n);
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0] || 1e-6; m[i] = (pts[i + 1][1] - pts[i][1]) / dx[i]; }
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    t[i] = m[i - 1] * m[i] <= 0 ? 0 : 3 * (dx[i - 1] + dx[i]) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]);
+  }
+  let d = `M${f(pts[0][0])},${f(pts[0][1])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], h = dx[i] / 3;
+    d += `C${f(x0 + h)},${f(y0 + t[i] * h)} ${f(x1 - h)},${f(y1 - t[i + 1] * h)} ${f(x1)},${f(y1)}`;
+  }
+  return d;
 }
 
 function drawHero(rows, K, store, W, H) {
@@ -122,7 +177,7 @@ function drawHero(rows, K, store, W, H) {
   g.append(svg('line', { class: 'db-zero', x1: l, x2: r, y1: y0, y2: y0 }));
   g.append(svg('text', { class: 'lab-tick', x: r, y: y0 - 6, 'text-anchor': 'end' }, K.axis(0)));
 
-  const line = `M${l},${y0.toFixed(1)}` + rows.map(x => `L${X(x.i).toFixed(1)},${Y(x.eq).toFixed(1)}`).join('');
+  const line = smoothPath([[l, y0], ...rows.map(x => [X(x.i), Y(x.eq)])]);
   const area = line + `L${r},${y0.toFixed(1)}Z`;
   g.append(svg('path', { class: 'line-area', d: area, fill: `url(#dp${id})`, 'clip-path': `url(#cu${id})` }));
   g.append(svg('path', { class: 'line-area', d: area, fill: `url(#dn${id})`, 'clip-path': `url(#cd${id})` }));
@@ -134,7 +189,6 @@ function drawHero(rows, K, store, W, H) {
   if (hiI >= 0 && hiI !== n - 1) g.append(svg('circle', { class: 'an-high line-tip', cx: X(hiI), cy: Y(rows[hiI].eq), r: 3.5 }));
   const end = rows[n - 1];
   g.append(svg('circle', { class: 'an-end line-tip ' + (end.eq < 0 ? 'is-neg' : 'is-pos'), cx: X(n - 1), cy: Y(end.eq), r: 4.5 }));
-  g.append(svg('text', { class: 'db-endlbl line-tip', x: X(n - 1) - 10, y: Y(end.eq) + (Y(end.eq) - t < 18 ? 16 : -12), 'text-anchor': 'end' }, K.fmt(end.eq)));
 
   /* Four dates along the bottom, never the same day twice. */
   let last = '';

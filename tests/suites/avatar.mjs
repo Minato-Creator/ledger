@@ -62,7 +62,7 @@ const pick = name => p.evaluate(n=>[...document.querySelectorAll('.drop-opt')]
 /* ---------- a journal from before this existed ---------- */
 let s = await side();
 t('the initials come from the name', s.letters === 'MK', s.letters);
-t('and sit on the colour they always have', s.bg === 'rgb(244, 98, 74)', s.bg);
+t('and sit on frosted glass until a colour is chosen', /color\(srgb .* \/ 0\.1[0-9]*\)|rgba\(.*, 0\.1[0-9]*\)/.test(s.bg), s.bg);
 
 await p.evaluate(()=>{location.hash='#/settings/profile';}); await p.waitForTimeout(800);
 let d = await drop();

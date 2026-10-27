@@ -6,6 +6,7 @@ import { fs } from './fs.js';
 import { el, icon, clear, toast, brandWordmark } from './ui.js';
 import { topbar, fitTopbar, bottombar, subnav, sectionOf, tabOf, accountMenu, moreSheet, arrive, settle, segMarks, segGlide } from './shell.js';
 import { closeSheets } from './sheet.js';
+import { initGlide } from './glide.js';
 import { applyLastLook } from './look.js';
 import { openAppearance } from './views/appearance.js';
 import * as c from './calc.js';
@@ -185,6 +186,7 @@ function render() {
   const view = route();
   const main = el('main', { class: 'main' + (entered ? ' enter' : '') }, view);
   dressHead(view, hash);
+  stackTitle(view);
   root.classList.toggle('is-solo', solo);
   if (solo) root.append(main);
   else {
@@ -228,6 +230,17 @@ function dressHead(view, hash) {
   if (h1) { h1.classList.add('sr-only'); h1.after(tabs); } else head.prepend(tabs);
   head.classList.add('has-subnav');
   head.querySelector('.lab-views')?.remove();
+}
+/* A page's note ("Shared across every account") sits under its title as a
+   caption, not beside it in the same row, where it read as one more tab. */
+function stackTitle(view) {
+  const head = view.querySelector?.('.head');
+  const h1 = head?.querySelector(':scope > h1:not(.sr-only)');
+  const subs = head ? [...head.querySelectorAll(':scope > .sub')] : [];
+  if (!h1 || !subs.length) return;
+  const box = el('div', { class: 'head-title' });
+  h1.before(box);
+  box.append(h1, ...subs);
 }
 let enterTimer, settleTimer;
 
@@ -289,4 +302,5 @@ setInterval(() => {
 }, 60000);
 store.onChange(() => { /* views re-render explicitly; this is the hook for future live updates */ });
 
+initGlide();
 boot();

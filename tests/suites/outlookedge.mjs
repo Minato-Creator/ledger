@@ -85,7 +85,7 @@ t('Tue 8 Sep (Perth) trades in the candle from 17:00 New York on the 7th — 21:
 /* ===================== Analytics → Outlook ===================== */
 console.log('analytics');
 await go('#/analytics', 500);
-await p.click('.head .seg button:has-text("Outlook")'); await settle(200);
+await p.click('.head .an-tabs button:has-text("Outlook")'); await settle(200);
 await p.click('.head .seg button:has-text("All")'); await settle(300);
 await p.waitForFunction(() => !document.querySelector('.ao-right.is-wait'), null, { timeout: 15000 }).catch(() => {});
 await settle(200);
@@ -110,7 +110,7 @@ await p.waitForFunction(() => document.querySelector('.ob-grade.is-right, .ob-gr
 await settle(200);
 const O = await p.evaluate(() => ({ strip: document.querySelector('.ao-strip')?.textContent || '', grade: document.querySelector('.ob-grade')?.className || '', gtxt: document.querySelector('.ob-grade')?.textContent || '',
   verdict: document.querySelector('.ob-verdict')?.textContent || '' }));
-t('the strip at the top: the last 30 days — bias right, with it, against it, no bias', /Last 30 days/.test(O.strip) && O.strip.includes(`bias right${Math.round(RIGHT / 3 * 100)}%`) && O.strip.includes('with it+3.00R (2)') && O.strip.includes('against it−1.00R (1)') && O.strip.includes('no bias−0.50R (2)'), O.strip);
+t('no 30-day strip at the top any more — those figures live on Analytics → Outlook', O.strip === '', O.strip);
 t('under the block, the call graded on the day’s candle', GR[0].right ? /is-right/.test(O.grade) && /your Long was right/.test(O.gtxt) : /is-wrong/.test(O.grade) && /your Long was wrong/.test(O.gtxt), JSON.stringify(O));
 t('…beside what was traded (one long, one short: neither all with it nor all against)', /You said long/.test(O.verdict) && !/With your bias|Against what you wrote/.test(O.verdict), O.verdict);
 await shot('outlook');
@@ -121,8 +121,6 @@ await go('#/outlook/2026-09-20', 800);
 await p.fill('.ins-field', 'XAUUSD'); await p.press('.ins-field', 'Tab'); await settle(400);
 await p.click('.ob-head .seg .bias-long'); await settle(300);
 t('today’s call waits for its candle to close', /Graded once today/.test(await p.evaluate(() => document.querySelector('.ob-grade')?.textContent || '')), await p.evaluate(() => document.querySelector('.ob-grade')?.textContent || 'none'));
-await p.click('.ao-strip'); await settle(500);
-t('the strip opens Analytics → Outlook', await p.evaluate(() => location.hash === '#/analytics' && document.querySelector('.head .seg .is-on')?.textContent === 'Outlook'));
 
 t('no errors on the page', errs.length === 0, errs.slice(0, 3).join(' | '));
 await b.close();

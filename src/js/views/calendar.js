@@ -26,7 +26,7 @@ export function calendar(store, nav) {
   if (span === 'year') {
     const y = yearPanel(store, nav);
     return el('div', { class: 'view' },
-      el('header', { class: 'head' }, el('h1', {}, 'Calendar'), spanSwitch(nav), y.stepper, y.sub, el('div', { class: 'spacer' })),
+      el('header', { class: 'head' }, el('h1', {}, 'Calendar'), spanSwitch(nav), y.stepper, el('div', { class: 'spacer' }), y.sub),
       y.body);
   }
   const acct = store.activeAccount;

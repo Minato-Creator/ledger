@@ -101,8 +101,8 @@ t('second trades: two, making zero', JSON.stringify(pieces.pos[1]) === '[2,2,0]'
 /* ===================== Overview ===================== */
 console.log('overview');
 await p.evaluate(() => { location.hash = '#/analytics'; }); await p.waitForTimeout(600);
-await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(b => b.textContent.trim() === 'Overview').click());
-await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(b => b.textContent.trim() === 'All').click());
+await p.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === 'Overview').click());
+await p.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === 'All').click());
 await p.waitForTimeout(900);
 
 const tiles = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll('.an-tile')].map(n =>
@@ -183,7 +183,7 @@ await p.screenshot({ path: OUT + '/anviz-overview.png' });
 
 /* ===================== Timing ===================== */
 console.log('timing');
-await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(b => b.textContent.trim() === 'Timing').click());
+await p.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === 'Timing').click());
 await p.waitForTimeout(900);
 const hours = seq.map(x => Number(x.timeOpen.slice(0, 2)));
 const h0 = Math.min(...hours), h1 = Math.max(...hours);
@@ -264,7 +264,7 @@ await p.waitForTimeout(700);
 const netR = seq.reduce((a, x) => a + x.netResult / 1000, 0);
 const sesR = await p.evaluate(() => [...document.querySelectorAll('.an-stile b')].map(n => n.textContent));
 t('switched to R, the sessions read in R', sesR.every(s => /R$/.test(s)), sesR.join(' '));
-await p.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(b => b.textContent.trim() === 'Overview').click());
+await p.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === 'Overview').click());
 await p.waitForTimeout(700);
 const netTile = await p.evaluate(() => document.querySelector('.an-tile .v').textContent);
 t('and the Net tile in R', netTile === R2(netR), `${netTile} vs ${R2(netR)}`);
@@ -290,7 +290,7 @@ await p2.evaluate(() => { location.hash = '#/analytics'; }); await p2.waitForTim
 const bare = await p2.evaluate(() => document.querySelector('.main').innerText);
 t('two trades with no risk or times: Overview still draws', /Equity/.test(bare) && /\+\$250/.test(bare), bare.slice(0, 120));
 t('   and the R spread says what it needs', /Needs a risk %/.test(bare));
-await p2.evaluate(() => [...document.querySelectorAll('.head .seg button')].find(b => b.textContent.trim() === 'Timing').click());
+await p2.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === 'Timing').click());
 await p2.waitForTimeout(600);
 const bareT = await p2.evaluate(() => document.querySelector('.main').innerText);
 t('   Timing asks for open times instead of drawing an empty week', /Add an open time/.test(bareT) && /Needs an open and a close time/.test(bareT));

@@ -61,12 +61,12 @@ await p.addInitScript(FAKE_FS);
 await p.goto('http://127.0.0.1:8777/index.html',{waitUntil:'domcontentloaded'});
 await p.waitForSelector('.topbar',{timeout:8000});
 await p.evaluate(()=>{location.hash='#/analytics';}); await p.waitForTimeout(700);
-const period = k => p.evaluate(x=>[...document.querySelectorAll('.head .seg')][1]
+const period = k => p.evaluate(x=>[...document.querySelectorAll('.head .seg')].find(s=>/7D/.test(s.textContent))
   ?.querySelectorAll('button').forEach(b=>{ if(b.textContent.trim()===x) b.click(); }), k);
 await period('All'); await p.waitForTimeout(400);
 
-const tabs = () => p.evaluate(()=>[...document.querySelectorAll('.head .seg')][0]
-  .querySelectorAll('button')).then(()=>p.evaluate(()=>[...document.querySelectorAll('.head .seg button')].map(b=>b.textContent.trim())));
+const tabs = () => p.evaluate(()=>[...document.querySelectorAll('.head .an-tabs')][0]
+  .querySelectorAll('button')).then(()=>p.evaluate(()=>[...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].map(b=>b.textContent.trim())));
 t('Analytics offers a Tags tab', (await tabs()).includes('Tags'), JSON.stringify(await tabs()));
 
 /* the old bar list is gone from Overview */
@@ -74,7 +74,7 @@ t('Overview no longer carries a By tag card', await p.evaluate(()=>
   !/By tag/.test(document.querySelector('.main').innerText)),
   await p.evaluate(()=>[...document.querySelectorAll('.main h2')].map(h=>h.textContent).join(', ')));
 
-await p.evaluate(()=>[...document.querySelectorAll('.head .seg button')].find(b=>b.textContent.trim()==='Tags').click());
+await p.evaluate(()=>[...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b=>b.textContent.trim()==='Tags').click());
 await p.waitForTimeout(700);
 
 const groups = () => p.evaluate(()=>[...document.querySelectorAll('.tg-group')].map(g=>({
@@ -243,7 +243,7 @@ await p.evaluate(async()=>{
 });
 await p.evaluate(()=>{location.hash='#/';}); await p.waitForTimeout(300);
 await p.evaluate(()=>{location.hash='#/analytics';}); await p.waitForTimeout(600);
-await p.evaluate(()=>[...document.querySelectorAll('.head .seg button')].find(b=>b.textContent.trim()==='Tags').click());
+await p.evaluate(()=>[...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b=>b.textContent.trim()==='Tags').click());
 await p.waitForTimeout(500);
 t('with no groups set up it points at the Playbook rather than showing a blank',
   await p.evaluate(()=>/No tag groups yet/.test(document.querySelector('.main').innerText)),

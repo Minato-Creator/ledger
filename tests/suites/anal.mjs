@@ -53,7 +53,7 @@ await p.evaluate(()=>[...document.querySelectorAll('.head button')].find(b=>b.te
 await p.waitForTimeout(700);
 
 const txt = () => p.evaluate(()=>document.querySelector('.main').innerText);
-const tabTo = async (name) => { await p.evaluate(n=>[...document.querySelectorAll('.head .seg button')]
+const tabTo = async (name) => { await p.evaluate(n=>[...document.querySelectorAll('.head :is(.seg, .an-tabs) button')]
   .find(b=>b.textContent.trim()===n).click(), name); await p.waitForTimeout(800); };
 
 // ---- overview
@@ -64,7 +64,7 @@ t('Overview keeps setups and instruments', /By setup/.test(await txt()) && /By i
 t('and tags are no longer a bar list here', !/By tag/.test(await txt()),
   ([...(await txt()).matchAll(/By [a-z]+/g)].map(m=>m[0]).join(', ')));
 t('they have a tab of their own', await p.evaluate(()=>
-  [...document.querySelectorAll('.head .seg button')].some(b=>b.textContent.trim()==='Tags')));
+  [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].some(b=>b.textContent.trim()==='Tags')));
 await p.screenshot({path:OUT + '/an-overview.png'});
 
 // ---- discipline

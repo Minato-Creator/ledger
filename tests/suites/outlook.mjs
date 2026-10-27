@@ -63,7 +63,7 @@ await p.evaluate(()=>{ location.hash='#/outlook'; }); await p.waitForTimeout(700
 t('the page opens on today', await p.evaluate(()=>/today/.test(document.querySelector('.day-nav').innerText)),
   await p.evaluate(()=>document.querySelector('.day-nav')?.innerText.replace(/\n/g,' ')));
 t('it starts with one empty block', await p.evaluate(()=>document.querySelectorAll('.outlook-block').length) === 1);
-t('and says nothing is written yet', await p.evaluate(()=>/nothing written yet/.test(document.querySelector('.head').innerText)));
+t('and claims no save yet', await p.evaluate(()=>!document.querySelector('.ol-stamp').textContent));
 t('tomorrow is not reachable', await p.evaluate(()=>[...document.querySelectorAll('.day-nav button')].pop().disabled));
 
 // ---- write the first instrument
@@ -133,7 +133,7 @@ await p.waitForTimeout(800);
 t('yesterday is a blank page', await p.evaluate(()=>
   document.querySelectorAll('.outlook-block').length === 1
   && !document.querySelector('.outlook-notes').value
-  && /nothing written yet/.test(document.querySelector('.head').innerText)));
+  && !document.querySelector('.ol-stamp').textContent));
 await p.evaluate(()=>[...document.querySelectorAll('.day-nav button')].pop().click());
 await p.waitForTimeout(800);
 t('and today comes back with both instruments',
