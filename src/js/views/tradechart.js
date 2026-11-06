@@ -23,30 +23,42 @@
 
    Replay starts where you click, with pause, step and speed.
    ============================================================ */
-import { el, icon, toast } from '../ui.js';
+import { el, icon } from '../ui.js';
 import { pairMark } from '../flags.js';
 import * as cd from '../candles.js';
 import { createCore, CHART_TFS, TV_FONT, withAlpha, svgIcon, niceTicks, spread } from '../chart/core.js';
 import { openMenu } from '../chart/menu.js';
-import { createDrawings } from '../chart/drawings.js';
+import { createDrawings, defaultsOf } from '../chart/drawings.js';
 import { paintSessions, paintSessionNames, newsFor as newsOf, paintNews } from '../chart/overlays.js';
 import { rsiFor } from '../chart/rsi.js';
+import { tslOf, onTsl, tslLegend, openTslSettings, paintTslBack, paintTslFront } from '../chart/threesl.js';
+import { pad2 } from '../calc.js';
 
 export { CHART_TFS, niceTicks, spread };
 export const SPEEDS = [['1×', 250], ['2×', 125], ['5×', 50], ['10×', 25]];
 const TF_KEY = 'quire:chartTf', SPEED_KEY = 'quire:replaySpeed', FOLLOW_KEY = 'quire:replayFollow';
-const SESS_KEY = 'quire:chartSessions', NEWS_KEY = 'quire:chartNews', RSI_KEY = 'quire:chartRsi';
-const DAY = 86400;
+const SESS_KEY = 'quire:chartSessions', NEWS_KEY = 'quire:chartNews', RSI_KEY = 'quire:chartRsi', TSL_KEY = 'quire:chart3sl';
 const FOOT = 'for viewing only · prices can differ slightly from your broker’s';
 
 const remember = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* fine */ } };
 const recall = k => { try { return localStorage.getItem(k); } catch { return null; } };
 
+/** An execution arrow, its tip at (x, y): up (a buy, under the candle) or down (a sell, over it). */
+function execArrow(g, x, y, up) {
+  const k = up ? 1 : -1;
+  g.beginPath();
+  g.moveTo(x, y); g.lineTo(x - 6.5, y + k * 7.5); g.lineTo(x - 2, y + k * 7.5); g.lineTo(x - 2, y + k * 16);
+  g.lineTo(x + 2, y + k * 16); g.lineTo(x + 2, y + k * 7.5); g.lineTo(x + 6.5, y + k * 7.5); g.closePath(); g.fill();
+}
+
 export function tradeChart(store, nav, t, opts = {}) {
   const now = opts.now ?? Date.now() / 1000;
-  const height = opts.height || 340;
+  /* minimal: the trade page's chart (Minato) — no drawing tools, no legend,
+     no small print, narrow scales; the room goes to the candles */
+  const minimal = !!opts.minimal;
+  const height = opts.height || (minimal ? 362 : 340);
   const inst = cd.oandaInstrument(t.pair);
-  const card = el('section', { class: 'card tc' + (opts.wide ? ' is-wide' : ''), style: { flex: 'none' } });
+  const card = el('section', { class: 'card tc' + (opts.wide ? ' is-wide' : '') + (minimal ? ' is-minimal' : ''), style: { flex: 'none' } });
 
   const sub = el('span', { class: 'tc-sub' }, inst ? 'OANDA · mid' : '');
   const title = el('h3', {}, t.pair ? pairMark(t.pair, 20) : null, t.pair || 'Chart', sub);
@@ -55,6 +67,8 @@ export function tradeChart(store, nav, t, opts = {}) {
   /* ready: once it shows what it is going to show — a message, or the chart drawn */
   let ready;
   card.__ready = new Promise(r => { ready = r; });
+  /* the trade's prices changed (Review: typed into the form) — the chart reads them again; until it is drawn there is nothing to redo */
+  card.__update = () => {};
   const message = (text, ...actions) => {
     card.classList.add('is-quiet');
     card.replaceChildren(headOnly(), el('div', { class: 'tc-msg' }, el('span', {}, text), ...actions));
@@ -86,15 +100,20 @@ export function tradeChart(store, nav, t, opts = {}) {
   function chart(res) {
     const dp = cd.decimalsOf(inst);
     const num = v => (v == null || v === '' ? NaN : Number(v));
-    const entry = num(t.entryPrice), sl = num(t.stopLoss), tp = num(t.takeProfit), exitP = num(t.exitPrice);
     const closed = t.status !== 'open';
     /* plain: a chart of the instrument alone (the Outlook), no trade on it */
     const plain = !!opts.plain;
     const timed = !!t.timeOpen && !plain;
-    const eps = Math.abs(entry || 1) * 1e-6;
+    /* the prices are read off the trade, and read again when it changes (card.__update) */
+    let entry, sl, tp, exitP, eps, hasExit, exitOwnTag;
     const same = (a, b) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= eps;
-    const hasExit = closed && Number.isFinite(exitP);
-    const exitOwnTag = hasExit && !same(exitP, tp) && !same(exitP, sl) && !same(exitP, entry);
+    function readPrices() {
+      entry = num(t.entryPrice); sl = num(t.stopLoss); tp = num(t.takeProfit); exitP = num(t.exitPrice);
+      eps = Math.abs(entry || 1) * 1e-6;
+      hasExit = closed && Number.isFinite(exitP);
+      exitOwnTag = hasExit && !same(exitP, tp) && !same(exitP, sl) && !same(exitP, entry);
+    }
+    readPrices();
 
     const newsFor = () => newsOf(store, inst, res.rows[0][0], res.rows[res.rows.length - 1][0] + 60);
     let news = newsFor();
@@ -108,7 +127,8 @@ export function tradeChart(store, nav, t, opts = {}) {
     let lastGroups = [];
     let loadingMore = false, monthFailed = false;
     /* what is shown: the killzones and the news can each be switched off */
-    let showSessions = recall(SESS_KEY) !== '0', showNews = recall(NEWS_KEY) !== '0', showRsi = recall(RSI_KEY) === '1';
+    /* all off until you turn one on (Indicators ▾) — he wanted a clean chart to begin with */
+    let showSessions = recall(SESS_KEY) === '1', showNews = recall(NEWS_KEY) === '1', showRsi = recall(RSI_KEY) === '1', showTsl = recall(TSL_KEY) === '1';
     /* choosing where a replay starts, TradingView's way: a line follows the
        pointer and everything after it is dimmed; a click starts there */
     let picking = false, pickPrev = null;
@@ -117,7 +137,7 @@ export function tradeChart(store, nav, t, opts = {}) {
     const plot = el('div', { class: 'tc-plot', style: { height: height + 'px' } });
     const core = createCore(plot, {
       store, inst, dp, symbol: inst.replace('_', '').replace('NAS100USD', 'NAS100'), source: 'OANDA',
-      bars: cd.aggregate(res.rows, tf), tf,
+      bars: cd.aggregate(res.rows, tf), tf, compact: minimal,
       hooks: {
         limit: () => (replay ? replay.upto : null),
         tags: () => [...tagList(), ...(dr ? dr.tags() : [])],
@@ -133,12 +153,34 @@ export function tradeChart(store, nav, t, opts = {}) {
     });
     const rsi = rsiFor(store, core, { tf: () => tf, plot, remove: () => setShow('rsi', false) });
     const bars = () => core.bars;
+    /* 3SL (Minato's own indicator): its name under the instrument's, its settings app-wide */
+    const tslLeg = tslLegend(plot, { open: () => openTslSettings(store), remove: () => setShow('3sl', false) });
+    onTsl(plot, () => core.draw());
+    let tslBoxes = [];
     /* the drawings: kept per instrument and per place — the trade page and
        the weekly review share one set (the execution's markings), the
        Outlook keeps its own (opts.lines = 'outlook') */
     const dkey = opts.lines ? `${opts.lines}:${inst}` : inst;
     const acct = store.activeAccount;
+    /* Review (opts.position): TradingView's position tool drawn from the trade
+       itself — in at the entry, out at the exit, its stop and target, the
+       labels always showing and the closed P&L the trade's own — redrawn as
+       the prices are changed. Only to look at: it is not one of your drawings. */
+    const showPos = () => !!opts.position && timed && [entry, sl, tp].every(Number.isFinite) && sl !== entry && tp !== entry;
+    function posDrawing() {
+      if (!showPos()) return null;
+      const type = t.side === 'sell' ? 'short' : 'long', df = defaultsOf(type);
+      const own = store.data.accounts.accounts.find(a => a.id === t.accountId) || acct;
+      const end = hasExit ? Math.max(res.exit, res.entry + tf * 60) : Math.max(res.exit, res.entry + tf * 60 * 12);
+      const net = t.netResult == null || t.netResult === '' ? NaN : Number(t.netResult);
+      return { id: 'trade-position', type, __extra: true, locked: true, hideOn: [], at: null,
+        pts: [{ t: res.entry, p: entry }, { t: end, p: entry }], sl, tp,
+        style: { ...df.style, always: true }, text: df.text,
+        inputs: { account: own?.startingBalance || 100000, risk: Number(t.riskPercent) || own?.defaultRiskPercent || 1, riskMode: '%' },
+        closed: hasExit ? { t: res.exit, p: exitP, pnl: Number.isFinite(net) ? net : null } : null };
+    }
     const dr = createDrawings(core, plot, { store, dkey, inst, dp, tf: () => tf, rows: () => res.rows,
+      extras: () => { const d = posDrawing(); return d ? [d] : []; },
       replayT: () => (replay ? bars()[replay.upto][0] + tf * 60 : Infinity),
       account: () => ({ balance: acct?.startingBalance, risk: acct?.defaultRiskPercent }),
       onTool: k => { if (k) { cancelPick(); if (replay && replay.playing) togglePlay(); } paintFoot(); } });
@@ -211,11 +253,13 @@ export function tradeChart(store, nav, t, opts = {}) {
         { label: 'Relative Strength Index', checked: showRsi, cls: 'tc-ind-rsi', act: () => setShow('rsi', !showRsi) },
         { label: 'Sessions', checked: showSessions, cls: 'tc-ind-sessions', act: () => setShow('sessions', !showSessions) },
         { label: 'News · red folders', checked: showNews, cls: 'tc-ind-news', act: () => setShow('news', !showNews) },
+        { label: '3SL', checked: showTsl, cls: 'tc-ind-3sl', act: () => setShow('3sl', !showTsl) },
       ], r.left, r.bottom + 4, { cls: 'tc-indmenu' });
     }
     function setShow(which, on) {
       if (which === 'sessions') { showSessions = on; remember(SESS_KEY, on ? '1' : '0'); }
       else if (which === 'rsi') { showRsi = on; remember(RSI_KEY, on ? '1' : '0'); }
+      else if (which === '3sl') { showTsl = on; remember(TSL_KEY, on ? '1' : '0'); }
       else { showNews = on; remember(NEWS_KEY, on ? '1' : '0'); }
       core.draw();
     }
@@ -265,15 +309,16 @@ export function tradeChart(store, nav, t, opts = {}) {
       return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${clock(d)}`;
     };
 
-    const footL = el('span', { class: 'tc-read' }, FOOT);
+    const footL = el('span', { class: 'tc-read' }, minimal ? '' : FOOT);
+    const foot = el('div', { class: 'tc-foot', hidden: minimal }, footL);
     card.replaceChildren(
       el('div', { class: 'tc-head' }, title, el('div', { class: 'spacer' }), seg, rtop, indBtn, replayBtn, resetBtn, gearBtn, fullBtn),
-      el('div', { class: 'tc-body' }, dr.bar, plot), rbar,
-      el('div', { class: 'tc-foot' }, footL));
+      el('div', { class: 'tc-body' }, minimal ? null : dr.bar, plot), rbar, foot);
+    /* minimal keeps only the words that ask something of you (choosing a replay's start) */
     const hint = () => dr?.tool ? 'click, or drag, to draw · Shift keeps a line flat · Esc to stop'
       : picking ? 'click where the replay should start · Esc to cancel'
-      : monthFailed ? 'the rest of the month could not be loaded' : FOOT;
-    const paintFoot = () => { const h = hint(); if (footL.textContent !== h) footL.textContent = h; };
+      : monthFailed ? 'the rest of the month could not be loaded' : minimal ? '' : FOOT;
+    const paintFoot = () => { const h = hint(); if (footL.textContent !== h) footL.textContent = h; foot.hidden = !h; };
     /* Full screen: the card takes the whole window, Esc gives it back.
        The card is lifted out to the page itself while it is full screen, so
        nothing it sits in (a scrolling column, glass, an animation) can hold
@@ -415,17 +460,20 @@ export function tradeChart(store, nav, t, opts = {}) {
       return out;
     }
     let tagC = null;
+    let arrowMarks = [];            // the execution arrows last painted (for the tests)
+    plot.__arrows = () => arrowMarks;
     const tagColours = () => {
       if (!tagC) { const cs = getComputedStyle(plot); tagC = { flat: cs.getPropertyValue('--flat').trim() || '#787878', profit: cs.getPropertyValue('--profit').trim() || '#18AC65', loss: cs.getPropertyValue('--loss').trim() || '#F4624A', yellow: cs.getPropertyValue('--yellow').trim() || '#FFB800' }; }
       return tagC;
     };
     function paintBack(g, G, C) {
       tagC = null; FF = C.font;
-      const { pw, ph, xT, Y, replayT } = G;
-      /* killzones */
+      const { pw, xT, Y, replayT } = G;
+      /* killzones; 3SL's session boxes, behind the candles */
       if (showSessions) paintSessions(g, G, C, sessions, tf);
-      /* the position */
-      if (timed && Number.isFinite(entry)) {
+      tslBoxes = showTsl ? paintTslBack(g, G, tslOf(store), bars(), tf) : [];
+      /* the position (in Review the position tool draws it instead) */
+      if (timed && Number.isFinite(entry) && !showPos()) {
         const end = Math.min(res.exit, replayT);
         const xa = xT(res.entry), xz = Math.max(xT(end), xa + 2);
         if (end > res.entry && xz > 0 && xa < pw) {
@@ -447,6 +495,8 @@ export function tradeChart(store, nav, t, opts = {}) {
       /* killzone names along the bottom; red-folder news */
       if (showSessions) paintSessionNames(g, G, C, sessions, tf, f);
       lastGroups = showNews ? paintNews(g, G, C, news, f) : [];
+      if (showTsl) paintTslFront(g, G, C, tslOf(store), { bars: bars(), tf, ticker: inst.replace('_', ''), boxes: tslBoxes });
+      tslLeg.place(showTsl);
       /* the drawings */
       dr.paint(g, G, C);
       g.textBaseline = 'alphabetic';
@@ -459,6 +509,24 @@ export function tradeChart(store, nav, t, opts = {}) {
       };
       if (timed && Number.isFinite(entry) && res.entry <= replayT) dot(xT(res.entry), Y(entry), 'Entry', 'left');
       if (timed && hasExit && res.exit <= replayT) dot(xT(res.exit), Y(exitP), 'Exit', 'right');
+      /* the executions, TradingView's way (Chart Settings → Trading): a buy is
+         a blue arrow under its candle pointing up, a sell a red one over it
+         pointing down — in on the trade's side, out on the other */
+      arrowMarks = [];
+      if (timed && core.settings.trading.arrows !== false) {
+        const buyIn = t.side !== 'sell';
+        for (const [T, buy] of [[res.entry, buyIn], [hasExit ? res.exit : null, !buyIn]]) {
+          if (T == null || T > replayT) continue;
+          const i = Math.floor(core.idxAt(T) + 1e-9), b = bars()[i];
+          if (!b) continue;
+          const x = G.xI(i);
+          if (x < -12 || x > pw + 12) continue;
+          const y = buy ? Y(b[3]) + 5 : Y(b[2]) - 5;
+          g.fillStyle = buy ? '#3B82F6' : C.loss;
+          execArrow(g, x, y, buy);
+          arrowMarks.push({ buy, x, y, low: Y(b[3]), high: Y(b[2]) });
+        }
+      }
       /* choosing the replay's start: what would be hidden is dimmed */
       const hv = core.hover;
       if (picking && hv && hv.x < pw) {
@@ -476,6 +544,11 @@ export function tradeChart(store, nav, t, opts = {}) {
     fit();
     paintHead();
     core.draw();
+    card.__update = () => {
+      readPrices();
+      if (timed) core.fitPrices([entry, sl, tp, hasExit ? exitP : NaN]);
+      core.draw();
+    };
     /* The trade's week is on screen; the rest of its month follows. */
     if (res.rest?.length) {
       loadingMore = true; paintSub();
@@ -491,8 +564,8 @@ export function tradeChart(store, nav, t, opts = {}) {
       get speed() { return SPEEDS[speed][0]; }, get drawing() { return dr.tool; }, dr,
       get news() { return news.map(n => n.title); }, get days() { return res.days.slice(); }, get loadingMore() { return loadingMore; },
       get auto() { return core.yr.auto; }, get picking() { return picking; }, get full() { return full; },
-      get shows() { return { sessions: showSessions, news: showNews, rsi: showRsi }; }, rsi, get yRange() { return { lo: core.yr.lo, hi: core.yr.hi }; }, get follow() { return follow; },
-      get pw() { return core.geom().pw; }, get ph() { return core.geom().ph; }, get hidden() { return dr.hidden; }, core,
+      get shows() { return { sessions: showSessions, news: showNews, rsi: showRsi, tsl: showTsl }; }, tslBoxes: () => tslBoxes.map(B => ({ ...B })), rsi, get yRange() { return { lo: core.yr.lo, hi: core.yr.hi }; }, get follow() { return follow; },
+      get pw() { return core.geom().pw; }, position: () => posDrawing(), get ph() { return core.geom().ph; }, get hidden() { return dr.hidden; }, core,
       firstBar: () => res.rows[0][0], lastBar: () => res.rows[res.rows.length - 1][0],
       barTimes: () => bars().map(b => b[0]), barAt: i => bars()[i], groups: () => lastGroups, lineCount: () => dr.list().length, idxAt, tags: () => tagsNow(), dots: () => dotsNow(),
       xy: (T, p) => { const G = core.geom(); return { x: G.xT(T), y: G.Y(p) }; },
@@ -527,6 +600,4 @@ export function tradeChart(store, nav, t, opts = {}) {
 /* ---------- small pieces ---------- */
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const pad2 = n => String(n).padStart(2, '0');
 const clock = d => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-function localDay(T) { const d = new Date(T * 1000); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }

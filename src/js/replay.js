@@ -205,8 +205,6 @@ export function isoWeek(dateStr) {
   return `${year}-W${String(week).padStart(2, '0')}`;
 }
 
-export function weekKey(y, w) { return `${y}-W${String(w).padStart(2, '0')}`; }
-
 /** Monday and Sunday of an ISO week, as YYYY-MM-DD. */
 export function weekRange(key) {
   const [y, w] = key.split('-W').map(Number);
@@ -226,14 +224,4 @@ export function weeksInYear(y) {
   const dow = n => (new Date(Date.UTC(n, 0, 1)).getUTCDay() + 6) % 7;
   const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
   return dow(y) === 3 || (leap && dow(y) === 2) ? 53 : 52;
-}
-
-export function groupByWeek(trades) {
-  const m = new Map();
-  for (const t of trades) {
-    const k = isoWeek(t.date);
-    if (!m.has(k)) m.set(k, []);
-    m.get(k).push(t);
-  }
-  return m;
 }

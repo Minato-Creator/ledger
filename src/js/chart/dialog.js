@@ -7,7 +7,7 @@
    puts back what was saved, Ok keeps it.
    ============================================================ */
 import { el, toast } from '../ui.js';
-import { DEFAULTS, TIMEZONES, TEXT_SIZES, chartSettings, preview, dropPreview, saveSettings, merge,
+import { DEFAULTS, TIMEZONES, TEXT_SIZES, chartSettings, preview as previewIn, dropPreview as dropIn, saveSettings, merge,
   templateNames, templateOf, saveTemplate, dropTemplate, tzLabel } from './settings.js';
 import { swatch, closeColour } from './colour.js';
 import { closeMenus } from './menu.js';
@@ -29,10 +29,11 @@ const icon = d => {
 };
 let tabNow = 'symbol';
 
-export function openChartSettings(store, { tab, trading = false } = {}) {
+export function openChartSettings(store, { tab, trading = false, scope = 'main' } = {}) {
   closeMenus();
   document.querySelector('.tv-dialog-wrap')?.remove();
-  let draft = structuredClone(chartSettings(store));
+  let draft = structuredClone(chartSettings(store, scope));
+  const preview = d => previewIn(d, scope), dropPreview = () => dropIn(scope);
   if (tab) tabNow = tab;
 
   const body = el('div', { class: 'tv-dbody' });
@@ -97,20 +98,22 @@ export function openChartSettings(store, { tab, trading = false } = {}) {
     trading() {
       const t = draft.trading;
       return [
-        section('Positions and orders'),
-        row(check('Show the lines on the chart', t.lines, (d, v) => { d.trading.lines = v; }, 'tv-tr-lines')),
-        row(check('Profit and loss on the lines', t.pnl, (d, v) => { d.trading.pnl = v; }, 'tv-tr-pnl')),
+        section(trading ? 'Positions and orders' : 'Executions'),
+        trading ? row(check('Show the lines on the chart', t.lines, (d, v) => { d.trading.lines = v; }, 'tv-tr-lines')) : null,
+        trading ? row(check('Profit and loss on the lines', t.pnl, (d, v) => { d.trading.pnl = v; }, 'tv-tr-pnl')) : null,
         row(check('Execution arrows — buys under the candle, sells over it', t.arrows, (d, v) => { d.trading.arrows = v; }, 'tv-tr-arrows')),
-        el('p', { class: 'tv-note' }, 'Replay only — mid prices, no spread; a candle that reaches the stop and the target is a loss.'),
+        el('p', { class: 'tv-note' }, trading ? 'Replay — mid prices, no spread; a candle that reaches the stop and the target is a loss.'
+          : 'Where you got in and out: a buy is an arrow under its candle, a sell one over it.'),
       ];
     },
     canvas() {
       const c = draft.canvas;
       return [
         section('Chart basic styles'),
-        row('Background', seg([['quire', 'Laminar’s'], ['solid', 'Solid'], ['gradient', 'Gradient']], c.bg, (d, v) => { d.canvas.bg = v; }, 'tv-bg'),
-          c.bg === 'quire' ? null : sw(c.bgColor, (d, v) => { d.canvas.bgColor = v; }, 'tv-bg1'),
+        row('Background', seg([['quire', 'Laminar’s'], ['clear', 'Clear'], ['solid', 'Solid'], ['gradient', 'Gradient']], c.bg, (d, v) => { d.canvas.bg = v; }, 'tv-bg'),
+          c.bg === 'quire' || c.bg === 'clear' ? null : sw(c.bgColor, (d, v) => { d.canvas.bgColor = v; }, 'tv-bg1'),
           c.bg === 'gradient' ? sw(c.bgColor2, (d, v) => { d.canvas.bgColor2 = v; }, 'tv-bg2') : null),
+        c.bg === 'clear' ? el('p', { class: 'tv-note' }, 'See-through to your background — in Replay the whole screen is, the app hidden behind it.') : null,
         row('Grid lines',
           check('Vert', c.grid.vert, (d, v) => { d.canvas.grid.vert = v; }, 'tv-grid-v'),
           check('Horz', c.grid.horz, (d, v) => { d.canvas.grid.horz = v; }, 'tv-grid-h'),
@@ -127,8 +130,7 @@ export function openChartSettings(store, { tab, trading = false } = {}) {
     },
   };
   function paint() {
-    if (tabNow === 'trading' && !trading) tabNow = 'symbol';
-    nav.replaceChildren(...TABS.filter(([k]) => trading || k !== 'trading').map(([k, text, d]) => el('button', { type: 'button', class: 'tv-dtab' + (k === tabNow ? ' is-on' : ''), 'data-tab': k,
+    nav.replaceChildren(...TABS.map(([k, text, d]) => el('button', { type: 'button', class: 'tv-dtab' + (k === tabNow ? ' is-on' : ''), 'data-tab': k,
       onClick: () => { tabNow = k; closeColour(); paint(); } }, icon(d), el('span', {}, text))));
     const keep = body.scrollTop;
     body.replaceChildren(...pages[tabNow]().filter(Boolean));
@@ -177,7 +179,7 @@ export function openChartSettings(store, { tab, trading = false } = {}) {
   const ok = async () => {
     const s = structuredClone(draft);
     close(true);
-    try { await saveSettings(store, s); } catch (e) { dropPreview(); toast('Could not save the chart settings: ' + (e.message || e), 'bad'); }
+    try { await saveSettings(store, s, scope); } catch (e) { dropPreview(); toast('Could not save the chart settings: ' + (e.message || e), 'bad'); }
   };
   const onKey = e => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (tmenu) closeT(); else close(false); }
@@ -187,7 +189,7 @@ export function openChartSettings(store, { tab, trading = false } = {}) {
     el('button', { type: 'button', class: 'tv-btn tv-cancel', onClick: () => close(false) }, 'Cancel'),
     el('button', { type: 'button', class: 'tv-btn is-primary tv-ok', onClick: ok }, 'Ok'));
   const dlg = el('div', { class: 'tv-ui tv-dialog', role: 'dialog', 'aria-label': 'Chart settings' },
-    el('div', { class: 'tv-dhead' }, el('span', {}, 'Settings'),
+    el('div', { class: 'tv-dhead' }, el('span', {}, scope === 'lab' ? 'Settings · the Lab’s own' : 'Settings'),
       el('button', { type: 'button', class: 'tv-x', title: 'Close', onClick: () => close(false) }, icon('M6 6l12 12M18 6L6 18'))),
     el('div', { class: 'tv-dmain' }, nav, body), foot);
   const wrap = el('div', { class: 'tv-dialog-wrap', onPointerdown: e => { if (e.target === wrap) close(false); } }, dlg);

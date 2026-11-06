@@ -179,7 +179,8 @@ const pnlBox = await p.evaluate(() => {
   const bg = k => { const e = document.querySelector(`.rt-cl.is-${k} .rt-pnl`); return e && [getComputedStyle(e).backgroundColor, e.className]; };
   return { tp: bg('tp'), sl: bg('sl'), profit: probe('--profit'), loss: probe('--loss') };
 });
-t('P&L in a box: green when up (the target), red when down (the stop)', pnlBox.tp?.[0] === pnlBox.profit && pnlBox.sl?.[0] === pnlBox.loss, JSON.stringify(pnlBox));
+/* blue and red whatever the win and loss colours (Minato, 5 Nov: a white win colour made white tags) */
+t('P&L in a box: blue when up (the target), red when down (the stop)', pnlBox.tp?.[0] === 'rgb(41, 98, 255)' && pnlBox.sl?.[0] === 'rgb(224, 50, 43)', JSON.stringify(pnlBox));
 /* let the replay run until it closes */
 const expect = await p.evaluate(async T => {
   const R = await import('/js/replaytrades.js'), s = document.querySelector('.rs').__session;

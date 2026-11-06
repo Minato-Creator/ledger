@@ -59,7 +59,7 @@ const wBefore = await p.evaluate(() => { location.hash = '#/'; return 0; });
 await p.waitForTimeout(140);
 const mid = await p.evaluate(() => ({ t: document.querySelector('.db-big').innerText.replace(/\s+/g, ''), w: document.querySelector('.db-big').style.minWidth,
   meta: Math.round(document.querySelector('.db-meta').getBoundingClientRect().left) }));
-await p.waitForTimeout(1800);
+await p.waitForTimeout(2300);
 const end = await p.evaluate(() => ({ t: document.querySelector('.db-big').innerText.replace(/\s+/g, ''), w: document.querySelector('.db-big').style.minWidth,
   meta: Math.round(document.querySelector('.db-meta').getBoundingClientRect().left) }));
 t('the big number counts up to it when you arrive', Math.abs(num(mid.t)) < Math.abs(net) && Math.abs(num(mid.t)) > 0 && end.t === $(net, 2).replace(/\s+/g, ''), `${mid.t} → ${end.t}`);

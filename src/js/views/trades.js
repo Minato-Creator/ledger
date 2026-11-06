@@ -1,12 +1,13 @@
-import { el, icon, ft } from '../ui.js';
+import { el, icon, ft, demoTag, isToday, todayTag } from '../ui.js';
 import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
-import { tradeRow } from './dashboard.js';
 import { CONFIDENCE, EXIT_REASONS, EXEC_TFS, MISTAKES, NEWS } from '../questions.js';
 import { newsDayOf } from '../newsday.js';
 import { openShare, canShare } from './share.js';
+import { oandaSyncButton } from './oandabtn.js';
+import { popover } from '../sheet.js';
 
-const filters = { q: '', side: 'all', result: 'all', setupId: 'all', mistake: 'all', exit: 'all', conf: 'all', tf: 'all', news: 'all' };
+const filters = { side: 'all', result: 'all', setupId: 'all', mistake: 'all', exit: 'all', conf: 'all', tf: 'all', news: 'all' };
 const FRESH = { ...filters };
 
 /* The questions New trade asks, as filters. A mistake filter of 'none' is
@@ -40,30 +41,31 @@ export function trades(store, nav) {
   if (filters.setupId !== 'all')rows = rows.filter(t => t.setupId === filters.setupId);
   if (filters.result !== 'all') rows = rows.filter(t => c.outcome(t) === filters.result);
   rows = rows.filter(t => matchesQuestions(t, filters, store.data.news));
-  if (filters.q.trim()) {
-    const q = filters.q.toLowerCase();
-    rows = rows.filter(t => (t.notes || '').toLowerCase().includes(q) || (t.pair || '').toLowerCase().includes(q));
-  }
 
   const s = c.summarise(acct, rows);
   const u = store.displayUnit;
   const cols = '150px 78px 92px minmax(0,1fr) 88px 100px 100px 68px 124px';
 
+  /* A filter: a chip saying what it is on, and a menu in the app's own look (not the system's list) */
   const chip = (label, value, key, options) => {
-    const b = el('select', {
-      class: 'm', style: {
-        fontSize: '11.5px', background: value === 'all' ? 'var(--grey-7)' : 'rgba(9,136,240,0.16)',
-        color: value === 'all' ? 'var(--grey-1)' : 'var(--blue-surface)',
-        borderRadius: 'var(--r-btn)', padding: '8px 12px', cursor: 'pointer', appearance: 'none',
-      },
-      onChange: e => { filters[key] = e.target.value; nav.refresh(); },
-    }, ...options.map(o => el('option', { value: o.v, selected: o.v === value }, o.l)));
-    /* As wide as what it shows, not as wide as its longest option — seven
-       of these share one row. */
     const shown = (options.find(o => o.v === value) || options[0]).l;
-    b.style.width = `${Math.ceil(shown.length * 6.95) + 26}px`;
+    const b = el('button', { type: 'button', class: 'm tr-chip' + (value !== 'all' ? ' is-set' : ''), 'data-key': key, 'data-all': options[0].l,
+        'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': `${label}: ${shown}`,
+        onClick: () => { if (b.__close) return b.__close(); menu(b, key, value, options); } },
+      el('span', {}, shown), icon('chevdown', 11, 'currentColor', 2.2));
     return b;
   };
+  function menu(anchor, key, value, options) {
+    const pick = v => { anchor.__close?.(); if (v !== value) { filters[key] = v; nav.refresh(); } };
+    const list = el('div', { class: 'pop-list' }, ...options.map((o, i) => el('button', {
+        type: 'button', class: 'pop-item' + (o.v === value ? ' is-on' : ''), role: 'menuitemradio', 'aria-checked': String(o.v === value),
+        'data-v': o.v, style: { '--i': String(Math.min(i, 10)) }, onClick: () => pick(o.v) },
+      el('span', { class: 'pop-n' }, o.l),
+      o.v === value ? icon('check', 12, 'currentColor', 2.4) : el('span', { class: 'tr-menu-gap' }))));
+    anchor.classList.add('is-open'); anchor.setAttribute('aria-expanded', 'true');
+    anchor.__close = popover(anchor, list, { cls: 'pop-filter', align: 'left',
+      onClose: () => { anchor.__close = null; anchor.classList.remove('is-open'); anchor.setAttribute('aria-expanded', 'false'); } });
+  }
 
   const open = store.openFor(acct.id);
 
@@ -77,16 +79,12 @@ export function trades(store, nav) {
           `${open.length} still open`)
       : null,
     el('div', { class: 'spacer' }),
+    oandaSyncButton(store, nav),
     el('button', { class: 'btn btn-ghost', onClick: () => nav.go('#/settings/vault') }, 'Export'),
     el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/new') }, icon('plus', 15, 'currentColor', 2), 'New trade'),
   );
 
   const bar = el('section', { class: 'card tr-bar', style: { minHeight: '64px', flex: 'none', padding: '12px 24px', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
-    el('label', { style: { display: 'flex', alignItems: 'center', gap: '9px', background: 'var(--grey-7)', borderRadius: 'var(--r-btn)', padding: '8px 14px', width: '200px' } },
-      icon('trades', 14, 'var(--grey-5)', 2),
-      el('input', { class: 'm', placeholder: 'Search notes & pairs', value: filters.q,
-                    style: { fontSize: '12px', background: 'none', width: '100%', color: 'var(--ink)' },
-                    onInput: e => { filters.q = e.target.value; scheduleRefresh(nav); } })),
     chip('Side', filters.side, 'side', [{ v: 'all', l: 'Side · all' }, { v: 'buy', l: 'Long' }, { v: 'sell', l: 'Short' }]),
     chip('Result', filters.result, 'result', [{ v: 'all', l: 'Result · all' }, { v: 'win', l: 'Wins' }, { v: 'loss', l: 'Losses' }, { v: 'breakeven', l: 'Break-even' }]),
     chip('Setup', filters.setupId, 'setupId', [{ v: 'all', l: 'Setup · all' }, ...store.playbook.setups.map(x => ({ v: x.id, l: x.name }))]),
@@ -151,9 +149,6 @@ export function trades(store, nav) {
   return el('div', { class: 'view' }, head, bar, openCard, table);
 }
 
-let refreshTimer;
-function scheduleRefresh(nav) { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => nav.refresh({ keepFocus: true }), 220); }
-
 function fullRow(t, acct, store, cols, nav) {
   const o = c.outcome(t);
   const fwd = c.isForward(t);
@@ -170,12 +165,15 @@ function fullRow(t, acct, store, cols, nav) {
       canShare(t) ? el('button', { class: 'row-share', title: 'Share this trade', 'aria-label': 'Share this trade',
         onClick: e => { e.stopPropagation(); openShare(store, nav, t.id); } }, icon('share', 13, 'currentColor', 1.9)) : null),
     el('span', { class: 'td', style: { color: long ? 'var(--green)' : 'var(--orange)' } }, long ? '▲ Long' : '▼ Short'),
-    el('span', { class: 'td' }, c.shortDate(t.date)),
-    el('span', { style: { fontSize: '12px', color: 'var(--grey-3)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' } },
-      setup ? setup.name : '—',
-      ...tags.slice(0, 2).map(tag => el('span', { class: 'm', style: {
-        marginLeft: '6px', padding: '1px 7px', borderRadius: 'var(--r-pill)',
-        background: 'var(--grey-7)', color: 'var(--grey-2)', fontSize: '10px' } }, tag.name))),
+    el('span', { class: 'td' }, isToday(t) ? todayTag() : c.shortDate(t.date)),
+    el('span', { class: 'tr-setup' },
+      el('span', { style: { fontSize: '12px', color: 'var(--grey-3)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', minWidth: 0 } },
+        setup ? setup.name : '—',
+        ...tags.slice(0, 2).map(tag => el('span', { class: 'm', style: {
+          marginLeft: '6px', padding: '1px 7px', borderRadius: 'var(--r-pill)',
+          background: 'var(--grey-7)', color: 'var(--grey-2)', fontSize: '10px' } }, tag.name))),
+      /* a demo trade says so at the end of the row's words, just before the numbers */
+      demoTag(t)),
     el('span', { class: 'num' }, fwd ? ft() : (t.size ?? '—')),
     el('span', { class: 'num' }, t.entryPrice ?? '—'),
     el('span', { class: 'num' }, t.exitPrice ?? '—'),
@@ -204,10 +202,11 @@ function openRow(t, acct, store, nav) {
       el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair)),
     el('span', { class: 'm', style: { fontSize: '11.5px', color: long ? 'var(--profit)' : 'var(--loss)' } },
       long ? '▲ Long' : '▼ Short'),
-    el('span', { class: 'td' }, `${c.shortDate(t.date)}${t.timeOpen ? '  ' + t.timeOpen : ''}`),
+    el('span', { class: 'td' }, isToday(t) ? todayTag() : c.shortDate(t.date), t.timeOpen ? '  ' + t.timeOpen : ''),
     el('span', { style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, overflow: 'hidden' } },
       setup ? el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--ink-2)' } }, setup.name) : null,
-      ...tags.slice(0, 2).map(tag => el('span', { class: 'tag' }, tag.name))),
+      ...tags.slice(0, 2).map(tag => el('span', { class: 'tag' }, tag.name)),
+      demoTag(t)),
     el('span', { class: 'num' }, t.entryPrice ?? '—'),
     el('span', { class: 'num', style: { color: t.stopLoss == null ? 'var(--grey-5)' : 'var(--loss)' } }, t.stopLoss ?? '—'),
     el('span', { class: 'num', style: { color: t.takeProfit == null ? 'var(--grey-5)' : 'var(--profit)' } }, t.takeProfit ?? '—'),

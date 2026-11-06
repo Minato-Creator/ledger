@@ -13,12 +13,6 @@
    listed is "Other", named by hand.
    ============================================================ */
 
-export const ACCOUNT_KINDS = [
-  ['eval', 'Evaluation', 'EVAL'],
-  ['funded', 'Funded', 'FUNDED'],
-  ['live', 'Live', 'LIVE'],
-];
-
 /* the colours an account can wear, and the currencies it can be in */
 export const ACCOUNT_COLOURS = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#7C5CFF', '#9A9A9A'];
 export const CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'JPY'];

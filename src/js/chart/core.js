@@ -17,7 +17,8 @@
    • Drag the chart: time sideways, prices up and down (auto switches off).
      Drag the price scale: squeeze / stretch prices about the middle. Drag
      the time scale: squeeze / stretch time with the right edge still.
-     Wheel: zoom time about the pointer; over the price scale, prices.
+     Wheel: zoom time 10% a notch with the right edge still (Ctrl: about
+     the pointer); sideways or Shift scrolls; over the price scale, prices.
      Double-click the price scale: auto. Double-click the time scale: reset.
    • Auto fits the candles on screen inside the top and bottom margins. It
      starts off here — Minato: "make it so it doesn't move at all" — and the
@@ -31,9 +32,11 @@
    ============================================================ */
 import { el } from '../ui.js';
 import * as cd from '../candles.js';
+import { pairMark } from '../flags.js';
 import { chartSettings, onSettings, wall } from './settings.js';
 import { openMenu, closeMenus, intervalBox, parseInterval } from './menu.js';
 import { openChartSettings } from './dialog.js';
+import { pad2 } from '../calc.js';
 
 export const TV_FONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
 export const CHART_TFS = [['1m', 1], ['3m', 3], ['5m', 5], ['15m', 15], ['30m', 30], ['1H', 60], ['4H', 240], ['D', 1440]];
@@ -41,7 +44,6 @@ export const tfLabel = m => CHART_TFS.find(([, x]) => x === m)?.[0] || `${m}m`;
 const MIN_SPACING = 0.5, MAX_SPACING = 60;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const pad2 = n => String(n).padStart(2, '0');
 
 /**
  * @param plot  the element the chart fills (it sets the size)
@@ -55,7 +57,13 @@ export function createCore(plot, o) {
   const store = o.store, hooks = o.hooks || {};
   let bars = o.bars || [], tf = o.tf || 5;
   const dpInst = o.dp ?? 2;
-  let S = chartSettings(store);
+  const scope = o.scope || 'main';            // 'lab' keeps its own settings (chart/settings.js)
+  let S = chartSettings(store, scope);
+  /* compact: the trade page's quiet chart (Minato) — no legend, smaller scales,
+     a narrow price scale of about four figures, the time scale tight to the edge */
+  const compact = !!o.compact;
+  const scaleText = () => (compact ? Math.min(S.scales.textSize, 10) : S.scales.textSize);
+  const LP = compact ? 6 : 9;                 // the space before a price on the scale
   /* the app's own font (Minato: the chart in the same font as the app) */
   let FONT = getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || TV_FONT;
 
@@ -63,6 +71,8 @@ export function createCore(plot, o) {
   const status = el('div', { class: 'tv-status' });
   const autoBtn = el('button', { class: 'tc-auto', title: 'Auto (fits the prices to the screen)', onClick: () => { setAuto(!yr.auto); } }, 'auto');
   plot.classList.add('tv-plot');
+  plot.classList.toggle('is-compact', compact);
+  status.hidden = compact;
   plot.append(canvas, status, autoBtn);
 
   /* time: spacing in px a bar, and the bar index at the right edge */
@@ -74,8 +84,8 @@ export function createCore(plot, o) {
 
   const unlisten = onSettings(s => {
     if (seen && !plot.isConnected) { unlisten(); return; }
-    S = s || chartSettings(store); draw();
-  });
+    S = s || chartSettings(store, scope); draw();
+  }, scope);
 
   /* ---------- where things are ---------- */
   const limit = () => Math.min(bars.length - 1, hooks.limit ? hooks.limit() ?? bars.length - 1 : bars.length - 1);
@@ -98,6 +108,18 @@ export function createCore(plot, o) {
   }
   const dp = () => (S.precision === 'default' ? dpInst : S.precision);
   const fmt = v => (Number.isFinite(v) ? Number(v).toFixed(dp()) : '');
+  /* Compact, the scale shows about four figures — 4097, 0.6604, 1.172 — and
+     one more only when the prices on screen sit too close for four to tell
+     apart (fewer than three steps between them); never more than it has. */
+  function scaleDp(lo, hi) {
+    if (!compact) return dp();
+    const top = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
+    let d = Math.max(0, 3 - Math.floor(Math.log10(top)));
+    while (d < dp() && (hi - lo) * 10 ** d < 3) d++;
+    return Math.min(d, dp());
+  }
+  let sdp = dp();
+  const sfmt = v => (Number.isFinite(v) ? Number(v).toFixed(compact ? sdp : dp()) : '');
 
   /* the candles on screen, high to low, inside the top and bottom margins */
   function candleRange(start, count) {
@@ -117,18 +139,28 @@ export function createCore(plot, o) {
 
   /* the price scale is as wide as its widest label */
   const meter = document.createElement('canvas').getContext('2d');
+  /* The price scale's width, held steady: measured with every digit as a 0
+     (so 24,952.7 and 24,625.0 are the same width), it widens at once when it
+     must and narrows only once the chart has been still a moment and is well
+     clear — a scale that breathed with the numbers shifted the whole chart
+     sideways while it was zoomed (Minato: "jittery"). */
+  let awKept = 0, stillSince = 0;
+  const busy = () => { stillSince = performance.now(); };
   function axisWidth(lo, hi) {
-    meter.font = `400 ${S.scales.textSize}px ${FONT}`;
-    const texts = [fmt(hi), fmt(lo), fmt((hi + lo) / 2)];
-    for (const tg of hooks.tags?.() || []) texts.push(fmt(tg.p));   // tags are colour and price only — no "TP" / "Entry" words widening the scale (Minato)
-    const w = Math.max(...texts.map(s => meter.measureText(s).width));
-    return Math.max(52, Math.ceil(w + 18));
+    meter.font = `400 ${scaleText()}px ${FONT}`;
+    sdp = scaleDp(lo, hi);
+    const texts = [sfmt(hi), sfmt(lo), sfmt((hi + lo) / 2)];
+    for (const tg of hooks.tags?.() || []) texts.push(sfmt(tg.p));   // tags are colour and price only — no "TP" / "Entry" words widening the scale (Minato)
+    const w = Math.max(...texts.map(s => meter.measureText(String(s).replace(/\d/g, '0')).width));
+    const need = compact ? Math.max(34, Math.ceil((w + LP * 2) / 2) * 2) : Math.max(52, Math.ceil((w + 18) / 4) * 4);
+    if (need > awKept || (need < awKept - 8 && !drag && !grab && performance.now() - stillSince > 700)) awKept = need;
+    return awKept;
   }
 
   function size() { return { W: plot.clientWidth, H: plot.clientHeight }; }
   function geom() {
     const { W, H } = size();
-    const fs = S.scales.textSize, tH = Math.round(fs + 14);
+    const fs = scaleText(), tH = Math.round(fs + (compact ? 8 : 14));
     if (yr.auto && bars.length) {
       const aw0 = axisWidth(yr.lo, yr.hi), pw0 = Math.max(10, W - aw0);
       const r = candleRange(view.right - pw0 / view.spacing, pw0 / view.spacing);
@@ -239,7 +271,7 @@ export function createCore(plot, o) {
       if (claim.cursor) { plot.dataset.cursor = claim.cursor; plot.classList.remove('is-hot'); }
       return;
     }
-    drag = { zone, x: e.clientX, y: e.clientY, lx: x, right: view.right, spacing: view.spacing, lo: G.lo, hi: G.hi, ph: G.ph, pw: G.pw,
+    drag = { zone, x: e.clientX, y: e.clientY, lx: x, ly: y, right: view.right, spacing: view.spacing, lo: G.lo, hi: G.hi, ph: G.ph, pw: G.pw,
       moved: false, vertical: false, claim };
     canvas.setPointerCapture(e.pointerId);
   });
@@ -250,6 +282,7 @@ export function createCore(plot, o) {
     if (grab) { grab.move?.(x, y, G, e); draw(); return; }
     if (divider) { divider.r = paneShare(divider, e.clientY); divider.q.resize?.(divider.r, false); draw(); return; }
     if (drag) {
+      busy();
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
       if (drag.moved) {
@@ -263,8 +296,14 @@ export function createCore(plot, o) {
             yr.lo = drag.lo + shift; yr.hi = drag.hi + shift;
           }
         } else if (drag.zone === 'price') {
+          /* TradingView's curve: the range is scaled about its middle by where
+             you began over where you are, each measured up from the bottom
+             with a fifth of the height added — so it is gentle near the top,
+             firmer near the bottom, and never touches time */
           fixScale(G);
-          const k = Math.exp(dy * 0.006), mid = (drag.lo + drag.hi) / 2, half = (drag.hi - drag.lo) / 2 * k;
+          const h = drag.ph, pad = (h - 1) * 0.2;
+          const from = Math.max(0, h - drag.ly), to = Math.max(0, h - (drag.ly + dy));
+          const k = Math.max(0.1, (from + pad) / (to + pad)), mid = (drag.lo + drag.hi) / 2, half = (drag.hi - drag.lo) / 2 * k;
           yr.lo = mid - half; yr.hi = mid + half;
         } else if (drag.zone === 'time') {
           /* TradingView's way: the right edge stays, and the time you grabbed follows the pointer —
@@ -301,23 +340,41 @@ export function createCore(plot, o) {
     over = false;
     if (!drag && !grab && !divider) { hover = null; plot.classList.remove('on-price', 'on-time', 'on-divider', 'is-hot'); plot.dataset.cursor = ''; hooks.leave?.(); draw(); }
   });
+  /* The wheel, measured off TradingView's own chart: no easing, every notch
+     lands at once. A notch (100px, or a line as 32px) zooms time 10% with the
+     right edge held still — a smaller flick, a smaller step; Ctrl (and a
+     trackpad pinch) zooms about the pointer instead. Sideways, or Shift,
+     scrolls (0.8px a pixel). Over the price scale, prices 2% a notch about
+     their middle. */
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
+    busy();
     const { x, y } = local(e), G = geom();
+    const px = v => (e.deltaMode === 1 ? v * 32 : e.deltaMode === 2 ? v * G.ph : v);
+    const dX = px(e.deltaX), dY = px(e.deltaY);
+    const step = d => Math.min(1, Math.abs(d) / 100);
     if (zoneOf(x, y, G) === 'price') {
+      if (!dY) return;
       fixScale(G);
-      const k = Math.exp(e.deltaY * 0.0015), p = G.P(y);
-      yr.lo = p - (p - G.lo) * k; yr.hi = p + (G.hi - p) * k;
-    } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) {
-      view.right += (e.deltaX || e.deltaY) / view.spacing;
+      const k = 1 + 0.0204 * step(dY), f = dY < 0 ? 1 / k : k;
+      const mid = (G.lo + G.hi) / 2, half = (G.hi - G.lo) / 2 * f;
+      yr.lo = mid - half; yr.hi = mid + half;
+    } else if (Math.abs(dX) > Math.abs(dY) || e.shiftKey) {
+      const d = Math.abs(dX) > Math.abs(dY) ? dX : -dY;
+      view.right += d * 0.8 / view.spacing;
       hooks.onPan?.();
       clamp(G.pw);
-    } else {
-      const f = Math.min(G.pw, Math.max(0, x));
-      const anchor = G.start + f / view.spacing;
-      view.spacing *= Math.exp(-e.deltaY * 0.0015);
-      clamp(G.pw);
-      view.right = anchor - f / view.spacing + G.pw / view.spacing;
+    } else if (dY) {
+      const k = 0.1 * step(dY), f = dY < 0 ? 1 + k : 1 - k;
+      if (e.ctrlKey || e.metaKey) {
+        const fx = Math.min(G.pw, Math.max(0, x)), anchor = G.start + fx / view.spacing;
+        view.spacing *= f; clamp(G.pw);
+        view.right = anchor - fx / view.spacing + G.pw / view.spacing;
+      } else {
+        const right = view.right;
+        view.spacing *= f; clamp(G.pw);
+        view.right = right;
+      }
       clamp(G.pw);
     }
     draw();
@@ -346,7 +403,7 @@ export function createCore(plot, o) {
   document.addEventListener('pointerdown', offPress, true);
 
   function reset() { if (hooks.onReset) hooks.onReset(); else { toLatest(); fitPrices(); } draw(); }
-  function settings() { openChartSettings(store, { inst: o.inst, trading: !!o.trading }); }
+  function settings() { openChartSettings(store, { inst: o.inst, trading: !!o.trading, scope }); }
 
   /* ---------- the keyboard: Change interval, Alt+R ---------- */
   const onKey = e => {
@@ -388,7 +445,7 @@ export function createCore(plot, o) {
   function paint() {
     if (pending && plot.clientWidth) { const p = pending; setView(p.start, p.count); }
     const G = geom();
-    const { W, H, pw, ph, aw, tH, fs, last, i0, i1, lo, hi, xI, Y } = G;
+    const { W, H, pw, ph, aw, tH, fs, last, lo, hi, xI, Y } = G;
     if (!W || !H) return;
     seen = true;
     const dpr = window.devicePixelRatio || 1;
@@ -409,7 +466,11 @@ export function createCore(plot, o) {
       g.fillStyle = gr; g.fillRect(0, 0, W, H);
     }
 
-    const ticks = niceTicks(lo, hi, Math.max(2, Math.round(ph / (fs * 3.4))));
+    sdp = scaleDp(lo, hi);
+    /* compact: steps no finer than the figures shown (and no 2.5s), so no two read the same */
+    const ticks = compact
+      ? niceTicks(lo, hi, Math.max(2, Math.min(Math.round(ph / (fs * 3.4)), Math.floor((hi - lo) * 10 ** sdp))), [1, 2, 5, 10])
+      : niceTicks(lo, hi, Math.max(2, Math.round(ph / (fs * 3.4))));
     const marks = timeMarks(G, C);
     lastMarks = marks;
 
@@ -446,7 +507,8 @@ export function createCore(plot, o) {
     const areas = paintPanes(g, G, C, font);
 
     /* prices down the right: round steps, then the tags over them */
-    const tags = (hooks.tags?.() || []).map(t => ({ ...t, fg: t.fg || C.labelInk }));
+    /* the words on a tag in whichever ink reads on it (a white profit colour hid the TP's price) */
+    const tags = (hooks.tags?.() || []).map(t => ({ ...t, fg: t.fg || inkOn(t.bg) }));
     if (lastBar && S.scales.lastLabel) tags.push({ p: lastBar[4], label: '', bg: lastCol, fg: inkOn(lastCol), last: true });
     const tagH = fs + 7;
     const tagYs = spread(tags.map(t => Math.min(ph - tagH / 2, Math.max(tagH / 2, Y(t.p)))), tagH + 1, tagH / 2, ph - tagH / 2);
@@ -455,7 +517,7 @@ export function createCore(plot, o) {
     for (const p of ticks) {
       const y = Y(p);
       if (y < fs / 2 + 2 || y > ph - fs / 2 - 2 || tagYs.some(ty => Math.abs(ty - y) < tagH)) continue;
-      g.textAlign = 'left'; g.fillText(fmt(p), pw + 9, y);
+      g.textAlign = 'left'; g.fillText(sfmt(p), pw + LP, y);
     }
     g.textAlign = 'left';
     tags.forEach((t, k) => {
@@ -463,7 +525,7 @@ export function createCore(plot, o) {
       g.fillStyle = t.bg; roundRect(g, pw + 1, y - tagH / 2, aw - 2, tagH, 2); g.fill();
       g.fillStyle = t.fg;
       g.font = font();
-      g.fillText(fmt(t.p), pw + 9, y + 0.5);
+      g.fillText(sfmt(t.p), pw + LP, y + 0.5);
     });
 
     /* the time scale */
@@ -493,7 +555,7 @@ export function createCore(plot, o) {
       g.font = font(); g.textBaseline = 'middle';
       if (hover.y < ph || inSub) {
         g.fillStyle = C.label; roundRect(g, pw + 1, y - tagH / 2, aw - 2, tagH, 2); g.fill();
-        g.fillStyle = C.labelInk; g.fillText(inSub ? (inSub.q.fmt || fmt)(inSub.P(hover.y)) : fmt(G.P(hover.y)), pw + 9, y + 0.5);
+        g.fillStyle = C.labelInk; g.fillText(inSub ? (inSub.q.fmt || fmt)(inSub.P(hover.y)) : sfmt(G.P(hover.y)), pw + LP, y + 0.5);
       }
       const T = timeAtIdx(i);
       const tl = crossTime(T);
@@ -517,7 +579,7 @@ export function createCore(plot, o) {
   /* each indicator pane: its own scale on the right, clipped to its strip */
   function paintPanes(g, G, C, font) {
     const out = [];
-    const fs = S.scales.textSize, tagH = fs + 7;
+    const fs = scaleText(), tagH = fs + 7;
     for (const { q, top, h } of G.panes) {
       if (h < 10) continue;
       const r = q.range(G.i0, Math.max(G.i0, G.i1));
@@ -632,6 +694,7 @@ export function createCore(plot, o) {
   }
 
   /* ---------- the status line ---------- */
+  const symMark = o.symbol ? pairMark(o.symbol, 16) : null;
   function paintStatus(force, i = limit(), C = null) {
     const st = S.status;
     const b = i >= 0 ? bars[i] : null, p = i > 0 ? bars[i - 1] : null;
@@ -640,7 +703,8 @@ export function createCore(plot, o) {
     lastStatus = key;
     C = C || palette();
     const parts = [];
-    if (st.symbol) parts.push(el('span', { class: 'tv-sym' }, [o.symbol, tfLabel(tf), o.source].filter(Boolean).join(' · ')));
+    /* the instrument's mark before its name, as TradingView's legend has it */
+    if (st.symbol) parts.push(el('span', { class: 'tv-sym' }, symMark, el('span', {}, [o.symbol, tfLabel(tf), o.source].filter(Boolean).join(' · '))));
     if (b && (st.ohlc || st.change)) {
       const col = b[4] >= b[1] ? C.up : C.down;
       const vals = el('span', { class: 'tv-ohlc', style: { '--c': col } });
@@ -663,7 +727,7 @@ export function createCore(plot, o) {
     canvas, status, autoBtn, geom, draw, idxAt, timeAtIdx, fmt, dp, setView, getView, toLatest, fitPrices, setAuto, setBars, clamp, reset,
     openSettings: settings, zoneOf, yr, palette,
     get bars() { return bars; }, get tf() { return tf; }, get hover() { return hover; }, get dragging() { return !!(drag?.moved || grab); },
-    get over() { return over; }, get focused() { return focused; }, get settings() { return S; }, limit, statusText: () => status.textContent,
+    get over() { return over; }, get focused() { return focused; }, get settings() { return S; }, limit, statusText: () => status.textContent, scaleLabel: v => sfmt(v),
     marks: () => lastMarks.map(m => m.text), crossTime, areas: () => lastAreas.map(A => ({ key: A.q.key, top: A.top, h: A.h, lo: A.lo, hi: A.hi })),
   };
 }
@@ -677,11 +741,11 @@ export function bodyWidth(spacing, k = 1) {
 }
 
 /** Round price steps, about n of them across the range. */
-export function niceTicks(lo, hi, n = 5) {
+export function niceTicks(lo, hi, n = 5, steps = [1, 2, 2.5, 5, 10]) {
   const raw = (hi - lo) / n;
   if (!(raw > 0)) return [];
   const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(s => s >= raw) || 10 * mag;
+  const step = steps.map(k => k * mag).find(s => s >= raw) || 10 * mag;
   const out = [];
   for (let p = Math.ceil(lo / step) * step; p <= hi + step * 1e-9; p += step) out.push(+p.toFixed(10));
   return out;
@@ -738,6 +802,18 @@ export function roundRect(g, x, y, w, h, r) {
 }
 
 /** A thin TradingView-style outline icon from one path. */
+/** The handle a floating bar is dragged by: six dots, two across and three down, as TradingView's. */
+export function gripDots(size = 16) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size); s.setAttribute('height', size);
+  s.setAttribute('fill', 'currentColor'); s.setAttribute('aria-hidden', 'true');
+  for (const [x, y] of [[9, 5.5], [15, 5.5], [9, 12], [15, 12], [9, 18.5], [15, 18.5]]) {
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 1.7);
+    s.append(c);
+  }
+  return s;
+}
 export function svgIcon(d, size = 18) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size); s.setAttribute('height', size);

@@ -90,7 +90,6 @@ export function graded(bias, candle) {
 
 /* grades already worked out this session */
 const memo = new Map();
-export function forgetGrades() { memo.clear(); }
 
 /**
  * Grade calls on their daily candles. → { list: [{ ...call, candle, right }],

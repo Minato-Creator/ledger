@@ -260,7 +260,8 @@ t('and which mistakes came up, most first', mlist.length === Math.min(5, Object.
 console.log('trades');
 await go('#/trades', 500);
 const count = () => p.evaluate(() => document.querySelectorAll('.tbl-body > *').length);
-const sel = async (first, v) => { await p.evaluate(([f, v]) => { const s = [...document.querySelectorAll('.tr-bar select')].find(x => x.options[0].text === f); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }, [first, v]); await settle(250); };
+/* the filters are chips with menus now (not the system's dropdowns): open one, pick */
+const sel = async (first, v) => { await p.click(`.tr-chip[data-all="${first}"]`); await settle(120); await p.click(`.pop-filter .pop-item[data-v="${v}"]`); await settle(250); };
 const allN = await count();
 await sel('Mistakes · all', 'none');
 const nowTR = await onDisk();
@@ -275,7 +276,7 @@ await sel('Exit · all', 'tp');
 t('with take profit as well', await count() === closed.filter(x => x.confidence >= 4 && x.exitReason === 'tp').length);
 await sel('TF · all', '5m');
 t('and on the 5m', await count() === closed.filter(x => x.confidence >= 4 && x.exitReason === 'tp' && x.execTf === '5m').length);
-t('a filter on is lit', await p.evaluate(() => [...document.querySelectorAll('.tr-bar select')].filter(s => s.value !== 'all').length) === 3);
+t('a filter on is lit', await p.evaluate(() => document.querySelectorAll('.tr-bar .tr-chip.is-set').length) === 3);
 await p.evaluate(() => document.querySelector('.tr-clear').click()); await settle(250);
 t('Clear puts every filter back', await count() === allN && !(await p.$('.tr-clear')));
 const barOK = await p.evaluate(() => { const bar = document.querySelector('.tr-bar'); return bar.scrollWidth <= bar.clientWidth + 1; });

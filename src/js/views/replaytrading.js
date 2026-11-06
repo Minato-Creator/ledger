@@ -22,7 +22,8 @@
    ============================================================ */
 import { el, toast } from '../ui.js';
 import * as rt from '../replaytrades.js';
-import { svgIcon, roundRect, withAlpha } from '../chart/core.js';
+/* the target and the stop: blue and red, whatever the win and loss colours (a white win colour made white tags) */
+const TAG_BLUE = '#2962FF', TAG_RED = '#E0322B';
 
 const money = v => `${v < 0 ? '−' : ''}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const signed = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -183,7 +184,7 @@ export function createTrading(o) {
       if (!S.lines) { for (const n of nodes.values()) n.remove(); nodes.clear(); return; }
       for (const L of lines()) {
         const y = Math.round(G.Y(L.price)) + 0.5;
-        g.strokeStyle = L.kind === 'e' ? C.flat : L.kind === 'tp' ? C.profit : C.loss;
+        g.strokeStyle = L.kind === 'e' ? C.flat : L.kind === 'tp' ? TAG_BLUE : TAG_RED;
         g.lineWidth = 1; g.setLineDash([3, 3]);
         g.beginPath(); g.moveTo(0, y); g.lineTo(G.pw, y); g.stroke(); g.setLineDash([]);
       }
@@ -300,7 +301,7 @@ export function createTrading(o) {
       go.textContent = d.type === 'long' ? 'Buy' : 'Sell';
       go.className = 'rt-go is-' + (d.type === 'long' ? 'buy' : 'sell');
       const w = go.offsetWidth || 50;
-      go.style.left = Math.max(2, Math.min(G.pw - w - 4, h.x + 10)) + 'px';
+      go.style.left = Math.max(2, Math.min(G.pw - w - 4, h.x + 22)) + 'px';   // clear of the handle (Minato: a bit more to the right)
       go.style.top = (h.y - 12) + 'px';
       go.onclick = e => { e.stopPropagation(); if (fromTool(c.dr.list().find(x => x.id === id))) c.dr.select(null); };
     }
@@ -314,7 +315,7 @@ export function createTrading(o) {
     function tags() {
       if (!c.core.settings.trading.lines) return [];
       const C = c.core.palette();
-      return lines().map(L => ({ p: L.price, label: L.kind === 'e' ? '' : L.kind.toUpperCase(), bg: L.kind === 'e' ? C.flat : L.kind === 'tp' ? C.profit : C.loss }));
+      return lines().map(L => ({ p: L.price, label: L.kind === 'e' ? '' : L.kind.toUpperCase(), bg: L.kind === 'e' ? C.flat : L.kind === 'tp' ? TAG_BLUE : TAG_RED }));
     }
     return { paint, claim, hover, menu, tags, layer, marks: () => marks.slice() };
   }

@@ -24,7 +24,7 @@
 import { el, toast } from '../ui.js';
 import { openMenu } from './menu.js';
 import { swatch, closeColour } from './colour.js';
-import { svgIcon, roundRect, withAlpha, inkOn } from './core.js';
+import { svgIcon, roundRect, withAlpha, inkOn, gripDots } from './core.js';
 import { openDrawingSettings, WIDTHS } from './drawdialog.js';
 
 /* ---------- the tools ---------- */
@@ -47,12 +47,34 @@ export const ICONS = {
   text: 'M6 6.5h12M12 6.5V19M9.5 19h5',
   grip: 'M9.5 6h.01M14.5 6h.01M9.5 12h.01M14.5 12h.01M9.5 18h.01M14.5 18h.01',
 };
+/* The left toolbar's own set, on a 28px grid in crisp 1px lines (TradingView's
+   way of drawing a toolbar; the drawings themselves are Laminar's). */
+export const TOOL_ICONS = {
+  cursor: 'M14.5 6v17M6 14.5h17',
+  trend: 'M9 20L20 9M5.5 21.5a2 2 0 1 0 4 0a2 2 0 1 0-4 0M19.5 7.5a2 2 0 1 0 4 0a2 2 0 1 0-4 0',
+  rect: 'M7.5 9.5h14v10h-14zM6 9.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0M20 19.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0',
+  callout: 'M6.5 7.5h16v10h-9l-4.5 4v-4h-2.5zM10 11.5h9M10 14.5h6',
+  long: 'M7.5 6.5h14v16h-14zM7.5 14.5h14M11.5 11.5l3-3 3 3',
+  short: 'M7.5 6.5h14v16h-14zM7.5 14.5h14M11.5 17.5l3 3 3-3',
+  magnet: 'M8.5 7.5h3v7a3 3 0 0 0 6 0v-7h3v7a6 6 0 0 1-12 0zM8.5 10.5h3M17.5 10.5h3',
+  eye: 'M4.5 14.5s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6zM14.5 11.5a3 3 0 1 1 0 6a3 3 0 0 1 0-6z',
+  eyeOff: 'M4.5 14.5s3.5-6 10-6c1.8 0 3.3.5 4.6 1.2M24.5 14.5s-3.5 6-10 6c-1.8 0-3.3-.5-4.6-1.2M6.5 22.5l16-16',
+  trash: 'M7.5 8.5h14M11.5 8.5v-2h6v2M9.5 8.5l1 14h8l1-14M12.5 11.5v8M16.5 11.5v8',
+};
+const toolIcon = d => {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 28 28'); s.setAttribute('width', 28); s.setAttribute('height', 28);
+  s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '1');
+  s.setAttribute('stroke-linecap', 'square'); s.setAttribute('stroke-linejoin', 'miter');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d);
+  s.append(p);
+  return s;
+};
 export const TOOLS = [
   ['trend', 'Trend line'], ['rect', 'Rectangle'], ['callout', 'Callout'],
   ['long', 'Long position'], ['short', 'Short position'],
 ];
 export const toolName = type => TOOLS.find(([k]) => k === type)?.[1] || type;
-const TFS = [1, 3, 5, 15, 30, 60, 240, 1440];
 
 /* ---------- what a new drawing looks like ---------- */
 const TEXT = (colour, more = {}) => ({ value: '', color: colour, size: 12, bold: false, italic: false, v: 'top', h: 'center', ...more });
@@ -91,7 +113,12 @@ export function normalize(raw) {
 }
 /** What Ctrl+C took: shared by every chart, so a drawing can be pasted on another one. */
 let clip = null;
-const serialize = d => { const { legacy, ...rest } = d; return structuredClone(rest); };
+const serialize = d => { const { legacy: _legacy, ...rest } = d; return structuredClone(rest); };   // an old drawing's leftovers are not written back
+
+const HANDLE_CURSOR = {
+  position: { tp: 'ns-resize', sl: 'ns-resize', end: 'ew-resize', entry: 'default' },
+  rect: { t: 'ns-resize', b: 'ns-resize', l: 'ew-resize', r: 'ew-resize', tl: 'nwse-resize', br: 'nwse-resize', tr: 'nesw-resize', bl: 'nesw-resize' },
+};
 
 /* ---------- the position tool's numbers ---------- */
 /**
@@ -228,7 +255,7 @@ export function createDrawings(core, plot, o) {
 
   /* ---------- the left toolbar ---------- */
   const bar = el('div', { class: 'tv-left' });
-  const btn = (key, title, onClick, extra = {}) => el('button', { type: 'button', class: 'tv-lb', 'data-tool': key, title, onClick, ...extra }, svgIcon(ICONS[key], 22));
+  const btn = (key, title, onClick, extra = {}) => el('button', { type: 'button', class: 'tv-lb', 'data-tool': key, title, onClick, ...extra }, TOOL_ICONS[key] ? toolIcon(TOOL_ICONS[key]) : svgIcon(ICONS[key], 22));
   function paintBar() {
     const t = tools();
     bar.replaceChildren(
@@ -290,7 +317,7 @@ export function createDrawings(core, plot, o) {
   }
   /* a grip that moves its bar inside the chart; where it ends up is kept */
   function grip(box, key) {
-    const g = el('span', { class: 'tv-grip', title: 'Drag to move' }, svgIcon(ICONS.grip, 16));
+    const g = el('span', { class: 'tv-grip', title: 'Drag to move' }, gripDots(16));
     g.addEventListener('pointerdown', e => {
       e.preventDefault(); e.stopPropagation();
       const r = plot.getBoundingClientRect(), b = box.getBoundingClientRect();
@@ -515,8 +542,15 @@ export function createDrawings(core, plot, o) {
     hot = hit?.id || null;
     if (was !== hot) core.draw();
     if (!hit) return null;
-    if (hit.handle) return 'move';
-    return byId(hit.id)?.locked ? 'pointer' : 'pointer';
+    /* TradingView's cursors, handle by handle: a point (a line's end, the
+       entry) the plain arrow; a level that only goes up and down (the target,
+       the stop, a box's top or bottom) the up-down arrows; the position's
+       right edge and a box's sides left-right; a box's corners diagonal */
+    if (hit.handle) {
+      const ty = byId(hit.id)?.type;
+      return HANDLE_CURSOR[ty === 'rect' ? 'rect' : ty === 'long' || ty === 'short' ? 'position' : '']?.[hit.handle] || 'default';
+    }
+    return 'pointer';
   }
   function dbl(x, y) {
     const hit = hitTest(x, y);
@@ -567,7 +601,8 @@ export function createDrawings(core, plot, o) {
     shapes.clear();
     if (hidden) return;
     const tf = o.tf(), until = o.replayT?.() ?? Infinity;
-    const all = list().map(d => (live && live.id === d.id ? live : d));
+    /* o.extras: drawings the chart adds of its own (Review's position), shown but never kept, chosen or moved */
+    const all = [...list().map(d => (live && live.id === d.id ? live : d)), ...(o.extras?.() || []).filter(Boolean)];
     if (pending) all.push(make(pending.type, pending.a, pending.b));
     for (const d of all) {
       if (d.hideOn.includes(tf)) continue;
@@ -581,7 +616,9 @@ export function createDrawings(core, plot, o) {
         else if (d.type === 'callout') callout(g, G, C, d, lit);
         else if (d.type === 'long' || d.type === 'short') position(g, G, C, d, lit, until);
       } finally { g.restore(); }
-      if (d.id === sel) handles(g, C, shapes.get(d.id)?.handles || []);
+      if (d.__extra) { shapes.delete(d.id); continue; }
+      /* TradingView shows a drawing's points as soon as the pointer is on it, not only once it is chosen */
+      if (d.id === sel || (d.id === hot && !d.locked)) handles(g, C, shapes.get(d.id)?.handles || []);
     }
     const gd = guide(C);
     if (gd) {
@@ -604,8 +641,8 @@ export function createDrawings(core, plot, o) {
   function handles(g, C, hs) {
     for (const h of hs) {
       g.fillStyle = C.card; g.strokeStyle = '#2962FF'; g.lineWidth = 1.5;
-      if (h.square) { g.fillRect(h.x - 4, h.y - 4, 8, 8); g.strokeRect(h.x - 4, h.y - 4, 8, 8); }
-      else { g.beginPath(); g.arc(h.x, h.y, 4.5, 0, Math.PI * 2); g.fill(); g.stroke(); }
+      if (h.square) { roundRect(g, Math.round(h.x - 4.5) + 0.5, Math.round(h.y - 4.5) + 0.5, 9, 9, 2); g.fill(); g.stroke(); }
+      else { g.beginPath(); g.arc(h.x, h.y, 5, 0, Math.PI * 2); g.fill(); g.stroke(); }
     }
   }
   const segDist = (x, y, ax, ay, bx, by) => {
@@ -733,7 +770,8 @@ export function createDrawings(core, plot, o) {
     g.fillStyle = Z.profit; g.fillRect(x0, Math.min(ye, yt), x1 - x0, Math.abs(yt - ye));
     g.fillStyle = Z.stop; g.fillRect(x0, Math.min(ye, ys), x1 - x0, Math.abs(ys - ye));
     /* what price did: the stretch from the entry to now (or to the stop / target) a shade deeper, a dotted line to it */
-    const out = positionOutcome(o.rows(), d, until);
+    /* a trade that has ended (Review's position) ends where it did, not where the prices would put it */
+    const out = d.closed && d.closed.t <= until ? { state: 'closed', t: d.closed.t, p: d.closed.p } : positionOutcome(o.rows(), d, until);
     if (out) {
       const xo = Math.min(x1, X(out.t, G)), yo = G.Y(out.p);
       const win = N.pnl(out.p) >= 0;
@@ -750,18 +788,23 @@ export function createDrawings(core, plot, o) {
       const ticks = dist => Math.round(dist / tick);
       const amt = v => `${Math.round(v).toLocaleString('en-US')}${N.cur && N.cur !== 'USD' ? ' ' + N.cur : ''}`;
       const qty = N.qty >= 100 ? Math.round(N.qty).toLocaleString('en-US') : N.qty.toFixed(2);
-      const pnl = out ? N.pnl(out.p) : 0;
+      const pnl = out ? (out.state === 'closed' && d.closed?.pnl != null ? d.closed.pnl : N.pnl(out.p)) : 0;
       const label = (lines, cx, y, bg, above) => {
         g.font = `400 ${s.size}px ${C.font}`;
         const w = Math.max(...lines.map(l => g.measureText(l).width)) + 12, h = lines.length * (s.size + 3) + 6;
-        const lx = Math.max(2, Math.min(G.pw - w - 2, cx - w / 2)), ly = above ? y - h - 4 : y + 4;
+        const lx = Math.max(2, Math.min(G.pw - w - 2, cx - w / 2)), ly = above === 'mid' ? y - h / 2 : above ? y - h - 2 : y + 2;
         g.fillStyle = bg; roundRect(g, lx, ly, w, h, 3); g.fill();
         g.fillStyle = s.textColor === 'auto' ? inkOn(bg) : s.textColor; g.textAlign = 'left'; g.textBaseline = 'top';
         lines.forEach((l, k) => g.fillText(l, lx + 6, ly + 4 + k * (s.size + 3)));
       };
       const cx = (x0 + x1) / 2, up = N.long;
       label([`Target: ${core.fmt(N.targetDist)} (${pct(N.targetDist)}%) ${ticks(N.targetDist)}, Amount: ${amt(N.targetAmt)}`], cx, up ? Math.min(yt, ye) : Math.max(yt, ye), Z.win, up);
-      label([`${out && out.state !== 'open' ? 'Closed' : 'Open'} P&L: ${amt(pnl)}, Qty: ${qty}`, `Risk/Reward Ratio: ${N.rr.toFixed(2)}`], cx, ye - (s.size * 2 + 12) / 2 - 4, pnl >= 0 ? Z.win : Z.lose, false);
+      /* the middle one rides halfway along the stretch from the entry to where
+         price is now — but never more than 30px off the entry — so it eases
+         toward the entry as you zoom out and back as you zoom in (measured on
+         TradingView's own) */
+      const half = out ? (G.Y(out.p) - ye) / 2 : 0, mid = ye + Math.sign(half) * Math.min(Math.abs(half), 30);
+      label([`${out && out.state !== 'open' ? 'Closed' : 'Open'} P&L: ${amt(pnl)}, Qty: ${qty}`, `Risk/Reward Ratio: ${N.rr.toFixed(2)}`], cx, mid, pnl >= 0 ? Z.win : Z.lose, 'mid');
       label([`Stop: ${core.fmt(N.stopDist)} (${pct(N.stopDist)}%) ${ticks(N.stopDist)}, Amount: ${amt(N.stopAmt)}`], cx, up ? Math.max(ys, ye) : Math.min(ys, ye), Z.lose, !up);
     }
     const top = Math.min(yt, ys), bot = Math.max(yt, ys);

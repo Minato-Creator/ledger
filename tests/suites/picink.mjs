@@ -55,14 +55,14 @@ const state = p => p.evaluate(() => ({
   t('White is white, Theme is the theme’s', R[6] === 'white' && R[7] === null);
   t('no background: nothing is changed', await p.evaluate(() => !document.documentElement.dataset.picInk && !document.documentElement.dataset.shade));
   await openLook(p, 'custom');
-  t('…and Text is not offered without a background', await p.locator('.lk-pic-ink').count() === 0);
+  t('…and Text is offered without one too (White or Black is for everything)', await p.locator('.lk-pic-ink').count() === 1);
   await closeLook(p);
   await p.close();
 }
 
 /* ---------- a bright picture on a light look ---------- */
 {
-  const { p, errs } = await open(seed({ theme: 'light', background: 'torii', glass: 'clear' }));
+  const { p, errs } = await open(seed({ theme: 'light', background: 'path', glass: 'clear' }));
   let S = await state(p);
   t('Auto on a bright picture writes black', S.ink === 'black' && S.shade === 'light', JSON.stringify(S));
   t('…the heading and the top bar are dark', luma(S.h1) < 0.2 && luma(S.tab) < 0.35, `${S.h1} ${S.tab}`);
@@ -100,7 +100,7 @@ const state = p => p.evaluate(() => ({
 
 /* ---------- the same picture on a dark look ---------- */
 {
-  const { p } = await open(seed({ theme: 'dark', look: { theme: 'midnight' }, background: 'torii', glass: 'clear' }));
+  const { p } = await open(seed({ theme: 'dark', look: { theme: 'midnight' }, background: 'path', glass: 'clear' }));
   const S = await state(p);
   t('on Midnight the picture is held down hard, so Auto writes white', S.ink === 'white' && S.shade === 'dark' && luma(S.h1) > 0.95, JSON.stringify(S));
   t('the little controls up there take a backing to match', await p.evaluate(() => {
@@ -109,9 +109,9 @@ const state = p => p.evaluate(() => ({
   await p.close();
 }
 
-/* ---------- a dark look over a bright picture barely dimmed: Clear's panels turn ---------- */
+/* ---------- a dark look over a bright picture barely dimmed: Clear's panels turn (a pale Fade: none of the videos left is that bright) ---------- */
 {
-  const { p } = await open(seed({ theme: 'dark', look: { theme: 'midnight' }, background: 'torii', bgDim: 0.15, glass: 'clear' }));
+  const { p } = await open(seed({ theme: 'dark', look: { theme: 'midnight' }, background: 'fade', fade: { a: '#F4F1EA', b: '#E6E0D4' }, bgDim: 0.15, glass: 'clear' }));
   const S = await state(p);
   const flip = () => p.evaluate(() => 'picFlip' in document.documentElement.dataset);
   t('black writing on the picture', S.ink === 'black', JSON.stringify(S));
@@ -128,7 +128,7 @@ const state = p => p.evaluate(() => ({
   await p.evaluate(() => [...document.querySelectorAll('.lk-pic-ink .seg button')].find(x => x.textContent === 'Black').click());
   await p.waitForTimeout(500);
   await closeLook(p);
-  t('on Frosted the panels are their own ground: they stay the theme’s', luma((await state(p)).inCard) > 0.8 && (await state(p)).ink === 'black');
+  t('on Frosted, chosen Black turns the panels too: black writing in them', luma((await state(p)).inCard) < 0.2 && (await state(p)).ink === 'black', JSON.stringify(await state(p)));
   await p.close();
 }
 

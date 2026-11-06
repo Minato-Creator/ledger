@@ -73,7 +73,7 @@ t('the amount is kept, not zeroed', saved.netResult === -1.2);
 t('and the trade is labelled break-even', saved.outcome === 'breakeven');
 
 // the account总 has to include it
-await p.evaluate(()=>location.hash='#/'); await p.waitForTimeout(550);
+await p.evaluate(()=>location.hash='#/'); await p.waitForTimeout(2400);   // the headline counts up for 2 s
 const dash = await p.evaluate(()=>document.querySelector('.main').innerText.replace(/\n/g,' | '));
 t('account net includes the scratch', /\+\$998\.80/.test(dash), (dash.match(/[+−]\$[\d,.]+/)||[])[0]);
 t('it counts as neither a win nor a loss', /1 W · 0 L · 1 BE/.test(dash), (dash.match(/\d W · \d L · \d BE/)||[])[0]);
@@ -82,13 +82,10 @@ t('win rate stays 100%', /100\.0%/.test(dash), (dash.match(/\d+\.\d% */)||[])[0]
 // the trades page agrees
 await p.evaluate(()=>location.hash='#/trades'); await p.waitForTimeout(500);
 t('the log shows the real figure', /−\$1\.20/.test(await p.evaluate(()=>document.querySelector('.main').innerText)));
-t('and the break-even filter finds it', await p.evaluate(async () => {
-  const sel=[...document.querySelectorAll('select')].find(s=>[...s.options].some(o=>o.textContent==='Break-even'));
-  sel.value=[...sel.options].find(o=>o.textContent==='Break-even').value;
-  sel.dispatchEvent(new Event('change',{bubbles:true}));
-  await new Promise(r=>setTimeout(r,400));
-  return [...document.querySelectorAll('.tbl-row')].filter(r=>/MNQ/.test(r.innerText)).length;
-}) === 1);
+/* the filters are chips with menus now: Result, then Break-even */
+await p.click('.tr-chip[data-all="Result · all"]'); await p.waitForTimeout(150);
+await p.click('.pop-filter .pop-item[data-v="breakeven"]'); await p.waitForTimeout(400);
+t('and the break-even filter finds it', await p.evaluate(() => [...document.querySelectorAll('.tbl-row')].filter(r=>/MNQ/.test(r.innerText)).length) === 1);
 
 // reopening it keeps both the label and the amount
 await p.evaluate(()=>location.hash='#/trades'); await p.waitForTimeout(400);

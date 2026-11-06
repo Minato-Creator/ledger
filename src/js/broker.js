@@ -16,7 +16,7 @@
    ============================================================ */
 import { parseCSV } from './csv.js';
 import { readQuestions } from './questions.js';
-import { parseNumber, cleanSymbol } from './calc.js';
+import { parseNumber, cleanSymbol, pad2 as pad } from './calc.js';
 export { cleanSymbol };
 
 const norm = h => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -105,7 +105,6 @@ function parseStamp(raw, dayFirst, clock) {
   return { y, mo, d, hh, mi };
 }
 
-const pad = n => String(n).padStart(2, '0');
 const shift = (st, hours) => {
   const t = Date.UTC(st.y, st.mo - 1, st.d, st.hh, st.mi) + hours * 3600e3;
   const x = new Date(t);

@@ -25,6 +25,7 @@
 
    • Nothing about you is sent. Each one is a GET for a public file.
    ============================================================ */
+import { localDay, localTime } from './news.js';
 
 const BASE = 'https://investinglive.com/feed';
 
@@ -218,17 +219,8 @@ export async function readFeed(feed) {
 }
 
 /* ---------- reading it back ---------- */
-export const localDay = (iso) => {
-  const d = new Date(iso);
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
-
-export const localTime = (iso) => {
-  const d = new Date(iso);
-  const p = n => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
-};
+/* the day and time an item is read in: the same as the calendar's (news.js) */
+export { localDay, localTime };
 
 /** "just now", "12m ago", "3h ago", "2d ago" — how a wire is read. */
 export function ago(iso, now = Date.now()) {

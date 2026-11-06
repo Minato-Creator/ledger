@@ -2,7 +2,7 @@
    look.js — what the app looks like, as data.
 
    One object decides the whole look: a theme (the frame, the page and the
-   cards), an accent, a text tone, how the lines are drawn, the typeface and
+   cards), the typeface and
    how much things move. It lives in accounts.json beside the profit and loss
    colours, so it travels with the vault like every other preference.
 
@@ -37,22 +37,6 @@ export const THEMES = [
 ];
 export const themeOf = id => THEMES.find(t => t.id === id) || THEMES[0];
 
-/* Buttons, highlights and the page you are on. Mono is the theme's own ink. */
-export const ACCENTS = [
-  ['mono', 'Mono', null], ['blue', 'Blue', '#2563EB'], ['cyan', 'Cyan', '#06B6D4'], ['sky', 'Sky', '#0284C7'],
-  ['slate', 'Slate', '#64748B'], ['teal', 'Teal', '#14B8A6'], ['green', 'Green', '#10B981'], ['lime', 'Lime', '#84CC16'],
-  ['amber', 'Amber', '#F59E0B'], ['orange', 'Orange', '#F97316'], ['red', 'Red', '#EF4444'], ['custom', 'Your own', null],
-];
-
-/* The text tone on the paper themes. Each is checked to stay readable on both
-   paper cards: the quietest step it makes still clears 3:1 on white. */
-export const TONES = [
-  ['ink', 'Ink', '#0E0F11'], ['graphite', 'Graphite', '#2E3036'], ['espresso', 'Espresso', '#2B1E17'],
-  ['navy', 'Navy', '#0F1C36'], ['custom', 'Your own', null],
-];
-
-export const LINES = [['theme', 'Theme'], ['text', 'Text colour'], ['accent', 'Accent'], ['custom', 'Your own']];
-
 export const FONTS = [
   { id: 'jakarta',    name: 'Jakarta',    stack: "'Plus Jakarta Sans Variable','Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',sans-serif" },
   { id: 'geist',      name: 'Geist',      stack: "'Geist Variable','Geist',system-ui,-apple-system,'Segoe UI',sans-serif" },
@@ -64,22 +48,19 @@ export const fontOf = id => FONTS.find(f => f.id === id) || FONTS[0];
 
 export const MOTIONS = [['full', 'Full'], ['calm', 'Calm'], ['off', 'Off']];
 
-export const DEFAULT_LOOK = Object.freeze({
-  theme: 'light', accent: 'mono', accentCustom: '#7C5CFF', text: 'ink', textCustom: '#1F2937',
-  lines: 'theme', linesCustom: '#9CA3AF', font: 'jakarta', motion: 'full',
-});
+/* The accent, the text tone and the line colour were choices once (the
+   Colours tab); Minato took them out (3 Nov), so every look is drawn in the
+   theme's own ink and lines and a journal that had chosen others reads as
+   the defaults. */
+export const DEFAULT_LOOK = Object.freeze({ theme: 'light', font: 'jakarta', motion: 'full' });
 
 /** A look with every field present and every value one we know. */
 export function normaliseLook(raw, legacyTheme) {
   const l = { ...DEFAULT_LOOK, ...(raw || {}) };
   if (!raw && legacyTheme === 'dark') l.theme = 'midnight';
   if (!THEMES.some(t => t.id === l.theme)) l.theme = DEFAULT_LOOK.theme;
-  if (!ACCENTS.some(([k]) => k === l.accent)) l.accent = 'mono';
-  if (!TONES.some(([k]) => k === l.text)) l.text = 'ink';
-  if (!LINES.some(([k]) => k === l.lines)) l.lines = 'theme';
   if (!FONTS.some(f => f.id === l.font)) l.font = DEFAULT_LOOK.font;
   if (!MOTIONS.some(([k]) => k === l.motion)) l.motion = 'full';
-  for (const k of ['accentCustom', 'textCustom', 'linesCustom']) if (!isHex(l[k])) l[k] = DEFAULT_LOOK[k];
   return pick(l, Object.keys(DEFAULT_LOOK));
 }
 
@@ -103,17 +84,16 @@ export const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.m
 export const inkFor = hex => (lum(hex) > 0.42 ? '#0B0B0C' : '#FFFFFF');
 const rgba = (hex, a) => `rgba(${rgbOf(hex).join(', ')}, ${a})`;
 
-/** The text tone itself, nudged darker until its quiet step reads on the card. */
+/** The ink on the paper themes, nudged darker until its quiet step reads on the card. */
 function toneFor(look, theme) {
-  let t = look.text === 'custom' ? look.textCustom : (TONES.find(([k]) => k === look.text)?.[2] || '#0E0F11');
+  let t = '#0E0F11';
   for (let i = 0; i < 8 && contrast(mix(t, theme.card, 0.52), theme.card) < 3; i++) t = mix(t, '#000000', 0.25);
   return t;
 }
 
+/** Buttons, highlights and the page you are on: the theme's own ink. */
 export function accentOf(look, theme, ink) {
-  if (look.accent === 'mono') return theme.paper ? ink : '#F4F4F6';
-  if (look.accent === 'custom') return look.accentCustom;
-  return ACCENTS.find(([k]) => k === look.accent)?.[2] || ink;
+  return theme.paper ? ink : '#F4F4F6';
 }
 
 /* ---------- the tokens ---------- */
@@ -198,10 +178,7 @@ export function tokensFor(look, { glass = false, bg = false } = {}) {
   v['--accent-text'] = accText;
 
   const lineBase = th.paper ? ink : '#FFFFFF';
-  v['--line'] = look.lines === 'text' ? rgba(th.paper ? ink : '#F4F4F6', th.paper ? 0.22 : 0.2)
-              : look.lines === 'accent' ? rgba(acc, 0.42)
-              : look.lines === 'custom' ? look.linesCustom
-              : th.classic ? 'rgba(255,255,255,.07)' : rgba(lineBase, th.paper ? 0.085 : 0.075);
+  v['--line'] = th.classic ? 'rgba(255,255,255,.07)' : rgba(lineBase, th.paper ? 0.085 : 0.075);
 
   const font = fontOf(look.font);
   v['--mono'] = font.stack;
@@ -278,11 +255,9 @@ export function swatchesOf(look) {
     .map(h => (isHex(h) ? h.toUpperCase() : h));
 }
 
-/** "Light · Mono · Jakarta" */
+/** "Light · Jakarta" */
 export function describeLook(look) {
-  const th = themeOf(look.theme);
-  const acc = ACCENTS.find(([k]) => k === look.accent)?.[1] || 'Mono';
-  return `${th.name} · ${acc} · ${fontOf(look.font).name}`;
+  return `${themeOf(look.theme).name} · ${fontOf(look.font).name}`;
 }
 
 /* ---------- the ramp on the page itself ----------
@@ -322,18 +297,19 @@ function paleCardFor(look) {
   };
 }
 
-/* On Clear glass a panel is see-through, so the writing in it is on the
-   picture too. When the picture behind them calls for the other writing
-   from the theme's — a dark look over a bright video, a light one over a
-   dark video (store.js sets data-pic-flip) — the panels are drawn as the
-   other family would draw them: tint, writing, lines and all. Only for
-   Clear; a frosted or solid panel is its own ground. */
-function clearFlip(l, th, bg, rule) {
-  if (!bg) return '';
+/* When what is behind the panels calls for the other writing from the
+   theme's — a dark look whose Clear panels sit over something bright, a
+   light one over something dark — or when you chose White or Black text
+   for everything (Appearance → Text), the panels are drawn as the other
+   family would draw them: tint, writing, lines and all (store.js sets
+   data-pic-flip and decides when). Read off the picture it is only for
+   Clear; chosen, it is for every kind of panel, solid ones turning light
+   under black writing and dark under white. */
+function panelFlip(l, th, glass, bg, rule) {
   const opp = { ...l, theme: th.paper ? 'midnight' : 'light' };
-  const t = tokensFor(opp, { glass: 'clear', bg: true });
+  const t = tokensFor(opp, { glass, bg });
   const keep = Object.fromEntries(Object.entries(t).filter(([k]) => !/^--(frame|page|ground|mono|sans|font-name)/.test(k)));
-  return rule('html[data-glass-kind="clear"][data-pic-flip] :is(.card:not(.light), .st-list)', keep);
+  return rule('html[data-look][data-pic-flip] :is(.card:not(.light), .st-list)', keep);
 }
 
 /* ---------- writing it onto the page ---------- */
@@ -368,7 +344,7 @@ export function applyLook(look, { glass = false, bg = false } = {}) {
   styleEl.textContent = `html[data-look]:root {\n${body}\n}\n`
     + (pageRamp ? rule('html[data-look]:root .head [style*="var(--grey"], html[data-look]:root .page-ink', pageRamp) : '')
     + rule('html[data-look]:root .card.light', paleCardFor(l))
-    + clearFlip(l, th, bg, rule);
+    + panelFlip(l, th, glass, bg, rule);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = th.frame;
   /* Remembered on this computer too, so the next launch is drawn in it

@@ -4,7 +4,7 @@ import { weeklyTab, weeklyControls } from './weekly.js';
 import { overviewTab } from './an-overview.js';
 import { timingTab } from './an-timing.js';
 import { executionTab } from './an-execution.js';
-import { outlookTab, takeWantedTab } from './an-outlook.js';
+import { outlookTab } from './an-outlook.js';
 import { glide } from '../shell.js';
 
 let tab = 'overview';       // overview | weekly | tags | timing | execution | discipline | outlook  (the year lives on the Calendar now)
@@ -135,31 +135,17 @@ export function yearPanel(store, nav) {
 }
 
 export function analytics(store, nav) {
-  if (takeWantedTab() === 'outlook') tab = 'outlook';     // sent here from the Outlook page
   if (tab === 'year') tab = 'overview';
   const acct = store.activeAccount;
   const cur = acct.currency;
   const all = store.tradesFor(acct.id);
 
-  /* The year reads a whole year by definition, so the rolling window has
-     nothing to say on that tab and its own year control takes the slot. The
-     weekly page is the same: it walks through time a period at a time, so it
-     brings its own control and reads every trade itself. */
-  const isYear = tab === 'year';
+  /* The weekly page walks through time a period at a time, so it brings its
+     own control and reads every trade itself; the rest read the window.
+     (The year is the Calendar's now — yearPanel above.) */
   const isWeekly = tab === 'weekly';
-  const trades = isYear || isWeekly ? all : withinPeriod(all);
+  const trades = isWeekly ? all : withinPeriod(all);
   const s = c.summarise(acct, trades);
-
-  const years = [...new Set(all.map(t => String(t.date).slice(0, 4)))].filter(Boolean).sort();
-  const thisYear = String(new Date().getFullYear());
-  if (year == null || (years.length && !years.includes(year) && year !== thisYear)) {
-    year = years.length ? years[years.length - 1] : thisYear;
-  }
-  const stepYear = (delta) => {
-    const n = String(Number(year) + delta);
-    if (Number(n) < 2000 || Number(n) > Number(thisYear) + 1) return;
-    year = n; nav.refresh();
-  };
 
   /* The tabs read like the Journal's and the Lab's: words, the chosen one
      underlined, the line sliding to the next (shell.glide). */
@@ -175,17 +161,10 @@ export function analytics(store, nav) {
     /* The count sits by the period it counts, not beside the tabs where it
        read as one more. The weekly page brings a wider control than the
        others, so it gives the count up to make room. */
-    isWeekly || tab === 'tags' ? null : el('span', { class: 'head-meta' }, isYear
-      ? `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`
-      : `${trades.length} closed trade${trades.length === 1 ? '' : 's'}`),
+    isWeekly || tab === 'tags' ? null : el('span', { class: 'head-meta' }, `${trades.length} closed trade${trades.length === 1 ? '' : 's'}`),
     tab === 'tags' ? tagMinControl(nav) : null,
     isWeekly
       ? weeklyControls(store, nav)
-      : isYear
-      ? el('div', { class: 'stepper' },
-          el('button', { onClick: () => stepYear(-1) }, icon('chevleft', 12, 'var(--grey-2)', 2.4)),
-          el('span', { class: 'val', style: { minWidth: '52px' } }, year),
-          el('button', { onClick: () => stepYear(1) }, icon('chevright', 12, 'var(--grey-2)', 2.4)))
       : el('div', { class: 'seg' },
           ...Object.keys(DAYS).map(k => el('button', { class: k === period ? 'is-on' : '',
             onClick: () => { period = k; nav.refresh(); } }, k))),
@@ -198,8 +177,8 @@ export function analytics(store, nav) {
       el('div', { class: 'card', style: { flex: '1' } },
         el('div', { class: 'empty' },
           icon('analytics', 34, 'var(--grey-6)', 1.4),
-          el('h2', { style: { fontSize: '16px' } }, isYear ? 'Nothing logged yet' : 'Nothing in this window'),
-          el('p', {}, isYear ? 'A year fills in as you trade it.' : 'Log some trades, or widen the period.'))));
+          el('h2', { style: { fontSize: '16px' } }, 'Nothing in this window'),
+          el('p', {}, 'Log some trades, or widen the period.'))));
   }
 
   const ctx = { unit: store.displayUnit, account: acct, cur, nav };
@@ -207,7 +186,6 @@ export function analytics(store, nav) {
              : tab === 'tags'     ? tagsTab(store, acct, trades, s, ctx)
              : tab === 'timing'   ? timingTab(store, acct, trades, ctx)
              : tab === 'execution' ? executionTab(store, acct, trades, ctx)
-             : tab === 'year'     ? yearly(store, acct, all, ctx)
              : tab === 'outlook'  ? outlookTab(store, acct, trades, ctx, periodFrom())
              :                      discipline(store, acct, trades, ctx);
   return el('div', { class: 'view' }, head, body);
@@ -216,23 +194,6 @@ export function analytics(store, nav) {
 /* ============================================================
    Overview — where your outcomes land, and what earns
    ============================================================ */
-/* Tags, rolled up. Lives out here because the page that shows them and the
-   page that counts rule-breaks both need the same numbers. */
-function tagRollup(store, acct, trades) {
-  const counts = new Map();
-  const allTags = store.playbook.tagGroups.flatMap(g => g.tags);
-  for (const t of trades) for (const id of (t.tagIds || [])) {
-    const g = counts.get(id) || { id, count: 0, net: 0, r: 0, rKnown: true };
-    g.count += 1; g.net += Number(t.netResult) || 0;
-    const tr = c.rMultiple(acct, t);
-    if (tr != null && isFinite(tr)) g.r += tr; else g.rKnown = false;
-    counts.set(id, g);
-  }
-  for (const g of counts.values()) if (!g.rKnown) g.r = null;
-  return [...counts.values()]
-    .map(g => ({ ...g, label: allTags.find(t => t.id === g.id)?.name || '—', wins: 0, losses: 0 }))
-    .sort((a, b) => a.net - b.net);
-}
 
 /* ============================================================
    Tags — which kinds of trade actually pay
@@ -407,7 +368,7 @@ function tagsTab(store, acct, trades, s, ctx) {
    Discipline — did you follow your own rules
    ============================================================ */
 function discipline(store, acct, trades, ctx) {
-  const { unit: u, cur } = ctx;
+  const { unit: u } = ctx;
   const f = (d, r, o) => c.fig(u, acct, d, r, o);
   const rules = store.playbook.rules || {};
   const maxPerDay = Number(rules.maxTradesPerDay) || null;
@@ -555,7 +516,7 @@ function discipline(store, acct, trades, ctx) {
    an average trade is worth to you.
    ============================================================ */
 function afterLossCard(acct, trades, ctx) {
-  const { unit: u, cur } = ctx;
+  const { unit: u } = ctx;
   const f = (d, r, o) => c.fig(u, acct, d, r, o);
   const a = c.afterLoss(acct, trades);
 

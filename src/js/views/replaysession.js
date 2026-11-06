@@ -21,19 +21,22 @@
    tools work on. Full screen hides the top bar, the tools and the panel;
    the replay bar, the favourites and a timeframe bar stay and can be moved.
    ============================================================ */
-import { el, toast } from '../ui.js';
+import { el, toast, MARK_G } from '../ui.js';
 import * as cd from '../candles.js';
 import * as rd from '../replaydata.js';
 import * as rs from '../replaysessions.js';
 import { pairName } from '../replaysessions.js';
-import { createCore, CHART_TFS, svgIcon } from '../chart/core.js';
+import { createCore, CHART_TFS, svgIcon, gripDots } from '../chart/core.js';
 import { createDrawings } from '../chart/drawings.js';
 import { createTrading } from './replaytrading.js';
 import { paintSessions, paintSessionNames, newsFor, paintNews } from '../chart/overlays.js';
+import { tslOf, onTsl, tslLegend, openTslSettings, paintTslBack, paintTslFront } from '../chart/threesl.js';
 import { rsiFor } from '../chart/rsi.js';
 import { TV_FONT } from '../chart/core.js';
 import * as rt from '../replaytrades.js';
 import { openMenu, closeMenus } from '../chart/menu.js';
+import { chartSettings, onSettings } from '../chart/settings.js';
+import { pad2 } from '../calc.js';
 
 /* what one step moves: the chart's timeframe, or a set time (minutes; 0.25 = 15 seconds) */
 const TICK = 0.25;
@@ -44,7 +47,6 @@ const LOOKBACK = 31 * 86400;
 const BAR_KEY = 'quire:rsBar', TFBAR_KEY = 'quire:rsTfBar', PANEL_KEY = 'quire:rsPanel', SPEED_KEY = 'quire:rsSpeed', STEP_KEY = 'quire:rsStep';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const pad2 = n => String(n).padStart(2, '0');
 /** The moment as shown: inside a minute (15-second steps), with its seconds. */
 const momentText = (feed, T, secs) => {
   const st = feed.stateAt(T);
@@ -59,7 +61,7 @@ const ICON = {
   back: 'M6 5v14M18 6l-9 6 9 6z', fwd: 'M18 5v14M6 6l9 6-9 6z', play: 'M8 5.5l11 6.5-11 6.5z', pause: 'M8 5.5v13M16 5.5v13',
   full: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', unfull: 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5',
   gear: 'M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM12 3l1.6 2.3 2.7-.6.6 2.7L19.2 9 18.5 12l.7 3-2.3 1.6-.6 2.7-2.7-.6L12 21l-1.6-2.3-2.7.6-.6-2.7L4.8 15l.7-3-.7-3 2.3-1.6.6-2.7 2.7.6z',
-  layout: 'M4 5h16v14H4zM12 5v14', grip: 'M9.5 6h.01M14.5 6h.01M9.5 12h.01M14.5 12h.01M9.5 18h.01M14.5 18h.01',
+  layout: 'M4 5h16v14H4zM12 5v14',
 };
 
 /* ---------- the prices, and the candles up to a moment ---------- */
@@ -133,6 +135,11 @@ function openSession(store, nav, sid) {
   const root = el('div', { class: 'rs', role: 'dialog', 'aria-label': 'Replay session' });
   document.body.append(root);
   document.documentElement.classList.add('rs-open');
+  /* Chart Settings → Canvas → Background → Clear: the whole session see-through
+     to your background (the video or the fade), the app hidden behind it */
+  const paintClear = st => root.classList.toggle('is-clear', (st || chartSettings(store)).canvas.bg === 'clear');
+  paintClear();
+  const unClear = onSettings(st => { if (!root.isConnected) { unClear(); return; } paintClear(st); });
   let closed = false, cleanup = () => {};
   const handle = { sid, close: async keep => {
     if (closed) return;
@@ -185,15 +192,15 @@ function build(store, nav, s, feed, root, handle) {
   /* ---------- the frame ---------- */
   const tfSeg = el('div', { class: 'rs-tfs' });
   const layoutBtn = el('button', { class: 'rs-tb rs-layout', title: 'Layout', onClick: e => layoutMenu(e.currentTarget) }, svgIcon(ICON.layout, 18), el('span', {}, 'Layout'));
-  /* indicators: Sessions, News (red folders) and the RSI — kept with the session */
-  if (!s.ind || typeof s.ind !== 'object') s.ind = { sessions: true, news: true, rsi: false };
+  /* indicators: Sessions, News (red folders), the RSI and 3SL — kept with the session */
+  if (!s.ind || typeof s.ind !== 'object') s.ind = { sessions: false, news: false, rsi: false };
   const pbSessions = store.playbook?.sessions || [];
   const news = newsFor(store, s.inst, s.from - LOOKBACK, s.to + 60);
   const indBtn = el('button', { class: 'rs-tb rs-ind', title: 'Indicators', onClick: e => indMenu(e.currentTarget) }, svgIcon('M4 19l5-7 4 3 7-10', 18), el('span', {}, 'Indicators'));
   function indMenu(anchor) {
     const r = anchor.getBoundingClientRect();
     const item = (k, label) => ({ label, checked: !!s.ind[k], cls: 'rs-ind-' + k, act: () => setInd(k, !s.ind[k]) });
-    openMenu([{ head: 'Indicators' }, item('rsi', 'Relative Strength Index'), item('sessions', 'Sessions'), item('news', 'News · red folders')], r.left, r.bottom + 4);
+    openMenu([{ head: 'Indicators' }, item('rsi', 'Relative Strength Index'), item('sessions', 'Sessions'), item('news', 'News · red folders'), item('tsl', '3SL')], r.left, r.bottom + 4);
   }
   function setInd(k, on) { s.ind = { ...s.ind, [k]: on }; queueSave(); redrawAll(); }
   const stat = (k, cls) => el('div', { class: 'rs-stat ' + cls }, el('span', {}, k), el('b', {}));
@@ -240,11 +247,16 @@ function build(store, nav, s, feed, root, handle) {
       hooks: {
         limit: () => c.k,
         tags: () => (c.dr ? [...c.dr.tags(), ...c.tr.tags()] : []),
-        back: (g, G, C) => { if (s.ind.sessions) paintSessions(g, G, C, pbSessions, c.tf); },
+        back: (g, G, C) => {
+          if (s.ind.sessions) paintSessions(g, G, C, pbSessions, c.tf);
+          c.tslBoxes = s.ind.tsl ? paintTslBack(g, G, tslOf(store), c.core.bars, c.tf) : [];
+        },
         front: (g, G, C) => {
           const font = px => `400 ${px}px ${C.font || TV_FONT}`;
           if (s.ind.sessions) paintSessionNames(g, G, C, pbSessions, c.tf, font);
           c.groups = s.ind.news ? paintNews(g, G, C, news, font) : [];
+          if (s.ind.tsl) paintTslFront(g, G, { ...C, font: C.font || TV_FONT }, tslOf(store), { bars: c.core.bars, tf: c.tf, ticker: s.inst.replace('_', ''), boxes: c.tslBoxes });
+          c.tslLeg?.place(!!s.ind.tsl);
           c.dr.paint(g, G, C); c.tr.paint(g, G, C);
         },
         panes: () => (s.ind.rsi && c.rsi ? [c.rsi] : []),
@@ -260,6 +272,8 @@ function build(store, nav, s, feed, root, handle) {
       replayT: () => feed.doneAt(T) + 59, hideFuture: false, account: () => ({ balance: s.balance, risk: s.riskMode === '%' ? s.risk : (s.risk / s.balance * 100) }) });
     c.tr = trading.forChart(c);
     c.rsi = rsiFor(store, c.core, { tf: () => c.tf, plot, remove: () => setInd('rsi', false) });
+    c.tslLeg = tslLegend(plot, { open: () => openTslSettings(store), remove: () => setInd('tsl', false) });
+    onTsl(plot, () => c.core.draw());
     c.core.setAuto(true);
     pane.addEventListener('pointerdown', () => setActive(slot), true);
     return c;
@@ -448,12 +462,21 @@ function build(store, nav, s, feed, root, handle) {
       } }, sp),
       el('button', { class: 'rs-rt rs-jump', onClick: e => jumpMenu(e.currentTarget) }, 'Jump to', el('i', { class: 'rs-caret' })),
       el('span', { class: 'rs-sep' }),
-      el('span', { class: 'rs-when' }, momentText(feed, T, step === TICK)));
+      el('span', { class: 'rs-when' }, momentText(feed, T, step === TICK)),
+      /* the Laminar mark at the end (Minato, 6 Nov): just the L, quiet, nothing to press */
+      el('span', { class: 'rs-sep' }),
+      barMark());
     place(bar, recall(BAR_KEY, { x: 0.5, y: 0.86 }), true);
+  }
+  function barMark() {
+    const m = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    m.setAttribute('viewBox', '-2 -2 126 159'); m.setAttribute('fill', 'currentColor'); m.setAttribute('aria-hidden', 'true');
+    m.innerHTML = MARK_G;
+    return el('span', { class: 'rs-mark', title: 'Laminar' }, m);
   }
   /* a grip that moves its bar over the charts; where it ends up is kept on this computer */
   function grip(box, key) {
-    const g = el('span', { class: 'tv-grip', title: 'Drag to move' }, svgIcon(ICON.grip, 16));
+    const g = el('span', { class: 'tv-grip', title: 'Drag to move' }, gripDots(16));
     g.addEventListener('pointerdown', e => {
       e.preventDefault(); e.stopPropagation();
       const r = stage.getBoundingClientRect(), b = box.getBoundingClientRect();
@@ -583,7 +606,7 @@ function build(store, nav, s, feed, root, handle) {
   ro.observe(stage);
 
   root.__session = {
-    get T() { return T; }, get playing() { return playing; }, get speed() { return RS_SPEEDS[speed][0]; }, get step() { return step; }, setStep, price: () => feed.priceAt(T), get charts() { return charts.map(c => ({ tf: c.tf, k: c.k, bars: c.shown.length, last: c.shown[c.k], groups: c.groups || [], rsi: c.rsi.values(), areas: c.core.areas() })); }, get ind() { return { ...s.ind }; },
+    get T() { return T; }, get playing() { return playing; }, get speed() { return RS_SPEEDS[speed][0]; }, get step() { return step; }, setStep, price: () => feed.priceAt(T), get charts() { return charts.map(c => ({ tf: c.tf, k: c.k, bars: c.shown.length, last: c.shown[c.k], groups: c.groups || [], rsi: c.rsi.values(), areas: c.core.areas(), tsl: (c.tslBoxes || []).map(B => ({ ...B })) })); }, get ind() { return { ...s.ind }; },
     get active() { return active; }, trading, trades: () => structuredClone(s.trades || []), get bare() { return bare; }, get panel() { return panelH; }, feed, first, last: lastInPeriod,
     core: i => charts[i ?? active].core, dr: i => charts[i ?? active].dr, marks: i => charts[i ?? active].tr.marks(),
     stepForward, stepBack, setPlaying, moveTo, jumpTo, setTf: (m, i) => setTf(charts[i ?? active], m), setLayout,

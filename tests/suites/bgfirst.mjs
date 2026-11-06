@@ -47,20 +47,20 @@ let pass=0, fail=0; const t=(n,c,x='')=>{c?pass++:fail++;console.log(`  ${c?'ok 
 {
   const { b, p, errs } = await open(seed());
   const picks = await backgroundNames(p);
-  t('eight tiles: none plus seven videos (his GT3 RS and Water the last)', picks.length === 8 && /Water/.test(picks.at(-1)), picks.join(', '));
+  t('six tiles: none, Fade, four videos (his GT3 RS the last)', picks.length === 6 && /GT3 RS/.test(picks.at(-1)), picks.join(', '));
   await closeLook(p);
   t('starts with glass off', (await state(p)).glass === 'off');
 
-  await pick(p, 'Moon');
+  await pick(p, 'Susanoo');
   let s = await state(p);
-  t('first pick puts the video behind', s.bg === 'moon');
+  t('first pick puts the video behind', s.bg === 'susanoo');
   t('and turns Clear glass on with it', s.glass === 'on' && s.kind === 'clear', JSON.stringify(s));
   t('and says so', /Clear glass turned on/.test(s.toast), s.toast);
   /* Read from the module rather than pinned to a number: the videos get
      replaced, the rule does not. */
   t('a video carries its own dim, not a guess', await p.evaluate(async ()=>{
     const { BACKGROUNDS, scrimFor } = await import('/js/backgrounds.js');
-    const want = scrimFor(BACKGROUNDS.find(b => b.id === 'moon'));
+    const want = scrimFor(BACKGROUNDS.find(b => b.id === 'susanoo'));
     const got = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bg-scrim'));
     return Math.abs(got - want) < .001 && want > 0 && want < 1;
   }));
@@ -81,15 +81,15 @@ let pass=0, fail=0; const t=(n,c,x='')=>{c?pass++:fail++;console.log(`  ${c?'ok 
   /* The whole point of the number: a brighter video is held down harder. */
   t('and a brighter video is held down harder than a darker one', await p.evaluate(async ()=>{
     const { BACKGROUNDS, scrimFor } = await import('/js/backgrounds.js');
-    return scrimFor(BACKGROUNDS.find(b => b.id === 'torii')) > scrimFor(BACKGROUNDS.find(b => b.id === 'rain'));
+    return scrimFor(BACKGROUNDS.find(b => b.id === 'path')) > scrimFor(BACKGROUNDS.find(b => b.id === 'rain'));
   }));
-  await pick(p, 'Torii');
+  await pick(p, 'Samurai Path');
   t('nor does the one after that', (await state(p)).glass === 'off');
 
   // and it stays decided across a reload
   await p.reload({waitUntil:'domcontentloaded'}); await p.waitForTimeout(800);
   await p.evaluate(()=>location.hash='#/settings'); await p.waitForTimeout(500);
-  await pick(p, 'Moon');
+  await pick(p, 'Susanoo');
   t('still decided after a reload', (await state(p)).glass === 'off');
   t('no errors', errs.length === 0, errs.join('|'));
   await b.close();
@@ -106,7 +106,7 @@ let pass=0, fail=0; const t=(n,c,x='')=>{c?pass++:fail++;console.log(`  ${c?'ok 
 // --- someone who already turned the glass on before ever picking a picture ---
 {
   const { b, p } = await open(seed({ glass:true, glassNudged:true }));
-  await pick(p, 'Moon');
+  await pick(p, 'Susanoo');
   const s = await state(p);
   t('glass already on stays on, and stays Frosted', s.glass === 'on' && s.kind === 'frosted');
   t('and no announcement is made', !/glass turned on/.test(s.toast), s.toast || '(none)');

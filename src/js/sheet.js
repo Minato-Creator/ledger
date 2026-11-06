@@ -79,13 +79,12 @@ export function sheet({ cls = '', body, title, onClose, label } = {}) {
 
 /** Close every sheet — used when the route changes underneath them. */
 export function closeSheets() { for (const s of [...open]) s.close(); }
-export const sheetsOpen = () => open.size > 0;
 
 /**
  * A small menu anchored to a button: account list, quick actions.
  * Closes on a click elsewhere or Escape. Returns the close function.
  */
-export function popover(anchor, body, { cls = '', align = 'right' } = {}) {
+export function popover(anchor, body, { cls = '', align = 'right', onClose = null } = {}) {
   const r = anchor.getBoundingClientRect();
   const pop = el('div', { class: 'popover ' + cls, role: 'menu' }, body);
   pop.style.top = `${Math.round(r.bottom + 8)}px`;
@@ -97,11 +96,15 @@ export function popover(anchor, body, { cls = '', align = 'right' } = {}) {
     if (e.type === 'pointerdown' && (pop.contains(e.target) || anchor.contains(e.target))) return;
     close();
   };
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
     document.removeEventListener('pointerdown', away, true);
     document.removeEventListener('keydown', away, true);
     pop.classList.add('is-out');
     setTimeout(() => pop.remove(), 160);
+    onClose?.();
   };
   setTimeout(() => {
     document.addEventListener('pointerdown', away, true);

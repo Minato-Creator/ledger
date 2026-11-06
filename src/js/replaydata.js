@@ -26,7 +26,6 @@ import { fs } from './fs.js';
 import { call, parseCandles, explain, useLocalPrices } from './candles.js';
 
 export const ROOT = 'replay/prices';
-export const MONTHS_BACK = 24;                   // two years, plus the month we are in — the default
 /* How far back to keep: two years unless asked for more (the index remembers it). */
 export const HISTORY = [2, 5, 10];
 export const historyOf = ix => (HISTORY.includes(ix?.years) ? ix.years : 2);
@@ -160,13 +159,6 @@ async function fetchSpan(inst, month, cred, from0, { now, signal }) {
     for (const r of got) if (r[0] >= from && r[0] < to && (!rows.length || r[0] > rows[rows.length - 1][0])) rows.push(r);
   }
   return rows;
-}
-
-/** One month, fetched whole and saved. */
-export async function fetchMonth(inst, month, cred, { now = Date.now() / 1000, signal } = {}) {
-  const rows = await fetchSpan(inst, month, cred, monthStart(month), { now, signal });
-  await saveMonth(inst, month, rows, now);
-  return rows.length;
 }
 
 /**

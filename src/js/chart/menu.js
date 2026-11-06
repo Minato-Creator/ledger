@@ -59,7 +59,6 @@ export function openMenu(items, x, y, { cls = '' } = {}) {
   }, 0);
   return m;
 }
-export const menuOpen = () => !!open;
 
 /* ---------- Change interval ---------- */
 const NAMES = { 1: '1 minute', 60: '1 hour', 1440: '1 day' };

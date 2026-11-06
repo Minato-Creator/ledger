@@ -12,11 +12,11 @@
 import * as cd from '../candles.js';
 import { withAlpha } from './core.js';
 import { shortNews, newsLabel } from '../news.js';
+import { pad2 } from '../calc.js';
 export { shortNews, newsLabel };
 
 const DAY = 86400;
 export const NEWS_TOP = 28;
-const pad2 = n => String(n).padStart(2, '0');
 const localDay = T => { const d = new Date(T * 1000); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 
 /** Each session on screen: [from, to, name]. */

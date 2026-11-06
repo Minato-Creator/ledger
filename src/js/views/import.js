@@ -10,7 +10,10 @@
 import { el, icon, toast } from '../ui.js';
 import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
-import { acctMark } from './acctlogo.js';
+import { acctMark, logoTile } from './acctlogo.js';
+import { syncOanda } from '../oandasync.js';
+import * as cd from '../candles.js';
+import { ago } from '../wire.js';
 import { parseBrokerCSV, instrumentsIn, moneyFor, suggestedPointValue, guessAssetClass } from '../broker.js';
 
 export function importTrades(store, nav) {
@@ -86,6 +89,9 @@ export function importTrades(store, nav) {
   }
 
   function chooser() {
+    return el('div', { class: 'im-choose' }, oandaCard(store, nav), csvCard());
+  }
+  function csvCard() {
     return el('section', { class: 'card', style: { padding: '52px 46px', alignItems: 'center', textAlign: 'center', gap: '16px' } },
       el('div', { style: { width: '54px', height: '54px', borderRadius: '18px', background: 'var(--inset)', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
         icon('upload', 22, 'var(--grey-4)', 1.7)),
@@ -283,4 +289,54 @@ export function importTrades(store, nav) {
 
   paint();
   return el('div', { class: 'view' }, head, stage);
+}
+
+/* ---------- OANDA: the trades from your account, no file needed ----------
+   oandasync.js does the work; this is its button. With no key it says where
+   the key goes; synced once, it says where the trades went and when, and
+   whether it syncs by itself when the journal opens. */
+function oandaCard(store, nav) {
+  const card = el('section', { class: 'card im-oanda' });
+  let busy = false, note = '';
+  async function paint() {
+    const cred = await cd.getKey();
+    const link = store.data.accounts.oanda || null;
+    const into = link?.laminarId ? store.accounts.find(a => a.id === link.laminarId) : null;
+    const count = into ? store.trades.filter(t => t.accountId === into.id && t.oanda).length : 0;
+    const go = el('button', { class: 'btn btn-primary im-oanda-go', disabled: busy || !cred, onClick: run },
+      icon('refresh', 14, 'currentColor', 1.9), busy ? (note || 'Syncing…') : into ? 'Sync now' : 'Sync from OANDA');
+    const auto = into ? el('label', { class: 'im-oanda-auto' },
+      el('input', { type: 'checkbox', checked: link.auto !== false, onChange: async e => { store.data.accounts.oanda = { ...link, auto: e.target.checked }; await store.save('accounts'); } }),
+      el('span', {}, 'Sync each time Laminar opens')) : null;
+    card.replaceChildren(
+      el('div', { class: 'im-oanda-top' },
+        logoTile(store, { firm: 'oanda', name: 'OANDA' }, 40),
+        el('div', { class: 'im-oanda-t' },
+          el('h3', {}, 'OANDA', cred ? el('span', { class: 'im-oanda-k' }, cred.live ? 'live key' : 'demo key') : null),
+          el('p', {}, !cred ? 'Add your OANDA key in Settings → Charts & prices and your trades come across by themselves — times, prices, size, the result, the stop and the target.'
+            : into ? `Into ${into.name} · ${count} trade${count === 1 ? '' : 's'} · synced ${ago(link.syncedAt) || 'just now'}`
+            : `Brings in every trade on your ${cred.live ? 'live' : 'demo (practice)'} account: times, prices, size, the result, the stop it began with and the target. It only reads — Laminar never places an order.`)),
+        el('div', { class: 'spacer' }),
+        /* the trades live in their own account; from another one, a way across to them */
+        into && cred && store.activeAccount?.id !== into.id ? el('button', { class: 'btn btn-quiet im-oanda-see',
+          onClick: async () => { await store.setActiveAccount(into.id); toast('Switched to ' + into.name); nav.go('#/trades'); } }, 'Show them') : null,
+        cred ? go : el('button', { class: 'btn btn-quiet', onClick: () => nav.go('#/settings/charts') }, 'Add your key')),
+      auto);
+  }
+  async function run() {
+    if (busy) return;
+    busy = true; note = ''; paint();
+    try {
+      const r = await syncOanda(store, { onStep: s => { note = s; paint(); } });
+      busy = false;
+      const here = store.activeAccount?.id === r.account.id;
+      toast(r.added || r.updated ? `${r.added} new, ${r.updated} brought up to date in ${r.account.name}${here ? '' : ' — open it from the account switcher at the top'}` : `Up to date — nothing new on OANDA`);
+      if (r.added && here) nav.go('#/trades'); else paint();
+    } catch (e) {
+      busy = false; paint();
+      toast(/401|403|unauthori|insufficient/i.test(String(e?.message)) ? cd.explain(e) : (e?.message || 'Could not reach OANDA'), 'bad');
+    }
+  }
+  paint();
+  return card;
 }

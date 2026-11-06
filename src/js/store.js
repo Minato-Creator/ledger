@@ -6,8 +6,8 @@
    This file only knows about accounts, trades, playbook and replay.
    ============================================================ */
 
-import { sessionFor, UNITS, todayISO, readableOn, lift, sink, inkOn, accountMoney } from './calc.js';
-import { findBackground, scrimFor } from './backgrounds.js';
+import { sessionFor, UNITS, todayISO, readableOn, lift, sink, inkOn, accountMoney, useAccounts } from './calc.js';
+import { findBackground, scrimFor, FADE, fadeCss, fadeLuma, normaliseFade } from './backgrounds.js';
 import { tidyName } from './clip.js';
 import { BUILTIN_CLIPS, isBuiltinClip } from './share/clips.js';
 import { shotName, urlFor, forgetUrl } from './shots.js';
@@ -96,16 +96,14 @@ function videoLayer() {
   const wrap = document.createElement('div');
   wrap.className = 'bg-layer';
   wrap.setAttribute('aria-hidden', 'true');
-  const v = document.createElement('video');
-  v.muted = true; v.loop = true; v.playsInline = true; v.autoplay = true; v.preload = 'auto';
-  v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.disablePictureInPicture = true;
   const scrim = document.createElement('div');
   scrim.className = 'bg-scrim';
   /* a soft shade down from the top, under the top bar and each page's
      heading, dark under light writing and light under dark (data-shade) */
   const shade = document.createElement('div');
   shade.className = 'bg-shade';
-  wrap.append(v, scrim, shade);
+  wrap.append(scrim, shade);
+  wrap.hidden = true;
   document.body.prepend(wrap);
   layer = wrap;
   if (!videoLayer.listening) {
@@ -114,14 +112,76 @@ function videoLayer() {
   }
   return wrap;
 }
+/* ---------- changing it: one picture fading over the last ----------
+   Each background is a slot of its own in the layer: the still (or the fade's
+   two colours) at once, the clip over it once it is actually playing. A new
+   one comes in on top of the old and the old is taken away when it is
+   covered, so nothing goes blank while a clip loads (in the desktop app a
+   clip is read whole first) and nothing snaps. None fades the last one out. */
+export const BG_FADE_MS = 650;
+const quietMotion = () => document.documentElement.dataset.motion === 'off'
+  || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+/** A slot for a background — shared with the Appearance sheet's preview, which shows the still alone
+    (`still`): the clip is already playing behind the sheet, and a second copy of it would only cost. */
+export function bgSlot(bg, { still = false } = {}) {
+  const s = document.createElement('div');
+  s.className = 'bg-slot';
+  s.dataset.key = bg.fade ? 'fade:' + fadeCss(bg.fade) : bg.src;
+  if (bg.fade) { s.style.backgroundImage = fadeCss(bg.fade); return s; }
+  if (bg.poster) { s.style.backgroundImage = `url("${bg.poster}")`; s.dataset.poster = bg.poster; }
+  if (still) return s;
+  const v = document.createElement('video');
+  v.muted = true; v.loop = true; v.playsInline = true; v.autoplay = true; v.preload = 'auto';
+  v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.disablePictureInPicture = true;
+  if (bg.poster) v.setAttribute('poster', bg.poster);
+  /* the clip shows itself once it has frames to show */
+  const on = () => v.classList.add('is-on');
+  v.addEventListener('playing', on, { once: true });
+  v.addEventListener('loadeddata', () => { if (quietMotion() || document.hidden) on(); }, { once: true });
+  s.append(v);
+  /* in place already (usually): play it; not yet: bgSwap does when it puts it there */
+  playable(bg.src).then(url => { if (s.parentNode) { v.setAttribute('src', url); playIfAwake(v); } else s.dataset.url = url; });
+  return s;
+}
+/** Bring `slot` in over whatever `host` shows (its other slots), then let those go. */
+export function bgSwap(host, slot, { before = null, instant = false } = {}) {
+  const olds = [...host.querySelectorAll(':scope > .bg-slot')].filter(o => o !== slot);
+  host.insertBefore(slot, before);
+  if (slot.dataset.url) { const v = slot.querySelector('video'); v.setAttribute('src', slot.dataset.url); playIfAwake(v); }
+  const done = () => olds.forEach(o => { o.querySelectorAll('video').forEach(stopVideo); o.remove(); });
+  if (instant || quietMotion()) { slot.classList.add('is-in'); done(); return; }
+  olds.forEach(o => o.classList.add('is-under'));
+  /* the old one goes once the new one has fully covered it, not on a guess */
+  let gone = false;
+  const go = () => { if (!gone) { gone = true; done(); } };
+  slot.addEventListener('transitionend', e => { if (e.target === slot && e.propertyName === 'opacity') go(); });
+  /* the still decoded first (at most a moment), so the fade runs its whole length rather than starting late and jumping */
+  const ready = slot.dataset.poster ? decoded(slot.dataset.poster) : Promise.resolve();
+  Promise.race([ready, new Promise(r => setTimeout(r, 280))]).then(() =>
+    requestAnimationFrame(() => requestAnimationFrame(() => { slot.classList.add('is-in'); setTimeout(go, BG_FADE_MS + 400); })));
+}
+/** Fade out everything `host` shows, then call `after`. */
+export function bgClear(host, after = () => {}) {
+  const olds = [...host.querySelectorAll(':scope > .bg-slot')];
+  const done = () => { olds.forEach(o => { o.querySelectorAll('video').forEach(stopVideo); o.remove(); }); after(); };
+  if (!olds.length || quietMotion()) return done();
+  olds.forEach(o => { o.classList.remove('is-in'); o.classList.add('is-leaving'); });
+  setTimeout(done, BG_FADE_MS + 60);
+}
+const decodes = new Map();
+function decoded(url) {
+  if (!decodes.has(url)) { const im = new Image(); im.src = url; decodes.set(url, (im.decode ? im.decode() : Promise.resolve()).catch(() => {})); }
+  return decodes.get(url);
+}
+function stopVideo(v) { v.pause(); v.removeAttribute('src'); v.removeAttribute('poster'); v.load(); }
+function playIfAwake(v) {
+  const still = document.hidden || quietMotion();
+  if (still) v.pause(); else v.play().catch(() => {});
+}
 /* Still while the window is hidden, and for Motion: Off or a system that
    asks for less motion — the first frame stays, as a picture. */
 export function syncBgPlay() {
-  const v = layer?.querySelector('video');
-  if (!v || !v.getAttribute('src')) return;
-  const still = document.hidden || document.documentElement.dataset.motion === 'off'
-    || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
-  if (still) v.pause(); else v.play().catch(() => {});
+  for (const v of layer?.querySelectorAll('.bg-slot video[src]') || []) playIfAwake(v);
 }
 /* ---------- the writing on the picture ----------
    The top bar and each page's heading sit on the video, not on a panel. Its
@@ -172,52 +232,83 @@ export function picInkFor(mode, luma, paper, scrim) {
 }
 /* The heading's writing is read off the top of the picture; whether Clear's
    see-through panels are drawn the other way round from the theme (data-pic-
-   flip, look.js → clearFlip) off the whole of it — or, when you chose the
-   writing yourself, off your choice. */
-function paintPicInk(bg, mode, scrim) {
+   flip, look.js → panelFlip) off the whole of it — or, when you chose the
+   writing yourself, off your choice, for every kind of panel.
+
+   With nothing behind the app the "picture" is the theme's own frame: Auto
+   leaves the frame's writing to the theme (it was drawn for it) and only
+   turns Clear panels that have gone see-through over a frame too bright or
+   too dark for the theme's writing; White and Black still write everything
+   in what they say. */
+function paintPicInk(bg, mode, scrim, frame) {
   const root = document.documentElement;
   const want = PIC_INKS.includes(mode) ? mode : 'auto';
+  const chosen = want === 'white' || want === 'black';
   const lightInk = k => k === 'white' || k === 'grey-l';
   const set = L => {
-    if (root.dataset.bg !== bg.id) return;               // another background since
+    if (bg ? root.dataset.bg !== bg.id : root.dataset.bg) return;   // another background since
     const paper = root.dataset.paper === 'on';
-    const ink = picInkFor(want, L ? L.top : null, paper, scrim);
-    if (ink) root.dataset.picInk = ink; else root.removeAttribute('data-pic-ink');
-    root.dataset.shade = ink ? (lightInk(ink) ? 'dark' : 'light') : (paper ? 'light' : 'dark');
+    const clear = root.dataset.glassKind === 'clear';
+    const ink = !bg && !chosen ? null : picInkFor(want, L ? L.top : null, paper, scrim);
+    /* with nothing behind, the frame is the theme's own colour: writing that
+       would vanish into it (black on Midnight's black) is left to the theme
+       there, and only the panels take it */
+    const onFrame = ink && (bg || !L || (lightInk(ink) ? L.top < 0.62 : L.top > 0.38));
+    if (onFrame) root.dataset.picInk = ink; else root.removeAttribute('data-pic-ink');
+    if (bg) root.dataset.shade = ink ? (lightInk(ink) ? 'dark' : 'light') : (paper ? 'light' : 'dark');
+    else root.removeAttribute('data-shade');
     /* Read off the picture, the panels only turn when it is well over on the
        other side — a busy picture in between is better on the theme's own;
        chosen by you, they follow your choice. */
     let flip;
-    if (want === 'auto' || want === 'grey') {
+    if (chosen) flip = paper ? lightInk(ink) : !lightInk(ink);
+    else if (want === 'theme' || !clear) flip = false;
+    else if (bg) {
       const seen = L ? seenOf(L.all, paper, scrim) : null;
       flip = seen != null && (paper ? seen < 0.38 : seen > 0.62);
-    } else flip = !!ink && (paper ? lightInk(ink) : !lightInk(ink));
+    } else flip = L != null && (paper ? L.all < 0.45 : L.all > 0.55);
     if (flip) root.dataset.picFlip = ''; else root.removeAttribute('data-pic-flip');
   };
+  if (!bg) return set(frame ? plainLuma(frame, root) : null);
+  if (bg.luma) return set(bg.luma);
   if (want !== 'auto' && want !== 'grey') return set(null);
   const src = bg.poster || null;
   if (lumas.has(src)) lumas.get(src).then(set); else { set(null); topLuma(src).then(set); }
 }
+/* With nothing behind: how bright the frame is, and how bright a Clear panel
+   over it comes out at this clarity (its tint is look.js's). */
+function plainLuma(frame, root) {
+  const y = hex => { const m = String(hex).replace('#', ''); const [r, g, b] = [0, 2, 4].map(i => parseInt(m.slice(i, i + 2), 16));
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; };
+  const top = y(frame);
+  if (root.dataset.glassKind !== 'clear') return { top, all: top };
+  const k = clampClarity(root.style.getPropertyValue('--clear-k'));
+  const paper = root.dataset.paper === 'on';
+  const a = paper ? 0.66 - 0.6 * k : 0.55 - 0.51 * k;
+  return { top, all: top * (1 - a) + (paper ? 1 : 0.03) * a };
+}
 
 /** How clear Clear glass is by default: 0 is nearly frosted, 1 is bare. */
 export const CLARITY = 0.65;
-export function applySurface(background, glass, theme, dim = null, clarity = CLARITY, picInk = 'auto') {
+export function applySurface(background, glass, theme, dim = null, clarity = CLARITY, picInk = 'auto', { fade = FADE, frame = null } = {}) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const bg = findBackground(background) || yourBackground(background);
+  const bg = background === 'fade' ? fadeBackground(fade) : findBackground(background) || yourBackground(background);
+  /* the first one at start-up is simply there (the intro is over it); after that, each fades in */
+  const first = !applySurface.ran;
+  applySurface.ran = true;
   root.dataset.glass = glass ? 'on' : 'off';
   root.dataset.glassKind = glass === 'clear' ? 'clear' : glass ? 'frosted' : 'off';
   /* the tint and blur of Clear are worked out from this in CSS (look.js) */
   root.style.setProperty('--clear-k', String(clampClarity(clarity)));
   if (!bg) {
     root.removeAttribute('data-bg');
-    root.removeAttribute('data-pic-ink'); root.removeAttribute('data-shade'); root.removeAttribute('data-pic-flip');
     root.style.removeProperty('--bg-scrim');
-    if (layer) {
-      const v = layer.querySelector('video');
-      v.pause(); v.removeAttribute('src'); v.removeAttribute('poster'); v.load();
-      layer.hidden = true;
+    if (layer && !layer.hidden) {
+      layer.classList.add('is-clearing');
+      bgClear(layer, () => { if (!root.dataset.bg) { layer.hidden = true; layer.classList.remove('is-clearing'); } });
     }
+    paintPicInk(null, picInk, 0, frame);
     return;
   }
   root.dataset.bg = bg.id;
@@ -225,16 +316,15 @@ export function applySurface(background, glass, theme, dim = null, clarity = CLA
   root.style.setProperty('--bg-scrim', String(scrim));
   paintPicInk(bg, picInk, scrim);
   const L = videoLayer();
+  /* coming out of None, the dim and the shade come in with the picture rather than ahead of it */
+  if (L.hidden && !first && !quietMotion()) { L.classList.add('is-clearing'); requestAnimationFrame(() => requestAnimationFrame(() => { if (root.dataset.bg) L.classList.remove('is-clearing'); })); }
+  else L.classList.remove('is-clearing');
   L.hidden = false;
-  const v = L.querySelector('video');
-  if (v.dataset.want !== bg.src) {
-    v.dataset.want = bg.src;
-    if (bg.poster) v.setAttribute('poster', bg.poster); else v.removeAttribute('poster');
-    playable(bg.src).then(url => {
-      if (v.dataset.want !== bg.src) return;            // another was chosen meanwhile
-      if (v.getAttribute('src') !== url) v.setAttribute('src', url);
-      syncBgPlay();
-    });
+  const now = [...L.querySelectorAll(':scope > .bg-slot:not(.is-under):not(.is-leaving)')].pop();
+  const key = bg.fade ? 'fade:' + fadeCss(bg.fade) : bg.src;
+  if (!now || now.dataset.key !== key || !now.classList.contains('is-in')) {
+    if (now && now.dataset.key === key) now.classList.add('is-in');
+    else bgSwap(L, bgSlot(bg), { before: L.querySelector('.bg-scrim'), instant: first });
   }
   syncBgPlay();
 }
@@ -264,6 +354,16 @@ const profileUrls = new Map();
 /* the share sheet's own clips, read once: src -> Promise<Blob|null> */
 const builtinBlobs = new Map();
 export function rememberYourBackground(id, url, poster) { yourUrls.set(id, { url, poster }); }
+/* The two-colour fade (Appearance → Background → Fade): no clip, nothing
+   held down behind the writing unless you Dim it — the colours are yours. */
+function fadeBackground(fade) {
+  const f = normaliseFade(fade);
+  return { id: 'fade', fade: f, scrim: 0, luma: fadeLuma(f) };
+}
+/** What a background setting draws: { id, src, poster } for a clip, { id, fade } for the fade, null for none. */
+export function backgroundOf(value, fade = FADE) {
+  return value === 'fade' ? fadeBackground(fade) : findBackground(value) || yourBackground(value);
+}
 function yourBackground(value) {
   const id = String(value || '').startsWith('yours:') ? String(value).slice(6) : null;
   const got = id && yourUrls.get(id);
@@ -305,6 +405,8 @@ class Store {
   constructor() {
     this.data = null;          // { accounts, trades, playbook, replay }
     this.listeners = new Set();
+    /* a trade's R (and so whether it was a break-even) is measured on its own account */
+    useAccounts(id => this.data?.accounts?.accounts?.find(a => a.id === id) || null);
   }
 
   onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -574,7 +676,8 @@ class Store {
 
     if (!d.accounts || typeof d.accounts !== 'object') { d.accounts = defaultAccounts(); note(); }
     if (!Array.isArray(d.accounts.accounts)) { d.accounts.accounts = []; note(); }
-    d.accounts.accounts = d.accounts.accounts.filter(a => a && a.id);
+    { const seenA = new Set(), ok = d.accounts.accounts.filter(a => a && a.id && !seenA.has(a.id) && seenA.add(a.id));
+      if (ok.length !== d.accounts.accounts.length) { d.accounts.accounts = ok; note(); } }
     /* a clip left at the old ten-second default trim plays whole now */
     for (const cl of Array.isArray(d.accounts.share?.clips) ? d.accounts.share.clips : []) {
       const dur = Number(cl?.dur) || 0;
@@ -592,7 +695,11 @@ class Store {
     if (!Array.isArray(d.trades.trades)) { d.trades.trades = []; note(); }
     /* A row with no id cannot be opened, edited or deleted, so it is not a
        trade — it is a hole that swallows clicks. */
-    const kept = d.trades.trades.filter(t => t && t.id);
+    /* …nor is a second row with an id already used: an edit or a delete
+       would only ever reach the first, and the other would linger as a ghost
+       in every total. The first is kept (two copies are the same trade). */
+    const seenT = new Set();
+    const kept = d.trades.trades.filter(t => t && t.id && !seenT.has(t.id) && seenT.add(t.id));
     if (kept.length !== d.trades.trades.length) { d.trades.trades = kept; note(); }
 
     if (!d.playbook || typeof d.playbook !== 'object') { d.playbook = def; note(); }
@@ -1169,7 +1276,8 @@ class Store {
     applyTheme(this.lookIsDark ? 'dark' : 'light', colours, !!th.classic);
     /* the look first: it sets data-motion, which decides whether the video plays */
     applyLook(eff, { glass: this.glassMode === 'clear' ? 'clear' : this.glass, bg: this.hasBackground });
-    applySurface(this.background, this.glassMode === 'clear' ? 'clear' : this.glass, this.theme, this.bgDim, this.clarity, this.picInk);
+    applySurface(this.background, this.glassMode === 'clear' ? 'clear' : this.glass, this.theme, this.bgDim, this.clarity, this.picInk,
+      { fade: this.fade, frame: th.frame });
   }
 
   async setLook(patch) {
@@ -1181,7 +1289,7 @@ class Store {
   /** Everything a saved look carries, in one object. */
   snapshotLook() {
     return { look: this.look, colours: { ...this.colours }, background: this.background, glass: this.data.accounts.glass === 'clear' ? 'clear' : this.glass,
-             clarity: this.clarity, picInk: this.picInk };
+             clarity: this.clarity, picInk: this.picInk, fade: this.fade };
   }
   async restoreLook(snap) {
     if (!snap) return;
@@ -1191,6 +1299,7 @@ class Store {
     if (snap.glass !== undefined) this.data.accounts.glass = snap.glass === 'clear' ? 'clear' : !!snap.glass;
     if (snap.clarity != null) this.data.accounts.clarity = clampClarity(snap.clarity);
     if (PIC_INKS.includes(snap.picInk)) this.data.accounts.picInk = snap.picInk;
+    if (snap.fade) this.data.accounts.fade = normaliseFade(snap.fade);
     this.data.accounts.theme = this.lookIsDark ? 'dark' : 'light';
     this.applyLookNow();
     await this.loadBgVideo();
@@ -1363,7 +1472,15 @@ class Store {
     if (gone) await this.dropImage(gone.file);
   }
   /** Whether something is actually behind the app right now. */
-  get hasBackground() { return !!(findBackground(this.background) || yourBackground(this.background)); }
+  get hasBackground() { return this.background === 'fade' || !!(findBackground(this.background) || yourBackground(this.background)); }
+  /** The two colours of the Fade background: { a, b }, a at the top left. */
+  get fade() { return normaliseFade(this.data.accounts.fade); }
+  async setFade(patch) {
+    this.data.accounts.fade = normaliseFade({ ...this.fade, ...patch });
+    if (this.background !== 'fade') { await this.setBackground('fade'); return; }
+    this.applyLookNow();
+    await this.save('accounts');
+  }
   /** The writing on the picture: 'auto' | 'white' | 'black' | 'grey' | 'theme'. */
   get picInk() { const v = this.data.accounts.picInk; return PIC_INKS.includes(v) ? v : 'auto'; }
   async setPicInk(v) {

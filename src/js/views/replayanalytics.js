@@ -22,7 +22,7 @@ import * as cd from '../candles.js';
 import * as rd from '../replaydata.js';
 import * as rs from '../replaysessions.js';
 import { pairName } from '../replaysessions.js';
-import { sessionFor } from '../calc.js';
+import { sessionFor, pad2 } from '../calc.js';
 import { ticks, hoverLayer, tipLayer } from './chartkit.js';
 import { createCore, CHART_TFS } from '../chart/core.js';
 import { createDrawings } from '../chart/drawings.js';
@@ -30,7 +30,6 @@ import { whatIf } from './replaywhatif.js';
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const pad2 = n => String(n).padStart(2, '0');
 const day = T => { const d = new Date(T * 1000); return `${d.getDate()} ${MON[d.getMonth()]}`; };
 const when = T => { const d = new Date(T * 1000); return `${WD[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]} · ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const clock = T => { const d = new Date(T * 1000); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };

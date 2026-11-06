@@ -69,9 +69,10 @@ await page.waitForTimeout(250);
 ok('stepping the month does not replay', await entered(), false);
 
 await go('#/trades');
-await page.fill('.card input[placeholder="Search notes & pairs"]', 'xau');
+await page.click('.tr-chip[data-all="Side · all"]'); await page.waitForTimeout(150);
+await page.click('.pop-filter .pop-item[data-v="buy"]');
 await page.waitForTimeout(450);
-ok('typing in the filter does not replay', await entered(), false);
+ok('a filter does not replay', await entered(), false);
 
 // ---- unit change is a redraw, so it should ------------------------------
 await go('#/');

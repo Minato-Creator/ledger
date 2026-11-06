@@ -4,13 +4,15 @@ import { DEFAULT_SESSIONS } from '../store.js';
 
 const SWATCHES = ['#0988F0', '#18AC65', '#FFB800', '#F4624A', '#9A9A9A', '#E9E9E9'];
 
-export function playbook(store, nav) {
+/* Opened from Settings → Trading (#/settings/playbook, and the old #/playbook): `back` is Settings' way back */
+export function playbook(store, nav, { back = null } = {}) {
   const pb = store.playbook;
   const acct = store.activeAccount;
 
   const save = async () => { await store.save('playbook'); nav.refresh(); };
 
-  const head = el('header', { class: 'head' },
+  const head = el('header', { class: 'head' + (back ? ' st-subhead' : '') },
+    back,
     el('h1', {}, 'Playbook'),
     el('span', { class: 'sub' }, 'Shared across every account'),
   );

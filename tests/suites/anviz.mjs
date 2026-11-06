@@ -274,6 +274,8 @@ t('its axis says 0R, not 0.0R', await p.evaluate(() => [...document.querySelecto
 /* ===================== nothing to go on ===================== */
 console.log('bare');
 const p2 = await b.newPage({ viewport: { width: 1280, height: 800 } });
+/* its two trades are from late September: on the real clock they fall out of the 30-day window */
+await p2.clock.setFixedTime(new Date('2026-10-01T12:00:00+08:00'));
 p2.on('pageerror', e => errs.push(e.message));
 await p2.addInitScript(({ ACCT }) => {
   if (localStorage.getItem('fakefs')) return;

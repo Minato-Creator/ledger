@@ -421,7 +421,8 @@ export function accountSheet(store, nav, a) {
   function history() {
     const rows = [
       ...(a.payouts || []).map(p => ({ id: p.id, date: p.date, what: kindOf(a) === 'live' ? 'Withdrawal' : 'Payout', v: -Math.abs(p.amount), note: p.note, drop: () => store.removePayout(a.id, p.id) })),
-      ...(a.adjustments || []).map(x => ({ id: x.id, date: x.date, what: 'Balance correction', v: x.amount, note: '', drop: () => store.removeAdjustment(a.id, x.id) })),
+      ...(a.adjustments || []).map(x => ({ id: x.id, date: x.date, v: x.amount, note: x.note || '', drop: () => store.removeAdjustment(a.id, x.id),
+        what: x.kind === 'funding' ? (x.amount < 0 ? 'Funds taken out' : 'Funds added') : 'Balance correction' })),
     ].sort((x, y) => String(y.date).localeCompare(String(x.date)));
     if (!rows.length) return null;
     return part('Paid out and corrected', el('div', { class: 'ab-hist' }, ...rows.map(r => el('div', { class: 'ab-hrow' },

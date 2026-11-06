@@ -17,7 +17,7 @@ const FAKE_FS = fs.readFileSync(HERE + 'e2e.mjs', 'utf8').match(/const FAKE_FS =
 let pass = 0, fail = 0;
 const t = (n, c, x = '') => { c ? pass++ : fail++; console.log(`  ${c ? 'ok  ' : 'FAIL'}  ${n}${x !== '' ? ' — ' + x : ''}`); };
 
-const acc = JSON.stringify({ version: 2, displayUnit: '$', theme: 'light', background: 'moon', glass: 'clear', glassNudged: true,
+const acc = JSON.stringify({ version: 2, displayUnit: '$', theme: 'light', background: 'susanoo', glass: 'clear', glassNudged: true,
   accounts: [{ id: 'acc_1', name: 'A', currency: 'USD', startingBalance: 100000, defaultRiskPercent: 1, color: '#0988F0', openedAt: '2026-09-01', archived: false, weeklyTargetPercent: 0 }],
   activeAccountId: 'acc_1' });
 const trades = JSON.stringify({ version: 1, trades: [{ id: 't1', accountId: 'acc_1', date: '2026-10-20', pair: 'EURUSD', side: 'buy', netResult: 500, riskPercent: 1, status: 'closed' },
@@ -66,10 +66,14 @@ t('it is kept', (await disk()).clarity === 0);
 t('it says how clear', /0%/.test(await p.locator('.lk-clarity + .lk-val').innerText()));
 
 /* ---------- the preview ---------- */
-const prev = await p.evaluate(() => { const m = document.querySelector('.lk-bgprev .lk-mini-app'); const cs = getComputedStyle(m);
-  return { size: cs.backgroundSize, video: !!m.querySelector('video.lk-ma-v'), fit: m.querySelector('video.lk-ma-v') ? getComputedStyle(m.querySelector('video.lk-ma-v')).objectFit : '' }; });
-t('the preview is one picture filling the frame, not a small one tiled', prev.size === 'cover', JSON.stringify(prev));
-t('…with the video itself in it', prev.video && prev.fit === 'cover', JSON.stringify(prev));
+/* the dashboard drawn lightly on the picture's still (the clip itself plays behind the sheet) */
+const prev = await p.evaluate(() => { const m = document.querySelector('.lk-pv'), s = m?.querySelector('.bg-slot.is-in'), cs = s && getComputedStyle(s);
+  return { size: cs?.backgroundSize, still: /url\(/.test(cs?.backgroundImage || ''), video: !!m?.querySelector('video'),
+    dash: !!m?.querySelector('.lk-pv-dash .lk-pv-top') && m.querySelectorAll('.lk-pv-stat').length === 3 && !!m.querySelector('.lk-pv-chart svg path'),
+    panel: getComputedStyle(m.querySelector('.lk-pv-stat')).backdropFilter }; });
+t('the preview is the picture filling the frame, not a small one tiled', prev.size === 'cover' && prev.still && !prev.video, JSON.stringify(prev));
+t('…with a light dashboard on it: the top bar, three figures, the curve', prev.dash, JSON.stringify(prev));
+t('…its panels in the glass you have', /blur/.test(prev.panel || ''), JSON.stringify(prev));
 
 /* ---------- the sheet is glass too ---------- */
 const sheetA = alphaOf(await p.evaluate(() => getComputedStyle(document.querySelector('.sheet.is-look')).backgroundColor));

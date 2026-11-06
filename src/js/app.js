@@ -7,9 +7,10 @@ import { el, icon, clear, toast, brandWordmark } from './ui.js';
 import { topbar, fitTopbar, bottombar, subnav, sectionOf, tabOf, accountMenu, moreSheet, arrive, settle, segMarks, segGlide } from './shell.js';
 import { closeSheets } from './sheet.js';
 import { initGlide } from './glide.js';
+import { syncOanda, autoSyncs } from './oandasync.js';
 import { applyLastLook } from './look.js';
+import { startIntro } from './intro.js';
 import { openAppearance } from './views/appearance.js';
-import * as c from './calc.js';
 import { dashboard } from './views/dashboard.js';
 import { trades } from './views/trades.js';
 import { addTrade } from './views/addtrade.js';
@@ -18,9 +19,9 @@ import { tradeDetail } from './views/tradedetail.js';
 import { settings } from './views/settings.js';
 import { calendar } from './views/calendar.js';
 import { analytics } from './views/analytics.js';
-import { playbook } from './views/playbook.js';
 import { replay } from './views/replay.js';
 import { wire } from './views/wire.js';
+import { markets } from './views/markets.js';
 import { importTrades } from './views/import.js';
 import { outlook } from './views/outlook.js';
 import { lab } from './views/lab.js';
@@ -143,9 +144,10 @@ function route() {
     case 'settings':  return settings(store, nav, arg, { openLook });
     case 'calendar':  return calendar(store, nav);
     case 'analytics': return analytics(store, nav);
-    case 'playbook':  return playbook(store, nav);
+    case 'playbook':  return settings(store, nav, 'playbook', { openLook });   // Settings → Trading → Playbook; the old address still works
     case 'replay':    return replay(store, nav);
     case 'wire':      return wire(store, nav);
+    case 'markets':   return markets(store, nav);
     case 'lab':       return lab(store, nav, arg);
     case 'review':    return review(store, nav, arg);
     case 'firms':     return firmsPage(store, nav, arg);
@@ -270,6 +272,8 @@ async function boot() {
   /* Under automation (the test suites) nothing rises or writes itself in:
      a measurement taken mid-arrival would measure the animation. */
   if (typeof navigator !== 'undefined' && navigator.webdriver) document.documentElement.dataset.auto = 'on';
+  /* the opening plays over everything while the journal loads underneath (intro.js) */
+  const intro = startIntro();
   let state = 'none';
   try { state = await store.tryRestore(); }
   catch (e) { console.warn(e); state = 'none'; }
@@ -283,12 +287,32 @@ async function boot() {
       let suggested = null;
       try { suggested = await store.suggestedVault(); } catch { /* offer the picker alone */ }
       document.body.append(vaultGate(suggested));
+      intro.ready();
       return;
     }
     document.body.append(gate({ mode: state }));
+    intro.ready();
     return;
   }
   render();
+  intro.ready();
+  quietSync();
+}
+
+/* Your OANDA trades come in by themselves each time the journal opens, once
+   you have synced them the first time (Import trades → OANDA). Quietly: a
+   word when something new arrived, nothing when it did not, and a failure
+   (offline, a key changed) waits for the button. */
+async function quietSync() {
+  if (!autoSyncs(store)) return;
+  try {
+    const r = await syncOanda(store);
+    if (r.added || r.updated) {
+      render();
+      const where = store.activeAccount?.id === r.account.id ? '' : ` — in ${r.account.name}`;
+      toast((r.added ? `${r.added} new trade${r.added === 1 ? '' : 's'} from OANDA` : `${r.updated} trade${r.updated === 1 ? '' : 's'} brought up to date from OANDA`) + where);
+    }
+  } catch (e) { console.info('OANDA sync waits for the button:', e?.message || e); }
 }
 
 window.addEventListener('hashchange', () => { closeSheets(); render(); });

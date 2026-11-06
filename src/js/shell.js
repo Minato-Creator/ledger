@@ -14,7 +14,7 @@
    ============================================================ */
 import { el, icon, brandWordmark, toast } from './ui.js';
 import * as c from './calc.js';
-import { sheet, popover, closeSheets } from './sheet.js';
+import { sheet, popover } from './sheet.js';
 import { slidePill } from './glide.js';
 import { acctMark } from './views/acctlogo.js';
 
@@ -23,20 +23,21 @@ export const SECTIONS = [
   { id: 'journal', label: 'Journal', ic: 'journal', href: '#/trades',
     segs: ['trades', 'calendar', 'review', 'trade', 'new', 'edit', 'import'],
     tabs: [['#/trades', 'Trades', 'trades'], ['#/calendar', 'Calendar', 'calendar'], ['#/review', 'Review', 'review']] },
-  { id: 'plan', label: 'Plan', ic: 'plan', href: '#/outlook', segs: ['outlook', 'wire'],
-    tabs: [['#/outlook', 'Outlook', 'outlook'], ['#/wire', 'News', 'wire']] },
+  /* News first, and Plan opens on it (Minato, 4 Nov); Outlook second; Markets, the bubbles (6 Nov) */
+  { id: 'plan', label: 'Plan', ic: 'plan', href: '#/wire', segs: ['wire', 'outlook', 'markets'],
+    tabs: [['#/wire', 'News', 'wire'], ['#/outlook', 'Outlook', 'outlook'], ['#/markets', 'Markets', 'markets']] },
   { id: 'analytics', label: 'Analytics', ic: 'analytics', href: '#/analytics', segs: ['analytics'] },
   { id: 'lab', label: 'Lab', ic: 'lab', href: '#/lab', segs: ['lab', 'firms'],
     tabs: [['#/lab', 'Monte Carlo', 'lab'], ['#/lab/prop', 'Prop firm', 'lab/prop'], ['#/lab/ghost', 'Ghost', 'lab/ghost'],
            ['#/lab/quant', 'Quant', 'lab/quant'], ['#/firms', 'Firms', 'firms']] },
   { id: 'replay', label: 'Replay', ic: 'replay', href: '#/replay', segs: ['replay'] },
-  { id: 'playbook', label: 'Playbook', ic: 'playbook', href: '#/playbook', segs: ['playbook'] },
+  /* the Playbook lives in Settings → Trading now (Minato), not up here */
 ];
 /* What the phone's bottom bar carries; the rest are behind More. */
 const PHONE = ['dashboard', 'journal', 'analytics', 'plan'];
 
 export function sectionOf(seg) {
-  return SECTIONS.find(s => s.segs.includes(seg || '')) || (seg === 'settings' || seg === 'accounts' ? { id: 'settings' } : SECTIONS[0]);
+  return SECTIONS.find(s => s.segs.includes(seg || '')) || (['settings', 'accounts', 'playbook'].includes(seg) ? { id: 'settings' } : SECTIONS[0]);
 }
 
 /** Which tab of a section the hash is on, or null when it is a page inside one (a trade, the rules). */
@@ -51,22 +52,72 @@ export function tabOf(section, hash) {
    The bar is rebuilt on every render, so the indicator remembers where it
    was drawn last (by name) and is put back there before moving on. */
 const lastAt = new Map();
-export function glide(container, name, active, glider) {
+const flights = new Map();     // name -> the liquid run in progress: { anim, sample, t0, dur }
+export function glide(container, name, active, glider, { liquid = false } = {}) {
   if (!active) { glider.style.opacity = '0'; lastAt.delete(name); return; }
   const place = () => ({ x: active.offsetLeft, y: active.offsetTop, w: active.offsetWidth, h: active.offsetHeight });
   requestAnimationFrame(() => {
     if (!container.isConnected) return;
     const to = place();
-    const from = lastAt.get(name);
+    /* mid-pour, a page drawn again starts from where the drop is now */
+    const f = flights.get(name), age = f ? performance.now() - f.t0 : 0;
+    const from = f && age < f.dur ? f.sample(age) : lastAt.get(name);
+    if (f) { f.anim.cancel(); flights.delete(name); }
     const set = p => { glider.style.transform = `translate(${p.x}px, ${p.y}px)`; glider.style.width = p.w + 'px'; glider.style.height = p.h + 'px'; };
     glider.style.transition = 'none';
     set(from || to);
     glider.style.opacity = '1';
     void glider.offsetWidth;
+    const still = document.documentElement.dataset.motion === 'off'
+      || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (liquid && from && !still && glider.animate && (Math.abs(from.x - to.x) > 1 || Math.abs(from.w - to.w) > 1)) return pour(name, glider, from, to, set);
     glider.style.transition = '';
     if (from) set(to);
     lastAt.set(name, to);
   });
+}
+
+/* The dock's highlight moves like a drop: both edges ease out, the one on
+   the side it is going a little quicker, so it draws out gently, then the
+   other catches up and it settles — no hold, no snap. How far it may stretch
+   eases into a small cap (tanh), so a long move stays a drop, not a band.
+   The whole path is worked out first and handed to the compositor as one
+   animation of transform alone, so a page busy drawing itself cannot make
+   it stutter. */
+function pour(name, glider, from, to, set) {
+  const right = to.x + to.w / 2 >= from.x + from.w / 2;
+  const L0 = from.x, R0 = from.x + from.w, L1 = to.x, R1 = to.x + to.w;
+  const span = Math.max(1, Math.abs((to.x + to.w / 2) - (from.x + from.w / 2)));
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const LEAD = 440, TRAIL = 620, MAX = Math.min(24, span * 0.14);
+  const sample = e => {
+    const a = ease(Math.min(1, e / LEAD)), b = ease(Math.min(1, e / TRAIL));
+    const base = from.w + (to.w - from.w) * b;
+    let L = right ? L0 + (L1 - L0) * b : L0 + (L1 - L0) * a;
+    let R = right ? R0 + (R1 - R0) * a : R0 + (R1 - R0) * b;
+    const extra = Math.max(0, (R - L) - base), soft = MAX * Math.tanh(extra / Math.max(1, MAX));
+    if (right) L = R - (base + soft); else R = L + base + soft;
+    const h = (from.h + (to.h - from.h) * b) * (1 - 0.04 * (soft / Math.max(1, MAX)));   // stretched, it thins a touch
+    return { x: L, y: from.y + (to.y - from.y) * b + ((from.h + (to.h - from.h) * b) - h) / 2, w: Math.max(4, R - L), h };
+  };
+  /* drawn at its final size and scaled from its corner, so only transform moves */
+  set({ ...to, x: to.x, y: to.y });
+  glider.style.transformOrigin = '0 0';
+  const N = Math.ceil(TRAIL / 12), frames = [];
+  for (let i = 0; i <= N; i++) {
+    const p = sample(TRAIL * i / N);
+    frames.push({ offset: i / N, transform: `translate(${p.x}px, ${p.y}px) scale(${p.w / to.w}, ${p.h / to.h})` });
+  }
+  const anim = glider.animate(frames, { duration: TRAIL, easing: 'linear', fill: 'forwards' });
+  const run = { anim, sample, t0: performance.now(), dur: TRAIL };
+  flights.set(name, run);
+  lastAt.set(name, to);
+  anim.finished.then(() => {
+    if (flights.get(name) !== run) return;
+    flights.delete(name);
+    set(to); anim.cancel();
+    requestAnimationFrame(() => { glider.style.transition = ''; });
+  }).catch(() => {});
 }
 
 /* ---------- the top bar ---------- */
@@ -85,7 +136,7 @@ export function topbar(store, nav, { hash, onAccount, onYou }) {
   const navEl = el('nav', { class: 'tb-nav', 'aria-label': 'Sections' }, glider, ...tabs);
   /* The pill is placed once the bar has been fitted to the window (fitTopbar),
      since folding changes where every tab sits. */
-  glide(navEl, 'top', tabs.find(t => t.classList.contains('is-on')), glider);
+  glide(navEl, 'top', tabs.find(t => t.classList.contains('is-on')), glider, { liquid: true });
 
   const stats = acct ? c.summarise(acct, store.tradesFor(acct.id)) : null;
   const mark = acct ? acctMark(store, acct, 20) : null;
@@ -152,6 +203,7 @@ export function fitTopbar(bar = document.querySelector('.topbar')) {
   /* put the pill straight onto the tab, wherever folding moved it */
   const nav = bar.querySelector('.tb-nav'), on = nav?.querySelector('.tb-tab.is-on'), pill = nav?.querySelector('.tb-glide');
   if (on && pill && pill.style.opacity === '1') {
+    flights.get('top')?.anim.cancel(); flights.delete('top');
     pill.style.transition = 'none';
     pill.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`;
     pill.style.width = on.offsetWidth + 'px'; pill.style.height = on.offsetHeight + 'px';
@@ -244,7 +296,6 @@ export function accountMenu(store, nav, anchor) {
   const body = el('div', { class: 'pop-list' },
     el('div', { class: 'pop-k' }, 'Accounts'),
     ...store.accounts.map(a => {
-      const s = c.summarise(a, store.tradesFor(a.id));
       const isOn = acct && a.id === acct.id;
       return el('button', { class: 'pop-item' + (isOn ? ' is-on' : ''), role: 'menuitem',
           onClick: async () => { close(); if (!isOn) { await store.setActiveAccount(a.id); nav.refresh(); toast('Switched to ' + a.name); } } },

@@ -21,6 +21,7 @@
      order on this page is time, and nothing else is allowed to move it.
    ============================================================ */
 import { isRedFolder, isBankHoliday, holidayCountry } from '../questions.js';
+import { newsMap } from './newsmap.js';
 import { el, icon, toast, folderMark } from '../ui.js';
 import * as c from '../calc.js';
 import {
@@ -340,7 +341,9 @@ export function wire(store, nav) {
 
   const view = el('div', { class: 'view' }, head,
     redFolderStrip(store, nav),
-    el('div', { class: 'row', style: { flex: '1', minHeight: 0 } },
+    newsMap(store, nav),
+    /* the list keeps a usable height under the map; on a short window the page scrolls instead */
+    el('div', { class: 'row wire-row-pair', style: { flex: '1', minHeight: '420px' } },
       card, redFolderWeek(store, nav)));
   paintHead();
 

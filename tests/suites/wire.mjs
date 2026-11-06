@@ -95,8 +95,9 @@ const held = () => p.evaluate(async()=>{
 
 /* ---------- the nav ---------- */
 await p.evaluate(()=>{location.hash='#/outlook';}); await p.waitForTimeout(500);
-t('the news sits in the Plan, beside the outlook', await p.evaluate(()=>
-  [...document.querySelectorAll('.head .sn-tab')].map(a=>a.textContent).join(' · ') === 'Outlook · News'));
+t('the news sits in the Plan, first, then the outlook and Markets', await p.evaluate(()=>
+  [...document.querySelectorAll('.head .sn-tab')].map(a=>a.textContent).join(' · ') === 'News · Outlook · Markets'
+  && document.querySelector('.tb-tab[href="#/wire"]') !== null));
 
 await p.evaluate(()=>{location.hash='#/wire';}); await p.waitForTimeout(2200);
 

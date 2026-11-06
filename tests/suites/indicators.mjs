@@ -106,7 +106,7 @@ const ch = () => p.evaluate(() => { const c = document.querySelector('.tc').__ch
 const legend = () => p.evaluate(() => { const l = document.querySelector('.tc .rsi-legend'); return l && !l.hidden ? l.textContent : null; });
 const ph0 = (await ch()).ph;
 await p.click('.tc-ind'); await settle(80);
-t('Indicators: the Relative Strength Index, Sessions, News', await p.evaluate(() => [...document.querySelectorAll('.tv-menu .tv-mlabel')].map(x => x.textContent).join() === 'Relative Strength Index,Sessions,News · red folders'));
+t('Indicators: the Relative Strength Index, Sessions, News, 3SL', await p.evaluate(() => [...document.querySelectorAll('.tv-menu .tv-mlabel')].map(x => x.textContent).join() === 'Relative Strength Index,Sessions,News · red folders,3SL'));
 await p.click('.tv-menu .tc-ind-rsi'); await settle(250);
 let C = await ch();
 t('the RSI comes in its own pane under the candles, the time scale still at the bottom', C.areas.length === 1 && C.areas[0].key === 'rsi' && C.ph < ph0 - 60 && C.areas[0].top > C.ph && C.shows.rsi, JSON.stringify(C));
@@ -201,10 +201,13 @@ await p.waitForFunction(() => !!document.querySelector('.rs')?.__session, null, 
 await p.evaluate(() => document.querySelector('.rs').__session.moveTo(Date.parse('2026-09-09T21:07:00+08:00') / 1000)); await settle(300);
 const RS = () => p.evaluate(() => { const s = document.querySelector('.rs').__session; return { ind: s.ind, c: s.charts[0], T: s.T }; });
 let R = await RS();
-t('a session starts with Sessions and News on, the RSI off', JSON.stringify(R.ind) === '{"sessions":true,"news":true,"rsi":false}' && R.c.areas.length === 0);
+t('a session starts with every indicator off', JSON.stringify(R.ind) === '{"sessions":false,"news":false,"rsi":false}' && R.c.areas.length === 0 && R.c.groups.length === 0, JSON.stringify(R.ind));
+await p.click('.rs-top .rs-ind'); await p.click('.tv-menu .rs-ind-sessions'); await settle(150);
+await p.click('.rs-top .rs-ind'); await p.click('.tv-menu .rs-ind-news'); await settle(300);
+R = await RS();
 t('News: red folders for the pair’s own currency only — CPI, not the ECB or a medium one', JSON.stringify(R.c.groups.map(g => g.titles)) === '[["CPI m/m"]]', JSON.stringify(R.c.groups));
 await p.click('.rs-top .rs-ind'); await settle(80);
-t('the Indicators button in the top bar', await p.evaluate(() => [...document.querySelectorAll('.tv-menu .tv-mlabel')].map(x => x.textContent).join() === 'Relative Strength Index,Sessions,News · red folders'));
+t('the Indicators button in the top bar', await p.evaluate(() => [...document.querySelectorAll('.tv-menu .tv-mlabel')].map(x => x.textContent).join() === 'Relative Strength Index,Sessions,News · red folders,3SL'));
 await p.click('.tv-menu .rs-ind-rsi'); await settle(300);
 R = await RS();
 t('the RSI in its pane, kept with the session', R.c.areas.length === 1 && R.ind.rsi === true);

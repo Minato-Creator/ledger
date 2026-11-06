@@ -130,7 +130,6 @@ export function run13(P, inst, o = {}) {
   /* ---------- the MTF failing to break: its last NC+S of the leg's extreme, per direction pushed ---------- */
   const fails = { 1: [], '-1': [] };
   for (const e of D2.events) if (e.kind === 'ncs') fails[e.dir].push(e);
-  const lastFail = (dirPushed, t) => { const a = fails[dirPushed]; const k = bsearch(a, t, x => x.t); return k >= 0 ? a[k] : null; };
     const bos3 = D2.events.filter(e => e.kind === 'bos');
   const bosBefore = t => { const k = bsearch(bos3, t, x => x.t); return k >= 0 ? bos3[k] : null; };
   /* failed the other way since the last real MTF break: lets a continuation go against the MTF */

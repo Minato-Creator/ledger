@@ -30,6 +30,21 @@ eq('planned R 12pt stop / 36pt target', c.plannedR(T({entryPrice:3412.80,stopLos
 eq('outcome win',  c.outcome(T({netResult:10})), 'win');
 eq('outcome loss', c.outcome(T({netResult:-10})), 'loss');
 eq('outcome breakeven', c.outcome(T({netResult:0})), 'breakeven');
+/* under 0.1R either way is a break-even (1R = $750 here) */
+eq('+$70 (0.09R) is a break-even',  c.outcome(T({netResult:70}), acct), 'breakeven');
+eq('−$74 (−0.099R) is a break-even', c.outcome(T({netResult:-74}), acct), 'breakeven');
+eq('+$80 (0.107R) is a win',         c.outcome(T({netResult:80}), acct), 'win');
+eq('−$76 (−0.101R) is a loss',       c.outcome(T({netResult:-76}), acct), 'loss');
+eq('a forward test at +0.05R is a break-even', c.outcome({ netResult: null, rMultiple: 0.05 }), 'breakeven');
+c.useAccounts(id => (id === 'a' ? acct : null));
+eq('its own account found by itself', c.outcome(T({netResult:70, accountId:'a'})), 'breakeven');
+eq('…and a summary counts it so', c.summarise(acct, [T({netResult:70, accountId:'a'}), T({netResult:1500, accountId:'a'})]).breakevens, 1);
+c.useAccounts(null);
+/* money from the broker (a deposit, a demo topped up) moves the balance, not the P&L */
+const fm = c.accountMoney({ startingBalance: 100000, adjustments: [{ id: 'x', kind: 'funding', amount: 5000, date: '2026-09-09' }, { id: 'y', amount: -20, date: '2026-09-10' }] }, [T({netResult:300})]);
+eq('funding: balance', fm.balance, 105280);
+eq('funding: not in the P&L', fm.gross, 280);
+eq('funding: said apart', fm.funded, 5000);
 eq('duration 09:14 -> 11:38', c.durationMins('09:14','11:38'), 144);
 eq('duration wraps midnight', c.durationMins('23:30','00:45'), 75);
 

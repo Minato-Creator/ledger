@@ -16,14 +16,6 @@
    bytes, and nothing is written until the trade is saved.
    ============================================================ */
 
-/* A trade used to hold two charts under fixed names. It holds a list now, so
-   these two are only here to read a journal written before that — nothing
-   writes them. */
-export const LEGACY_SLOTS = [
-  { key: 'ltf', field: 'shotLtf' },
-  { key: 'htf', field: 'shotHtf' },
-];
-
 /** Where a trade's screenshot lives. Named off the trade, so the folder is
     browsable and nothing is orphaned by a rename. */
 export const shotName = (tradeId, slot) => `screenshots/${tradeId}-${slot}.jpg`;

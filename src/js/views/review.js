@@ -22,7 +22,7 @@ import * as c from '../calc.js';
 import * as P from '../periods.js';
 import { tradeShotsOf } from '../store.js';
 import { tipLayer } from './chartkit.js';
-import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName, heldOf, heldText } from '../questions.js';
+import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, heldOf, heldText } from '../questions.js';
 import { newsText, holidayText } from '../newsday.js';
 import { heldEditor } from './held.js';
 import { fromPricesOf } from './addtrade.js';

@@ -11,19 +11,34 @@
    The rules live in firms.js, dated, with their sources. Firms change them
    often — the page says when they were checked and says to confirm on the
    firm's own site before buying.
+
+   Every firm shows its own logo (firmlogos.js, carried in the app).
+   Beside Futures and Forex, a third tab: Brokers (Minato, 6 Nov) — six
+   brokers in full: why they are known, their accounts, spreads and
+   commissions, platforms, who licenses them, who they suit, what a lot of
+   EUR/USD costs at each, and Laminar's take (brokers.js).
    ============================================================ */
-import { el, svg, icon, toast, fitted } from '../ui.js';
+import { el, svg, toast, fitted } from '../ui.js';
 import * as c from '../calc.js';
 import { FIRMS, CHECKED } from '../firms.js';
+import { BROKERS, BROKERS_CHECKED } from '../brokers.js';
+import { LOGOS } from '../firmlogos.js';
 import { blankSheet } from '../lab.js';
 
 let market = 'futures';
-const picked = { futures: 'topstep', forex: 'ftmo' };
+const picked = { futures: 'topstep', forex: 'ftmo', brokers: 'ig' };
 const choice = {};              // firm id → { program, size }
 let fineSev = 'all';
 let stretch = 2;                // months (or attempts) in the cost calculator
 
-const CHECKED_TEXT = (() => { const [y, m, d] = CHECKED.split('-').map(Number); return `${d} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`; })();
+const dayText = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`; };
+const CHECKED_TEXT = dayText(CHECKED), BROKERS_TEXT = dayText(BROKERS_CHECKED);
+
+/** A firm's or broker's own logo on its tile, or its letters when there is none. */
+export function firmMark(id, mono) {
+  const src = LOGOS[id];
+  return src ? el('span', { class: 'pf-mono is-logo' }, el('img', { src, alt: '', draggable: 'false' })) : el('span', { class: 'pf-mono' }, mono);
+}
 
 /* ---------- small pieces ---------- */
 const STAR = 'M10 1.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L10 14.9l-5.2 2.7 1-5.8L1.6 7.7l5.8-.8z';
@@ -61,17 +76,13 @@ export function pick(firm) {
    ============================================================ */
 export function firmsPage(store, nav, sub) {
   if (sub && FIRMS.some(f => f.id === sub)) { const f = FIRMS.find(x => x.id === sub); market = f.market; picked[market] = f.id; }
+  if (sub && BROKERS.some(b => b.id === sub)) { market = 'brokers'; picked.brokers = sub; }
+  if (market === 'brokers') return brokersPage(store, nav);
   const list = FIRMS.filter(f => f.market === market).sort((a, b) => a.rank - b.rank);
   const firm = list.find(f => f.id === picked[market]) || list[0];
-  const count = m => FIRMS.filter(f => f.market === m).length;
+  const count = countOf;
 
-  const head = el('header', { class: 'head' },
-    el('h1', {}, 'Prop firms'),
-    el('div', { class: 'seg', style: { marginLeft: '6px' } },
-      ...[['futures', 'Futures'], ['forex', 'Forex']].map(([k, l]) =>
-        el('button', { class: k === market ? 'is-on' : '', onClick: () => { market = k; nav.refresh(); } }, `${l} · ${count(k)}`))),
-    el('div', { class: 'spacer' }),
-    el('span', { class: 'head-meta pf-sub' }, `rules checked ${CHECKED_TEXT} · confirm on the firm’s site before you buy`));
+  const head = pageHead(nav, 'Prop firms', `rules checked ${CHECKED_TEXT} · confirm on the firm’s site before you buy`, count);
 
   const rail = el('section', { class: 'card pf-rail' },
     el('div', { class: 'pf-k' }, el('span', {}, 'Most trusted first'), el('span', {}, 'from')),
@@ -79,7 +90,7 @@ export function firmsPage(store, nav, sub) {
       const from = cheapest(f);
       return el('button', { class: 'pf-firm' + (f.id === firm.id ? ' on' : ''), onClick: () => { picked[market] = f.id; nav.refresh(); } },
         el('span', { class: 'rk' }, String(f.rank)),
-        el('span', { class: 'pf-mono' }, f.mono),
+        firmMark(f.id, f.mono),
         el('span', { class: 'nm' }, el('span', { class: 'n1' }, f.name), el('small', {}, stars(f.trust), el('i', {}, String(f.since)))),
         el('span', { class: 'px' }, from ? from : ''));
     }),
@@ -90,6 +101,18 @@ export function firmsPage(store, nav, sub) {
   paintFirm(main, store, nav, firm);
   return el('div', { class: 'view' }, head, el('div', { class: 'pf' }, rail, main));
 }
+
+/** The page's title, its three tabs (Futures · Forex · Brokers) and the date line. */
+function pageHead(nav, title, meta, count) {
+  return el('header', { class: 'head' },
+    el('h1', {}, title),
+    el('div', { class: 'seg pf-tabs', style: { marginLeft: '6px' } },
+      ...[['futures', 'Futures'], ['forex', 'Forex'], ['brokers', 'Brokers']].map(([k, l]) =>
+        el('button', { class: k === market ? 'is-on' : '', 'data-tab': k, onClick: () => { market = k; nav.refresh(); } }, `${l} · ${count(k)}`))),
+    el('div', { class: 'spacer' }),
+    el('span', { class: 'head-meta pf-sub' }, meta));
+}
+const countOf = k => (k === 'brokers' ? BROKERS.length : FIRMS.filter(f => f.market === k).length);
 
 /** "$49/mo" or "$145" — the cheapest way in. */
 function cheapest(f) {
@@ -122,7 +145,7 @@ function hero(firm, program, size, store, nav, repaint) {
     el('button', { class: k === on ? 'is-on' : '', onClick: () => { set(k); repaint(); } }, l)));
   return el('section', { class: 'card pf-hero' },
     el('div', { class: 'pf-id' },
-      el('span', { class: 'pf-mono' }, firm.mono),
+      firmMark(firm.id, firm.mono),
       el('div', {},
         el('h2', {}, firm.name, stars(firm.trust, true), el('span', { class: 'pf-trust' }, el('b', {}, firm.trust.toFixed(1)), 'trust')),
         el('div', { class: 'meta' },
@@ -377,9 +400,9 @@ function fineCard(firm, repaint) {
 }
 
 /* ---------- Quire's take ---------- */
-function takeCard(firm) {
+function takeCard(firm, sub = 'an opinion from the rules above — not advice') {
   return el('section', { class: 'card pf-take' },
-    el('h3', {}, 'Laminar’s take', el('span', {}, 'an opinion from the rules above — not advice')),
+    el('h3', {}, 'Laminar’s take', el('span', {}, sub)),
     el('div', { class: 'pf-takecols' },
       el('div', { class: 'pf-takecol is-pro' }, el('span', { class: 'pf-k' }, 'Going for it'),
         ...firm.take.pros.map(x => el('div', { class: 'pf-ti' }, el('i', {}, '+'), x))),
@@ -436,4 +459,151 @@ async function useInLab(store, nav, firm, program, size) {
   await store.save('lab');
   toast(`${sh.name} is in The Lab — check the numbers, then run it`);
   nav.go('#/lab/rules');
+}
+
+/* ============================================================
+   Brokers — six brokers in full (brokers.js): ranked by trust on the
+   left; on the right, one broker: who it is and why it is known, the six
+   numbers that matter, its accounts, who it suits, who licenses it, its
+   platforms, what a lot of EUR/USD costs there against the rest, its fees
+   and Laminar's take.
+   ============================================================ */
+const usd = v => `≈ US$${v.toFixed(2)}`;
+function brokersPage(store, nav) {
+  const list = [...BROKERS].sort((a, b) => a.rank - b.rank);
+  const b = list.find(x => x.id === picked.brokers) || list[0];
+  const head = pageHead(nav, 'Brokers', `checked ${BROKERS_TEXT} · confirm on the broker’s site before you open an account`, countOf);
+  const rail = el('section', { class: 'card pf-rail' },
+    el('div', { class: 'pf-k' }, el('span', {}, 'Most trusted first'), el('span', {}, 'EUR/USD lot')),
+    ...list.map(x => el('button', { class: 'pf-firm' + (x.id === b.id ? ' on' : ''), 'data-broker': x.id, onClick: () => { picked.brokers = x.id; nav.refresh(); } },
+      el('span', { class: 'rk' }, String(x.rank)),
+      firmMark(x.id, x.name.slice(0, 2).toUpperCase()),
+      el('span', { class: 'nm' }, el('span', { class: 'n1' }, x.name), el('small', {}, stars(x.trust), el('i', {}, String(x.since)))),
+      el('span', { class: 'px', title: 'One standard lot of EUR/USD, opened and closed, on its cheapest account — spread plus commission' }, usd(x.cost.usd)))),
+    el('div', { class: 'pf-k', style: { marginTop: '14px', paddingBottom: '4px' } }, 'How trust is rated'),
+    el('p', { class: 'pf-note' }, 'Years running, who licenses the company an Australian actually trades with, whether the group is listed, and its record. Laminar’s own rating, not the broker’s.'));
+  const main = el('div', { class: 'pf-main bk-main' },
+    brokerHero(b),
+    brokerTiles(b),
+    accountsCard(b),
+    el('div', { class: 'pf-row b' }, suitsCard(b), licencesCard(b)),
+    el('div', { class: 'pf-row b' }, platformsCard(b), compareCard(b)),
+    feesCard(b),
+    takeCard(b, 'an opinion from the research above — not financial advice'),
+    brokerSources(b));
+  return el('div', { class: 'view' }, head, el('div', { class: 'pf' }, rail, main));
+}
+
+function brokerHero(b) {
+  return el('section', { class: 'card pf-hero' },
+    el('div', { class: 'pf-id' },
+      firmMark(b.id, b.name.slice(0, 2).toUpperCase()),
+      el('div', {},
+        el('h2', {}, b.name, stars(b.trust, true), el('span', { class: 'pf-trust' }, el('b', {}, b.trust.toFixed(1)), 'trust')),
+        el('div', { class: 'meta' },
+          el('span', {}, el('b', {}, b.kind)),
+          el('span', {}, 'since ', el('b', {}, String(b.since))),
+          el('span', {}, b.hq),
+          el('span', {}, b.owner))),
+      el('div', { class: 'pf-side' },
+        el('span', { class: 'pf-checked' }, el('i', {}), `checked ${BROKERS_TEXT}`),
+        el('button', { class: 'btn btn-light', title: `Open ${b.name}’s site`, onClick: () => openLink(b.url) }, `${b.name}’s site ↗`))),
+    el('div', { class: 'bk-famous' }, el('span', { class: 'pf-k' }, 'Why it is known'), el('p', {}, b.famous)),
+    el('div', { class: 'bk-yours' }, el('b', {}, 'For your markets'), b.yours));
+}
+
+/* ---------- the six numbers ---------- */
+function brokerTiles(b) {
+  const tile = (k, v, s, cls = '') => el('div', { class: 'lab-tile ' + cls }, el('span', { class: 'k' }, k), el('span', { class: 'v' }, ...[].concat(v)), el('span', { class: 's' }, s));
+  const p = b.platforms, names = [p.mt4 && 'MT4', p.mt5 && 'MT5', p.ctrader && 'cTrader', p.tradingview && 'TradingView', p.own && 'its own', p.api && 'API'].filter(Boolean);
+  const tier1 = b.regulators.filter(r => r.tier === 1).length;
+  const lev = (b.leverage.match(/(\d+):1/) || [])[1];
+  return el('div', { class: 'pf-tiles' },
+    tile('EUR/USD, all in', [usd(b.cost.usd).replace('≈ ', ''), el('small', {}, 'a lot')], 'opened and closed, cheapest account', 'is-best'),
+    tile('Commission', b.commission, b.commissionSub),
+    tile('Min deposit', b.minDeposit, 'to open an account'),
+    tile('Platforms', String(names.length), names.join(' · ')),
+    tile('Max leverage', lev ? `${lev}:1` : '—', 'major forex, for Australian retail (ASIC)'),
+    tile('Licences', String(b.regulators.length), `${tier1} from top-tier regulators`));
+}
+
+/* ---------- the accounts ---------- */
+function accountsCard(b) {
+  const kv = (k, v) => el('div', { class: 'pf-kv' }, el('span', {}, k), el('b', {}, v));
+  return el('section', { class: 'card pf-card bk-accounts' },
+    el('h3', {}, 'Accounts', el('span', {}, `${b.accounts.length} to choose from · EUR/USD spreads in pips`)),
+    el('div', { class: 'bk-accs' }, ...b.accounts.map(a => el('div', { class: 'pf-pp bk-acc' },
+      el('div', { class: 't' }, a.name, el('small', {}, a.model)),
+      kv('EUR/USD spread', a.eurusd), kv('Commission', a.commission), kv('Min deposit', a.min), kv('Platforms', a.platforms), kv('Best for', a.best)))));
+}
+
+/* ---------- who it suits ---------- */
+function meter(n) {
+  return el('span', { class: 'bk-dots', title: `${n} of 5`, 'aria-label': `${n} of 5` },
+    ...[1, 2, 3, 4, 5].map(i => el('i', { class: n >= i ? 'on' : n >= i - 0.5 ? 'half' : '' })));
+}
+function suitsCard(b) {
+  const row = (k, n, why) => el('div', { class: 'bk-suit' },
+    el('div', { class: 'top' }, el('span', { class: 'nm' }, k), meter(n), el('b', {}, `${n}/5`)),
+    el('p', {}, why));
+  return el('section', { class: 'card pf-card' },
+    el('h3', {}, 'Who it suits', el('span', {}, 'Laminar’s view')),
+    row('New traders', b.suits.new, b.suits.newWhy),
+    row('Experienced', b.suits.pro, b.suits.proWhy));
+}
+
+/* ---------- who licenses it ---------- */
+const TIER = { 1: 'top tier', 2: 'mid tier', 3: 'offshore' };
+function licencesCard(b) {
+  return el('section', { class: 'card pf-card' },
+    el('h3', {}, 'Licensed by', el('span', {}, 'the first is the one your account would be under')),
+    el('div', { class: 'bk-regs' }, ...b.regulators.map(r => el('div', { class: 'bk-reg t' + r.tier + (r.yours ? ' is-yours' : '') },
+      el('i', { title: TIER[r.tier] }),
+      el('span', { class: 'who' }, r.who, el('small', {}, r.lic)),
+      el('span', { class: 'ent' }, r.entity)))),
+    el('div', { class: 'pf-verdict' }, b.trustWhy));
+}
+
+/* ---------- platforms ---------- */
+function platformsCard(b) {
+  const p = b.platforms;
+  const cell = (name, on, note) => el('div', { class: 'bk-plat' + (on ? ' on' : '') }, el('i', {}, on ? '✓' : '–'), el('span', {}, name, note ? el('small', {}, note) : null));
+  return el('section', { class: 'card pf-card' },
+    el('h3', {}, 'Platforms', el('span', {}, 'where you would trade')),
+    el('div', { class: 'bk-plats' },
+      cell('MetaTrader 4', p.mt4), cell('MetaTrader 5', p.mt5), cell('cTrader', p.ctrader), cell('TradingView', p.tradingview),
+      cell('Its own', !!p.own, p.own || null), cell('API', p.api)),
+    p.more ? el('div', { class: 'pf-pnote' }, p.more) : null,
+    el('div', { class: 'bk-lev' }, el('span', { class: 'pf-k' }, 'Leverage'), el('p', {}, b.leverage)));
+}
+
+/* ---------- what a lot costs, against the rest ---------- */
+function compareCard(b) {
+  const rows = [...BROKERS].sort((x, y) => x.cost.usd - y.cost.usd), reach = Math.max(...rows.map(r => r.cost.usd));
+  return el('section', { class: 'card pf-card' },
+    el('h3', {}, 'One lot of EUR/USD', el('span', {}, 'opened and closed, cheapest account, all six')),
+    el('div', { class: 'pf-bars' }, ...rows.map(r => el('div', { class: 'pf-bar' + (r.id === b.id ? ' on' : '') + (r === rows[0] ? ' best' : '') },
+      el('span', { class: 'nm' }, r.name),
+      el('span', { class: 'tk' }, el('i', { style: { width: (r.cost.usd / reach * 100) + '%' } })),
+      el('b', {}, usd(r.cost.usd).replace('≈ ', ''))))),
+    el('div', { class: 'pf-verdict' }, el('em', {}, `${b.name}: `), b.cost.how, '. Average spreads move with the market — a guide, not a quote.'));
+}
+
+/* ---------- fees and extras ---------- */
+function feesCard(b) {
+  return el('section', { class: 'card pf-card bk-fees' },
+    el('h3', {}, 'Fees and extras', el('span', {}, 'what else it costs, and what else you get')),
+    el('div', { class: 'bk-feecols' },
+      el('div', {}, ...b.fees.map(([k, v]) => el('div', { class: 'pf-kv' }, el('span', {}, k), el('b', {}, v)))),
+      el('div', { class: 'bk-extras' }, ...b.extras.map(x => el('div', { class: 'pf-ti' }, el('i', {}, '+'), x)))));
+}
+
+function brokerSources(b) {
+  const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+  return el('section', { class: 'card pf-src' },
+    el('div', { class: 'pf-k' }, `Sources · checked ${BROKERS_TEXT}`),
+    el('div', { class: 'pf-links' },
+      el('button', { class: 'pf-link is-main', onClick: () => openLink(b.url) }, `${b.name}’s site ↗`),
+      el('span', { class: 'pf-srcn' }, `${b.sources.length} pages`),
+      ...b.sources.map(u => el('button', { class: 'pf-link', title: u, onClick: () => openLink(u) }, host(u)))));
 }

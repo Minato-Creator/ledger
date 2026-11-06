@@ -5,11 +5,15 @@
    account, a daily loss smaller than the max loss, ranks in order); the page
    is checked against the data, firm by firm, so every tile reads what the
    research says; the pieces — the cost sums, the journal checks, the Lab
-   sheet — are checked by hand. */
+   sheet — are checked by hand. Every firm wears its own logo; and the
+   Brokers tab (Minato, 6 Nov): six brokers, each in full, read against
+   brokers.js. */
 import pw from 'playwright';
 import fs from 'node:fs';
 import { ACCT, PB, makeTrades } from '../fixtures/ghost-fixture.mjs';
 import { FIRMS, CHECKED } from '../../src/js/firms.js';
+import { BROKERS, BROKERS_CHECKED } from '../../src/js/brokers.js';
+import { LOGOS } from '../../src/js/firmlogos.js';
 
 const HERE = new URL('.', import.meta.url).pathname;
 const CHROME = process.env.QUIRE_CHROMIUM || undefined;
@@ -173,8 +177,55 @@ await p.evaluate(() => [...document.querySelectorAll('.pf-hero button')].find(b 
 lab = await p.evaluate(() => JSON.parse(window.__files.get('data/lab.json')));
 t('using it again does not add a second', lab.firms.filter(f => f.name === name).length === 1);
 
+/* ===================== logos ===================== */
+console.log('logos');
+t('a logo for every firm and every broker, carried in the app (no requests)', [...FIRMS, ...BROKERS].every(f => /^data:image\/webp;base64,/.test(LOGOS[f.id] || '')));
+await p.evaluate(() => { location.hash = '#/firms/topstep'; }); await settle(400);
+const marks = () => p.evaluate(() => [...document.querySelectorAll('.pf-firm .pf-mono, .pf-id .pf-mono')].map(m => { const i = m.querySelector('img'); return { logo: m.classList.contains('is-logo'), ok: !!i && i.complete && i.naturalWidth > 0, w: Math.round(m.getBoundingClientRect().width) }; }));
+let mk = await marks();
+t('each firm in the list and its page wears its own logo, loaded', mk.length === 7 && mk.every(m => m.logo && m.ok), JSON.stringify(mk));
+t('…on the same rounded tile as before (34 px in the list, 56 on the page)', mk.slice(0, 6).every(m => m.w === 34) && mk[6].w === 56, JSON.stringify(mk.map(m => m.w)));
+
+/* ===================== brokers ===================== */
+console.log('brokers');
+t('the data: six brokers, ranked, each with accounts, licences, platforms, a cost, a take and sources', BROKERS.length === 6
+  && BROKERS.map(b => b.rank).join() === '1,2,3,4,5,6' && BROKERS.every(b => b.accounts.length && b.regulators.length && b.regulators[0].yours && b.regulators[0].who === 'ASIC'
+  && b.cost.usd > 3 && b.cost.usd < 15 && b.take.pros.length && b.take.watch.length && b.take.verdict && b.sources.length >= 2 && b.trust >= 1 && b.trust <= 5 && b.suits.new && b.suits.pro)
+  && /^\d{4}-\d\d-\d\d$/.test(BROKERS_CHECKED));
+t('his three and three more: Fusion Markets, OANDA, Pepperstone, IC Markets, IG, Interactive Brokers', ['Fusion Markets', 'OANDA', 'Pepperstone', 'IC Markets', 'IG', 'Interactive Brokers'].every(n => BROKERS.some(b => b.name === n)));
+await p.evaluate(() => { location.hash = '#/firms'; }); await settle(300);
+const tabs = await p.evaluate(() => [...document.querySelectorAll('.head .pf-tabs button')].map(b => b.textContent));
+t('a third tab beside Futures and Forex: Brokers · 6', tabs.join(' | ') === 'Futures · 6 | Forex · 5 | Brokers · 6', tabs.join(' | '));
+await p.click('.pf-tabs [data-tab="brokers"]'); await settle(400);
+t('the list: most trusted first, each with its logo, stars and what a lot of EUR/USD costs', (await rail()).join() === [...BROKERS].sort((a, b) => a.rank - b.rank).map(b => b.name).join()
+  && await p.evaluate(() => [...document.querySelectorAll('.pf-firm')].every(r => r.querySelector('.pf-mono.is-logo img') && r.querySelector('.stars') && /^≈ US\$\d+\.\d\d$/.test(r.querySelector('.px').textContent))), (await rail()).join());
+const bp = () => p.evaluate(() => ({ name: document.querySelector('.pf-id h2')?.firstChild.textContent, famous: document.querySelector('.bk-famous p')?.textContent || '',
+  tiles: Object.fromEntries([...document.querySelectorAll('.pf-tiles .lab-tile')].map(x => [x.querySelector('.k').textContent, x.querySelector('.v').firstChild.textContent])),
+  accounts: [...document.querySelectorAll('.bk-acc .t')].map(x => x.firstChild.textContent), regs: [...document.querySelectorAll('.bk-reg .who')].map(x => x.firstChild.textContent),
+  yours: document.querySelector('.bk-reg.is-yours .who')?.firstChild.textContent, suits: [...document.querySelectorAll('.bk-suit .top b')].map(x => x.textContent),
+  plats: [...document.querySelectorAll('.bk-plat.on')].map(x => x.querySelector('span').firstChild.textContent), bars: document.querySelectorAll('.pf-bar').length,
+  on: document.querySelector('.pf-bar.on .nm')?.textContent, take: !!document.querySelector('.pf-take .pf-verdictline'), src: document.querySelectorAll('.pf-src .pf-link').length,
+  checked: document.querySelector('.pf-checked')?.textContent }));
+const off = [];
+for (const br of BROKERS) {
+  await p.evaluate(id => { location.hash = '#/firms/' + id; }, br.id); await settle(250);
+  const v = await bp();
+  const plats = [br.platforms.mt4 && 'MetaTrader 4', br.platforms.mt5 && 'MetaTrader 5', br.platforms.ctrader && 'cTrader', br.platforms.tradingview && 'TradingView', br.platforms.own && 'Its own', br.platforms.api && 'API'].filter(Boolean);
+  const bad = [v.name !== br.name && 'name', v.famous !== br.famous && 'famous', v.tiles['EUR/USD, all in'] !== `US$${br.cost.usd.toFixed(2)}` && 'cost', v.tiles['Min deposit'] !== br.minDeposit && 'min',
+    v.tiles.Commission !== br.commission && 'commission', v.accounts.join() !== br.accounts.map(a => a.name).join() && 'accounts', v.regs.join() !== br.regulators.map(r => r.who).join() && 'licences',
+    v.yours !== 'ASIC' && 'yours', v.suits.join() !== `${br.suits.new}/5,${br.suits.pro}/5` && 'suits', v.plats.join() !== plats.join() && 'platforms',
+    (v.bars !== 6 || v.on !== br.name) && 'bars', !v.take && 'take', v.src !== br.sources.length + 1 && 'sources', !/checked \d+ \w{3} 2026/.test(v.checked || '') && 'checked'].filter(Boolean);
+  if (bad.length) off.push(`${br.id}: ${bad.join(',')}`);
+}
+t('every broker’s page reads brokers.js: name, why it is known, the tiles, accounts, licences (ASIC first, yours), who it suits, platforms, the cost bars, the take, the sources', off.length === 0, off.join(' | '));
+const cheap = await p.evaluate(() => [...document.querySelectorAll('.pf-bar')].map(b => b.querySelector('.nm').textContent));
+t('the cost bars run cheapest first: Fusion Markets at the top', cheap[0] === 'Fusion Markets' && cheap.length === 6, cheap.join());
+await p.evaluate(() => { location.hash = '#/firms/topstep'; }); await settle(300);
+t('a firm’s link still opens the firm (and its tab)', await p.evaluate(() => document.querySelector('.pf-id h2').firstChild.textContent) === 'Topstep'
+  && await p.evaluate(() => document.querySelector('.pf-tabs .is-on')?.dataset.tab) === 'futures');
+
 await p.setViewportSize({ width: 1280, height: 800 });
-for (const id of ['lucid', 'fundingpips']) {
+for (const id of ['lucid', 'fundingpips', 'ibkr', 'pepperstone']) {
   await p.evaluate(x => { location.hash = '#/firms/' + x; }, id); await settle(400);
   const fit = await p.evaluate(() => [...document.querySelectorAll('.pf-main > *, .pf-rail, .head')].filter(n => n.scrollWidth > n.clientWidth + 1).map(n => n.className));
   t(`${id} fits at 1280 with nothing spilling sideways`, fit.length === 0, fit.join());

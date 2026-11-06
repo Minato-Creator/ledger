@@ -177,7 +177,17 @@ fn default_folder(app: tauri::AppHandle) -> Result<String, String> {
 fn check_url(url: &str) -> Result<(), String> {
     /* Every host this app will call, named one at a time. A feed added to
        the app is a deliberate line here, not something a URL can decide. */
-    const ALLOWED: [&str; 2] = ["nfs.faireconomy.media", "investinglive.com"];
+    /* Plan → Markets (6 Nov): coin prices from CoinGecko's keyless API or
+       Binance's public market data, and company prices from Stooq, or from
+       Finnhub once a key is added — reading only, like the rest. */
+    const ALLOWED: [&str; 6] = [
+        "nfs.faireconomy.media",
+        "investinglive.com",
+        "api.coingecko.com",
+        "data-api.binance.vision",
+        "stooq.com",
+        "finnhub.io",
+    ];
 
     let rest = url.strip_prefix("https://").ok_or("only https")?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
@@ -193,23 +203,54 @@ fn check_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The path of an OANDA candles request, checked before anything is sent:
-/// one instrument, the candles endpoint, and a plain query string. The host is
-/// never taken from the page — it is one of OANDA's two, chosen here.
+/// What may be asked of OANDA, checked before anything is sent. Reading only,
+/// never an order: an instrument's candles (the charts), and for the trade
+/// sync the list of your accounts, an account's summary, its trades and its
+/// transactions by number. Every one of these is a GET (fetch_oanda sends
+/// nothing else), so a key that could trade is only ever used here to read.
+/// The host is never taken from the page — it is one of OANDA's two, chosen
+/// in fetch_oanda.
 fn check_oanda_path(path: &str) -> Result<(), String> {
-    let rest = path.strip_prefix("/v3/instruments/").ok_or("not a candles request")?;
-    let (inst, query) = rest.split_once("/candles?").ok_or("not a candles request")?;
-    if inst.is_empty() || inst.len() > 20 || !inst.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
-        return Err("that is not an instrument name".into());
+    if path == "/v3/accounts" {
+        return Ok(());
     }
+    if let Some(rest) = path.strip_prefix("/v3/instruments/") {
+        let (inst, query) = rest.split_once("/candles?").ok_or("not a candles request")?;
+        if inst.is_empty() || inst.len() > 20 || !inst.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
+            return Err("that is not an instrument name".into());
+        }
+        return check_query(query);
+    }
+    if let Some(rest) = path.strip_prefix("/v3/accounts/") {
+        let (id, tail) = rest.split_once('/').ok_or("not an account request")?;
+        if id.is_empty() || id.len() > 40 || !id.chars().all(|c| c.is_ascii_digit() || c == '-') {
+            return Err("that is not an account number".into());
+        }
+        if tail == "summary" {
+            return Ok(());
+        }
+        if let Some(query) = tail.strip_prefix("trades?") {
+            return check_query(query);
+        }
+        if let Some(query) = tail.strip_prefix("transactions/idrange?") {
+            return check_query(query);
+        }
+        return Err("that is not something Laminar reads".into());
+    }
+    Err("not a request Laminar makes".into())
+}
+
+/// A plain query string: letters, digits and the few marks a query needs.
+fn check_query(query: &str) -> Result<(), String> {
     if query.is_empty() || !query.chars().all(|c| c.is_ascii_alphanumeric() || "=&:._-%".contains(c)) {
         return Err("that query has characters it should not".into());
     }
     Ok(())
 }
 
-/// Candles from OANDA, with your own key. The key goes in the Authorization
-/// header and nowhere else, and only to OANDA's practice or live API.
+/// Read from OANDA with your own key — candles, or your own trades. The key
+/// goes in the Authorization header and nowhere else, and only to OANDA's
+/// practice or live API.
 #[tauri::command]
 fn fetch_oanda(path: String, token: String, live: bool) -> Result<String, String> {
     check_oanda_path(&path)?;
@@ -300,6 +341,10 @@ mod url_tests {
         assert!(check_url("https://nfs.faireconomy.media/anything?x=1#y").is_ok());
         assert!(check_url("https://investinglive.com/feed/").is_ok());
         assert!(check_url("https://investinglive.com/feed/centralbank/").is_ok());
+        assert!(check_url("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=60").is_ok());
+        assert!(check_url("https://data-api.binance.vision/api/v3/ticker/24hr?type=MINI").is_ok());
+        assert!(check_url("https://stooq.com/q/l/?s=aapl.us+msft.us&f=sd2t2ohlcv&h&e=csv").is_ok());
+        assert!(check_url("https://finnhub.io/api/v1/quote?symbol=AAPL&token=x").is_ok());
     }
 
     #[test]
@@ -313,6 +358,12 @@ mod url_tests {
             "https://investinglive.com.evil.example/feed/", // the new host, spoofed
             "https://evilinvestinglive.com/feed/",
             "http://investinglive.com/feed/",               // not https
+            "https://api.coingecko.com.evil.example/x",     // the market hosts, spoofed
+            "https://coingecko.com/api/v3/ping",            // only the API host, not the site
+            "https://api.binance.com/api/v3/order",         // Binance's trading API is not on the list
+            "https://stooq.com@evil.example/q/l/",
+            "http://stooq.com/q/l/",                        // not https
+            "https://finnhub.io.evil.example/api/v1/quote",
             "file:///etc/passwd",
             "https://127.0.0.1/x",
             "",
@@ -402,8 +453,29 @@ mod oanda_tests {
     }
 
     #[test]
+    fn allows_reading_your_own_trades() {
+        assert!(check_oanda_path("/v3/accounts").is_ok());
+        assert!(check_oanda_path("/v3/accounts/101-011-1234567-001/summary").is_ok());
+        assert!(check_oanda_path("/v3/accounts/101-011-1234567-001/trades?state=ALL&count=500").is_ok());
+        assert!(check_oanda_path("/v3/accounts/101-011-1234567-001/trades?state=ALL&count=500&beforeID=1200").is_ok());
+        assert!(check_oanda_path("/v3/accounts/101-011-1234567-001/transactions/idrange?from=1&to=1000").is_ok());
+    }
+
+    #[test]
+    fn refuses_orders_and_anything_that_is_not_reading() {
+        assert!(check_oanda_path("/v3/accounts/101-011-1234567-001/orders").is_err());
+        assert!(check_oanda_path("/v3/accounts/101-011-1234567-001/trades/42/close").is_err());
+        assert!(check_oanda_path("/v3/accounts/101-011-1234567-001/positions/EUR_USD/close").is_err());
+        assert!(check_oanda_path("/v3/accounts/101-011-1234567-001/trades").is_err());
+        assert!(check_oanda_path("/v3/accounts/../instruments/summary").is_err());
+        assert!(check_oanda_path("/v3/accounts/101-011/summary?x=1").is_err());
+        assert!(check_oanda_path("/v3/accounts/101-011/trades?state=ALL#x").is_err());
+        assert!(check_oanda_path("/v3/accounts/").is_err());
+    }
+
+    #[test]
     fn refuses_anything_else() {
-        assert!(check_oanda_path("/v3/accounts").is_err());
+        assert!(check_oanda_path("/v3/accountsX").is_err());
         assert!(check_oanda_path("/v3/instruments/XAU_USD/orderBook?x=1").is_err());
         assert!(check_oanda_path("/v3/instruments/../accounts/candles?x=1").is_err());
         assert!(check_oanda_path("/v3/instruments/XAU_USD/candles?x=1#frag").is_err());

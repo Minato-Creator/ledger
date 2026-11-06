@@ -5,6 +5,9 @@
    have" done after you exited.
    ============================================================ */
 
+/** 7 → '07'. */
+export const pad2 = n => String(n).padStart(2, '0');
+
 /** 1R in account currency. Measured against the account's STARTING balance. */
 export function oneR(account, trade) {
   const pct = Number(trade.riskPercent);
@@ -28,9 +31,18 @@ export function rMultiple(account, trade) {
   return Number(trade.netResult) / r;
 }
 
+/** Within this much of nothing, either way, a trade is a break-even (Minato: "less than 0.1R or −0.1R"). */
+export const BE_BAND = 0.1;
+/* outcome() is asked about a trade alone, all over the app; the account its R
+   is measured on is looked up here (the store says how, once it has loaded). */
+let accountOf = () => null;
+export function useAccounts(find) { accountOf = typeof find === 'function' ? find : () => null; }
+
 /**
  * win | loss | breakeven.
  *
+ * Anything that came to less than 0.1R either way is a break-even — a stop
+ * moved to the entry and taken, give or take the spread, is not a loss.
  * A trade can be called break-even and still have moved the account a dollar
  * or two — commission, slippage, a partial fill. When it has been called, that
  * is the answer, and the exact amount still counts towards the account's
@@ -40,16 +52,18 @@ export function rMultiple(account, trade) {
  * disagree with: a win is entered as a positive number and a loss as a
  * negative one, so those two never need telling.
  */
-export function outcome(trade) {
+export function outcome(trade, account) {
   if (trade && trade.outcome === 'breakeven') return 'breakeven';
   /* A trade with no money but a stated R is judged on that R — a forward test
      that made two and a half is a win, not a scratch. */
   if (trade && trade.netResult == null && trade.rMultiple != null && isFinite(Number(trade.rMultiple))) {
     const r = Number(trade.rMultiple);
-    return r > 0 ? 'win' : r < 0 ? 'loss' : 'breakeven';
+    return Math.abs(r) < BE_BAND ? 'breakeven' : r > 0 ? 'win' : 'loss';
   }
   const n = Number(trade.netResult);
   if (!isFinite(n)) return 'breakeven';
+  const r = rMultiple(account || accountOf(trade.accountId), trade);
+  if (r != null && isFinite(r) && Math.abs(r) < BE_BAND) return 'breakeven';
   if (n > 0) return 'win';
   if (n < 0) return 'loss';
   return 'breakeven';
@@ -209,7 +223,7 @@ export function durationMins(open, close) {
    Aggregates over a set of trades for one account
    ============================================================ */
 export function summarise(account, trades) {
-  const rows = trades.map(t => ({ t, r: rMultiple(account, t), o: outcome(t), n: Number(t.netResult) || 0 }));
+  const rows = trades.map(t => ({ t, r: rMultiple(account, t), o: outcome(t, account), n: Number(t.netResult) || 0 }));
 
   const wins   = rows.filter(x => x.o === 'win');
   const losses = rows.filter(x => x.o === 'loss');
@@ -277,11 +291,11 @@ export function equityCurve(trades, account = null) {
 /** Largest peak-to-trough fall in the equity curve, with where it happened. */
 export function maxDrawdown(curve, key = 'equity') {
   if (curve.some(p => p[key] == null)) return null;
-  let peak = 0, peakIdx = -1, worst = 0, from = -1, to = -1, runPeak = 0, runPeakIdx = -1;
+  let peak = 0, worst = 0, from = -1, to = -1, runPeak = 0, runPeakIdx = -1;
   curve.forEach((p, i) => {
     if (p[key] > runPeak) { runPeak = p[key]; runPeakIdx = i; }
     const dd = runPeak - p[key];
-    if (dd > worst) { worst = dd; from = runPeakIdx; to = i; peak = runPeak; peakIdx = runPeakIdx; }
+    if (dd > worst) { worst = dd; from = runPeakIdx; to = i; peak = runPeak; }
   });
   return worst > 0 ? { amount: worst, fromIndex: from, toIndex: to, peak } : null;
 }
@@ -442,7 +456,6 @@ export function sink(hex) {
    cannot be converted after the fact.
    ============================================================ */
 export const UNITS = ['$', '%', 'R'];
-export const UNIT_LABEL = { $: '$', '%': '%', R: 'R' };
 
 /** A signed percentage: +2.00%, −0.75%, 0.00%. */
 export function pctSigned(v, decimals = 2) {
@@ -659,28 +672,31 @@ const roundsToZero = str => Number(String(str).replace(/[^0-9.]/g, '')) === 0;
 /**
  * An account's money over time. `trades` are its closed live trades. P&L
  * comes from them and from any balance corrections ("Update balance");
- * payouts (and withdrawals) take money out. Returns
- *   { start, gross, paid, after, balance, peak, series }
+ * payouts (and withdrawals) take money out; funding (a broker deposit, or a
+ * demo topped up or reset — `kind: 'funding'` adjustments, oandasync.js)
+ * moves the balance without being made or lost. Returns
+ *   { start, gross, paid, after, funded, balance, peak, series }
  * gross: trades + corrections; paid: total taken out; after: gross − paid;
- * balance: start + after; peak: the highest the balance has been;
+ * funded: put in or taken back by the broker; balance: start + after + funded;
+ * peak: the highest the balance has been;
  * series: the balance after each event, oldest first, from the start.
  */
 export function accountMoney(a, trades = []) {
   const start = Number(a?.startingBalance) || 0;
   const ev = [];
   for (const t of trades) ev.push([`${t.date || ''}T${t.timeClose || t.timeOpen || '23:59'}`, Number(t.netResult) || 0, 0]);
-  for (const x of a?.adjustments || []) ev.push([`${x.date || ''}T${x.at || '23:59:30'}`, Number(x.amount) || 0, 0]);
+  for (const x of a?.adjustments || []) ev.push([`${x.date || ''}T${x.at || '23:59:30'}`, Number(x.amount) || 0, x.kind === 'funding' ? 2 : 0]);
   for (const p of a?.payouts || []) ev.push([`${p.date || ''}T${p.at || '23:59:59'}`, -Math.abs(Number(p.amount) || 0), 1]);
   ev.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
-  let bal = start, peak = start, gross = 0, paid = 0;
+  let bal = start, peak = start, gross = 0, paid = 0, funded = 0;
   const series = [start];
   for (const [, v, out] of ev) {
     bal += v;
-    if (out) paid -= v; else gross += v;
+    if (out === 2) funded += v; else if (out) paid -= v; else gross += v;
     if (bal > peak) peak = bal;
     series.push(bal);
   }
-  return { start, gross, paid, after: gross - paid, balance: bal, peak, series };
+  return { start, gross, paid, after: gross - paid, funded, balance: bal, peak, series };
 }
 
 export function money(n, { sign = true, currency = 'USD', decimals = 2 } = {}) {
@@ -710,7 +726,7 @@ export function todayISO() {
 }
 export function shortDate(iso) {
   if (!iso) return '—';
-  const [y, m, d] = iso.split('-').map(Number);
+  const [, m, d] = iso.split('-').map(Number);
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${String(d).padStart(2, '0')} ${months[m - 1]}`;
 }

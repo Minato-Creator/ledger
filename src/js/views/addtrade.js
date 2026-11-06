@@ -8,17 +8,18 @@ import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, 
 import { heldEditor } from './held.js';
 import { guessAssetClass } from '../broker.js';
 import { dayNews, pairCurrencies, holidayKey, snapEvent } from '../newsday.js';
+import { pad2 } from '../calc.js';
+import { tradeChart } from './tradechart.js';
+import * as cd from '../candles.js';
 
 /** The category, from the instrument as typed — no picker to forget. */
 export const classOf = pair => { const p = String(pair || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return p ? guessAssetClass(p) : null; };
 
-const ASSET_CLASSES = ['Forex', 'Futures', 'Commodities', 'Indices'];
 
 /* The questions about a trade beyond its numbers live in questions.js, so
    the CSV and the importer can read them without the form. */
 export { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS };
 
-const pad2 = n => String(n).padStart(2, '0');
 const localTime = iso => { const d = new Date(iso); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
 /**
@@ -40,9 +41,10 @@ export function fromPricesOf(f) {
 }
 
 export function addTrade(store, nav, existingId = null) {
-  const acct = store.activeAccount;
   const pb = store.playbook;
   const editing = existingId ? store.trades.find(t => t.id === existingId) : null;
+  /* a trade is edited on its own account: saving it never moves it to the one you happen to be on */
+  const acct = (editing && store.data.accounts.accounts.find(a => a.id === editing.accountId)) || store.activeAccount;
 
   /* Fields loaded off disk are numbers; the form's inputs are text, and the
      forgiving reader takes strings. Normalise once here so nothing downstream
@@ -163,9 +165,19 @@ export function addTrade(store, nav, existingId = null) {
                        : !(f.pair && typedResult != null && risk > 0);
     out.save.textContent = open ? (editing ? 'Save changes' : 'Save as open')
                                 : (editing ? 'Save changes' : 'Save trade');
+    /* the chart on top follows the prices as they are typed (and the side, and the result) */
+    if (out.chart) {
+      const now = { entryPrice: numOrNull(f.entryPrice), stopLoss: numOrNull(f.stopLoss), takeProfit: numOrNull(f.takeProfit),
+        exitPrice: numOrNull(f.exitPrice), side: f.side, netResult: open || fwd ? null : signedResult(), riskPercent: c.parseNumberOrNull(f.riskPercent) };
+      const key = JSON.stringify(now);
+      if (key !== out.chartKey) { out.chartKey = key; Object.assign(out.chartTrade, now); out.chart.__update(); }
+    }
     // A forgiving reader has to say what it could not read, or a typo just
     // greys the save button out with no reason given.
-    out.resultNote.textContent = unreadable ? (fwd ? 'Cannot read that as an R' : 'Cannot read that as an amount') : '';
+    /* under 0.1R either way it is a break-even, whichever way the switch is set (calc.js BE_BAND) */
+    const scratch = !open && !flat && typedResult != null && r != null && r !== 0 && Math.abs(r) < c.BE_BAND;
+    out.resultNote.textContent = unreadable ? (fwd ? 'Cannot read that as an R' : 'Cannot read that as an amount')
+      : scratch ? 'under 0.1R — counts as break-even' : '';
 
     // Labels are exact: the entry time decides, with no tolerance anywhere near it.
     // Once you have picked a session by hand we stop touching it.
@@ -266,7 +278,6 @@ export function addTrade(store, nav, existingId = null) {
   const shotWrap = el('div', { class: 'shot-box' });
 
   const keptShots = () => tradeShotsOf(editing).filter(n => !dropped.has(n));
-  const shotCount = () => keptShots().length + staged.length;
 
   async function take(file) {
     if (!file) return;
@@ -685,12 +696,18 @@ export function addTrade(store, nav, existingId = null) {
      two cells that would repeat it, and the rules beside them, come out rather
      than standing there holding a dash. */
   out.moneyCells = [rule(), cell('R', out.rShown), rule(), cell('1R', out.oneR)];
+  /* Editing a trade OANDA has prices for: its own chart on top — the prices,
+     the executions, and the position drawn from what the form says, redrawn
+     as you change the entry, stop, target or side */
+  if (editing && editing.timeOpen && cd.oandaInstrument(editing.pair)) {
+    out.chartTrade = { ...editing };
+    out.chart = tradeChart(store, nav, out.chartTrade, { minimal: true, position: true, height: 300 });   // shorter, so the form below keeps room
+  }
   const strip = el('section', { class: 'card trade-strip' },
     cell('Result', out.result), ...out.moneyCells, rule(),
     cell('Planned', out.planned), rule(),
     cell('Time', out.duration));
 
-  const band = (...kids) => el('div', { class: 'band' }, ...kids);
   const grid = (cols, ...kids) => el('div', { style: { display: 'grid', gridTemplateColumns: cols, gap: '14px' } }, ...kids);
 
   const classHint = el('span', { class: 'pair-class' });
@@ -731,7 +748,7 @@ export function addTrade(store, nav, existingId = null) {
     signWrap, out.resultNote));
 
   const riskCell = labelled('Risk %', el('div', { class: 'suffix' },
-    field({ inputmode: 'decimal', ...bind('riskPercent') }),
+    out.riskField = field({ inputmode: 'decimal', class: 'field is-risk', ...bind('riskPercent') }),
     el('span', {}, '%')));
 
   out.riskRow = grid('minmax(0,200px) minmax(0,1fr)');
@@ -776,6 +793,19 @@ export function addTrade(store, nav, existingId = null) {
      edit opens as it was saved — and an exit reason you picked yourself is
      left alone. */
   let xrAuto = false;
+  /* A synced trade's size is what OANDA filled, so moving its stop (or entry)
+     moves its risk, not its size: the first risk scaled by the new distance —
+     the sync's own sum (oandasync.js) — so the R and the R:R follow the stop. */
+  const sizeFixed = !!editing?.oanda && Number(editing.riskPercent) > 0
+    && Number.isFinite(Number(editing.stopLoss)) && Number.isFinite(Number(editing.entryPrice)) && Number(editing.entryPrice) !== Number(editing.stopLoss);
+  function followRisk() {
+    if (!sizeFixed) return;
+    const e = c.parseNumberOrNull(f.entryPrice), s = c.parseNumberOrNull(f.stopLoss);
+    if (e == null || s == null || e === s) return;
+    const pct = Number(editing.riskPercent) * Math.abs(e - s) / Math.abs(Number(editing.entryPrice) - Number(editing.stopLoss));
+    f.riskPercent = String(+pct.toFixed(4));
+    if (out.riskField) out.riskField.value = f.riskPercent;
+  }
   function fromPrices() {
     const read = fromPricesOf(f);
     if (!read) return;
@@ -940,9 +970,9 @@ export function addTrade(store, nav, existingId = null) {
       labelled('Direction', direction))),
 
     sec('Prices', grid('repeat(4,minmax(0,1fr))',
-      labelled('Entry', field({ inputmode: 'decimal', ...bind('entryPrice', { onSet: fromPrices }) })),
-      labelled('Stop', field({ inputmode: 'decimal', class: 'field is-stop', ...bind('stopLoss', { onSet: fromPrices }) })),
-      labelled('Target', field({ inputmode: 'decimal', ...bind('takeProfit', { onSet: fromPrices }) })),
+      labelled('Entry', field({ inputmode: 'decimal', ...bind('entryPrice', { onSet: () => { followRisk(); fromPrices(); } }) })),
+      labelled('Stop', field({ inputmode: 'decimal', class: 'field is-stop', ...bind('stopLoss', { onSet: () => { followRisk(); fromPrices(); } }) })),
+      labelled('Target', field({ inputmode: 'decimal', class: 'field is-target', ...bind('takeProfit', { onSet: fromPrices }) })),
       labelled('Exit', out.exitField = field({ inputmode: 'decimal', ...bind('exitPrice', { onSet: fromPrices }) })))),
 
     sec('Timing & size', out.timingGrid = grid('repeat(4,minmax(0,1fr))',
@@ -1004,7 +1034,7 @@ export function addTrade(store, nav, existingId = null) {
      paste from there never reached a listener down here. That was the third
      Ctrl+V that did nothing. The listener retires itself once this view has
      been replaced, so a paste on another page is never taken here. */
-  const view = el('div', { class: 'view' }, head, strip, form);
+  const view = el('div', { class: 'view' }, head, out.chart, strip, form);
   out.wrapEl = form; renumber();
   const onDocPaste = e => {
     if (!view.isConnected) { document.removeEventListener('paste', onDocPaste); return; }

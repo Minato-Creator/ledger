@@ -9,6 +9,7 @@ import { swatch, closeColour } from './colour.js';
 import { closeMenus } from './menu.js';
 import { offsetOf, wall } from './settings.js';
 import { withAlpha } from './core.js';
+import { pad2 as pad } from '../calc.js';
 
 /** Line thicknesses: from half a pixel (Minato found 1px too heavy). */
 export const WIDTHS = [0.5, 1, 2, 3, 4];
@@ -17,7 +18,6 @@ const NAMES = { trend: 'Trend line', rect: 'Rectangle', callout: 'Callout', long
 let lastTab = {};
 
 /** datetime-local value in the chart's timezone, and back. */
-const pad = n => String(n).padStart(2, '0');
 export function toLocalInput(tz, T) { const d = wall(tz, T); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; }
 export function fromLocalInput(tz, v) {
   const m = String(v).match(/^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/);
@@ -39,7 +39,6 @@ export function openDrawingSettings(d, o) {
   const send = () => o.preview(structuredClone(draft));
   const change = (fn, repaint = true) => { fn(draft); send(); if (repaint) paint(); };
 
-  const section = text => el('div', { class: 'tv-dsec' }, text);
   const row = (label, ...right) => el('div', { class: 'tv-drow' }, el('span', { class: 'tv-dlab' }, label), el('div', { class: 'tv-dctl' }, ...right));
   const check = (label, on, set, cls = '') => el('label', { class: 'tv-check ' + cls },
     el('input', { type: 'checkbox', checked: !!on, onChange: e => change(dd => set(dd, e.target.checked)) }), el('i'), el('span', {}, label));

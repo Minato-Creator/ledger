@@ -27,10 +27,10 @@ import { pipOf, spreadOf } from '../pips.js';
 import { tenYearCard, yearsCard, volCard } from './quant10view.js';
 import { ticks, hoverLayer, readRow } from './chartkit.js';
 import { createCore, CHART_TFS, TV_FONT } from '../chart/core.js';
+import { pad2 } from '../calc.js';
 
 const INST = 'XAU_USD';
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const pad2 = n => String(n).padStart(2, '0');
 const when = T => { const d = new Date(T * 1000); return `${d.getDate()} ${MON[d.getMonth()]} ${String(d.getFullYear()).slice(2)} · ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const month = T => { const d = new Date(T * 1000); return `${MON[d.getMonth()]} ${d.getFullYear()}`; };
 const rT = (r, dp = 2) => `${r > 1e-9 ? '+' : r < -1e-9 ? '−' : ''}${Math.abs(r).toFixed(dp)}R`;
@@ -379,7 +379,7 @@ function quantChart(K, t) {
   let tf = t.etf || t.tf;
   requestAnimationFrame(() => {
     if (!box.isConnected) return;
-    const core = createCore(plot, { store: STORE, inst: INST, dp: cd.decimalsOf(INST), symbol: 'XAUUSD', source: 'OANDA', bars: cd.aggregate(slice, tf), tf,
+    const core = createCore(plot, { scope: 'lab', store: STORE, inst: INST, dp: cd.decimalsOf(INST), symbol: 'XAUUSD', source: 'OANDA', bars: cd.aggregate(slice, tf), tf,
       hooks: {
         tags: () => [{ p: t.entry, label: 'Entry', bg: '#787878' }, { p: t.tp, label: 'TP', bg: core.palette().profit }, { p: t.sl, label: 'SL', bg: core.palette().loss }],
         back: (g, G, C) => {

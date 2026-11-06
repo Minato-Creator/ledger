@@ -124,6 +124,7 @@ await p.addInitScript(({ ACCT, TR, PB, NEWS }) => {
     ['data/news.json', JSON.stringify(NEWS)]]));
 }, { ACCT, TR, PB, NEWS });
 await p.addInitScript(FAKE_FS);
+await p.addInitScript(() => { window.__fullTradeChart = true; });   // the trade page's chart with its tools (it is quiet by default)
 await p.goto('http://127.0.0.1:8777/index.html', { waitUntil: 'domcontentloaded' });
 await p.waitForSelector('.topbar', { timeout: 8000 });
 const settle = (ms = 300) => p.waitForTimeout(ms);
@@ -260,6 +261,12 @@ console.log('the chart');
 SEEN.length = 0;
 await go('#/trade/g1', 300); await chartReady();
 let C = await ch();
+{
+  const A = await p.evaluate(() => document.querySelector('.tc-plot').__arrows?.() || []);
+  t('execution arrows: a long in is a blue arrow under its candle, out a red one over it', A.length === 2 && A[0].buy && A[0].y > A[0].low && !A[1].buy && A[1].y < A[1].high, JSON.stringify(A));
+  const ind = await p.evaluate(() => [localStorage.getItem('quire:chartSessions'), localStorage.getItem('quire:chartNews')]);
+  t('indicators are off until chosen', JSON.stringify((await ch()).shows) === '{"sessions":false,"news":false,"rsi":false,"tsl":false}' && ind[0] == null, JSON.stringify((await ch()).shows));
+}
 t('a chart, on the trade’s own timeframe (5m), the whole month of it', C && C.tf === 5 && C.bars > 2400, JSON.stringify(C && { tf: C.tf, bars: C.bars }));
 const NOW = Date.parse('2026-09-18T04:00:00Z') / 1000;
 const days = SEEN.map(s => [new Date(+s.q.from * 1000).toISOString().slice(0, 10), Math.round((+s.q.to - +s.q.from) / 3600), s.q.granularity, s.q.price]);
@@ -320,11 +327,20 @@ let v = (await ch()).view;
 t('dragging right moves back in time', v.start < pre.start - 3 && Math.abs(v.count - pre.count) < 1e-6, `${pre.start.toFixed(1)} → ${v.start.toFixed(1)}`);
 t('…by as many candles as the pointer moved', Math.abs((pre.start - v.start) - 150 / pre.spacing) < 0.05, `${(pre.start - v.start).toFixed(2)} vs ${(150 / pre.spacing).toFixed(2)}`);
 t('…the candles keep their width while moving', Math.abs(v.spacing - pre.spacing) < 1e-9);
-await p.mouse.move(box.x + 200, box.y + 150); await p.mouse.wheel(0, -400); await settle(150);
+await p.mouse.move(box.x + 200, box.y + 150);
+for (let i = 0; i < 4; i++) { await p.mouse.wheel(0, -100); await settle(30); }
+await settle(120);
 const zin = (await ch()).view;
-t('scrolling up zooms in — wider candles, fewer of them', zin.count < v.count * 0.8 && zin.spacing > v.spacing * 1.2, `${v.count.toFixed(1)} → ${zin.count.toFixed(1)}`);
-const anchorBefore = v.start + 200 / v.spacing, anchorAfter = zin.start + 200 / zin.spacing;
-t('…around the pointer', Math.abs(anchorBefore - anchorAfter) < 0.6, `${anchorBefore.toFixed(2)} vs ${anchorAfter.toFixed(2)}`);
+t('scrolling up zooms in, 10% a notch — wider candles, fewer of them', zin.count < v.count * 0.8 && Math.abs(zin.spacing / v.spacing - 1.1 ** 4) < 0.02, `${v.count.toFixed(1)} → ${zin.count.toFixed(1)}, ×${(zin.spacing / v.spacing).toFixed(3)}`);
+t('…with the right edge held still, TradingView’s way', Math.abs((v.start + v.count) - (zin.start + zin.count)) < 0.6, `${(v.start + v.count).toFixed(2)} vs ${(zin.start + zin.count).toFixed(2)}`);
+{
+  const z0 = (await ch()).view;
+  await p.keyboard.down('Control'); await p.mouse.wheel(0, -100); await p.keyboard.up('Control'); await settle(120);
+  const z1 = (await ch()).view;
+  t('…and with Ctrl, about the pointer', Math.abs((z0.start + 200 / z0.spacing) - (z1.start + 200 / z1.spacing)) < 0.6 && z1.spacing > z0.spacing * 1.05,
+    `${(z0.start + 200 / z0.spacing).toFixed(2)} vs ${(z1.start + 200 / z1.spacing).toFixed(2)}`);
+  await p.keyboard.down('Control'); await p.mouse.wheel(0, 100); await p.keyboard.up('Control'); await settle(120);
+}
 await p.mouse.wheel(0, 3000); await settle(150);
 const zo = await ch();
 t('zooming out stops at TradingView’s narrowest spacing (half a pixel) or the whole month', zo.view.spacing >= 0.5 - 1e-9 && zo.view.count <= zo.bars * 1.3 + 1e-6, JSON.stringify(zo.view));
@@ -454,10 +470,10 @@ await p.mouse.move(box.x + 300, box.y + 150); await p.mouse.wheel(0, -300); awai
 m1 = await ch();
 await p.mouse.move(box.x + pw0 + 30, box.y + 150); await p.mouse.down(); await p.mouse.move(box.x + pw0 + 30, box.y + 210, { steps: 5 }); await p.mouse.up(); await settle(80);
 let m2 = await ch();
-t('dragging the price scale down squeezes the prices', !m2.auto && (m2.y.hi - m2.y.lo) > (m1.y.hi - m1.y.lo) * 1.3, JSON.stringify([m1.y, m2.y]));
+t('dragging the price scale down squeezes the prices, TradingView’s curve', !m2.auto && (m2.y.hi - m2.y.lo) > (m1.y.hi - m1.y.lo) * 1.15, JSON.stringify([m1.y, m2.y]));
 await p.mouse.move(box.x + pw0 + 30, box.y + 210); await p.mouse.down(); await p.mouse.move(box.x + pw0 + 30, box.y + 100, { steps: 5 }); await p.mouse.up(); await settle(80);
 let m3 = await ch();
-t('…and up stretches them', (m3.y.hi - m3.y.lo) < (m2.y.hi - m2.y.lo) * 0.6);
+t('…and up stretches them', (m3.y.hi - m3.y.lo) < (m2.y.hi - m2.y.lo) * 0.8, JSON.stringify([m2.y, m3.y]));
 const yHeld = m3.y;
 await p.mouse.move(box.x + 300, box.y + 150); await p.mouse.wheel(0, 400); await settle(80);
 await p.mouse.move(box.x + 300, box.y + 150); await p.mouse.down(); await p.mouse.move(box.x + 150, box.y + 150, { steps: 4 }); await p.mouse.up(); await settle(80);
@@ -542,7 +558,7 @@ t('the timeframe chosen is not boxed — only its text is brighter', await p.eva
 }));
 
 /* the last price: a dotted line in the candle's colour, and its tag */
-t('no » button on the chart (Minato did not want it)', await p.evaluate(() => !document.querySelector('.tc .tv-latest') && !document.querySelector('.tc .tc-plot button:not(.tc-auto)')));
+t('no » button on the chart (Minato did not want it)', await p.evaluate(() => !document.querySelector('.tc .tv-latest') && !document.querySelector('.tc .tc-plot button:not(.tc-auto):not(.tv-pbtn)')));
 await p.click('.tc-auto'); await settle(60);
 await p.evaluate(() => { const c = document.querySelector('.tc').__chart.core; c.toLatest(); c.draw(); }); await settle(120);
 const lv = await ch();
@@ -627,8 +643,8 @@ console.log('chart settings');
 const settingsFile = () => p.evaluate(() => { try { return JSON.parse(window.__files.get('data/drawings.json')).settings || null; } catch { return null; } });
 await p.mouse.click(box.x + 300, box.y + 150, { button: 'right' }); await settle(100);
 await p.click('.tv-menu .tv-m-settings'); await settle(150);
-t('Settings… opens TradingView’s Chart Settings: Symbol, Status line, Scales and lines, Canvas', await p.evaluate(() =>
-  [...document.querySelectorAll('.tv-dialog .tv-dtab')].map(b => b.textContent).join() === 'Symbol,Status line,Scales and lines,Canvas'
+t('Settings… opens TradingView’s Chart Settings: Symbol, Status line, Scales and lines, Canvas, Trading', await p.evaluate(() =>
+  [...document.querySelectorAll('.tv-dialog .tv-dtab')].map(b => b.textContent).join() === 'Symbol,Status line,Scales and lines,Canvas,Trading'
   && /Settings/.test(document.querySelector('.tv-dhead').textContent) && !!document.querySelector('.tv-dialog .tv-ok') && !!document.querySelector('.tv-dialog .tv-cancel') && !!document.querySelector('.tv-dialog .tv-tmpl')));
 await p.click('.tv-dtab[data-tab="symbol"]'); await settle(60);
 t('Symbol: candles follow Quire’s profit / loss to start with', await p.evaluate(() => document.querySelector('.tv-cmode .is-on').dataset.v === 'quire' && !document.querySelector('.tv-up-body')));
@@ -779,8 +795,9 @@ const band = await p.evaluate(() => {
 });
 t('dragged down, candles never run over the times along the bottom', band === 0, String(band));
 await p.click('.tc-reset'); await settle(100);
-t('sessions and news are on to start with, the RSI off', JSON.stringify((await ch()).shows) === '{"sessions":true,"news":true,"rsi":false}');
+t('every indicator is off to start with', JSON.stringify((await ch()).shows) === '{"sessions":false,"news":false,"rsi":false,"tsl":false}', JSON.stringify((await ch()).shows));
 const tog = async which => { await p.click('.tc-ind'); await settle(60); await p.click(`.tv-menu .tc-ind-${which}`); await settle(60); };
+await tog('sessions'); await tog('news');
 await p.click('.tc-ind'); await settle(60);
 t('Indicators opens a menu with Sessions and News, both ticked', await p.evaluate(() => {
   const m = document.querySelector('.tv-menu'); if (!m) return false;
@@ -967,6 +984,52 @@ t('the canvas has candles on it (green and red pixels)', await p.evaluate(() => 
   for (let i = 0; i < d.length; i += 4) { if (d[i + 1] > 150 && d[i] < 60) green++; if (d[i] > 220 && d[i + 1] < 120) red++; }
   return green > 200 && red > 200;
 }));
+
+/* the trade page's own chart is the quiet one: no tools, no legend, no small print,
+   narrow scales of about four figures, the time scale near the card's foot */
+console.log('  -- the quiet chart on the trade page --');
+await p.evaluate(() => { document.documentElement.dataset.theme = 'dark'; window.__fullTradeChart = false; });
+await go('#/trades', 300); await go('#/trade/g1', 300); await chartReady();
+const Q = await p.evaluate(() => { const c = document.querySelector('.tc'), G = c.__chart.core.geom();
+  return { minimal: c.classList.contains('is-minimal'), tools: !!c.querySelector('.tv-left'), legend: getComputedStyle(c.querySelector('.tv-status')).display,
+    foot: getComputedStyle(c.querySelector('.tc-foot')).display, aw: G.aw, tH: G.tH, fs: G.fs,
+    gap: Math.round(c.getBoundingClientRect().bottom - c.querySelector('.tc-plot').getBoundingClientRect().bottom) }; });
+t('no drawing tools down the left', Q.minimal && !Q.tools, JSON.stringify(Q));
+t('no legend (name, timeframe, O H L C)', Q.legend === 'none', Q.legend);
+t('no "for viewing only" line', Q.foot === 'none', Q.foot);
+t('smaller scales: 10px, the time scale 18px tall, close to the card’s foot', Q.fs === 10 && Q.tH === 18 && Q.gap <= 8, JSON.stringify(Q));
+t('a narrow price scale for gold (four figures)', Q.aw <= 44, String(Q.aw));
+const qG = await p.evaluate(() => { const ch = document.querySelector('.tc').__chart, G = ch.core.geom(); return { lo: G.lo, hi: G.hi, label: ch.core.scaleLabel(G.hi) }; });
+t('gold reads in whole dollars when the screen spans a few (4097, not 4096.72)', qG.hi - qG.lo < 3 || /^\d{4}$/.test(qG.label), JSON.stringify(qG));
+await go('#/trades', 300); await go('#/trade/a1', 300); await chartReady();
+const qF = await p.evaluate(() => { const ch = document.querySelector('.tc').__chart, G = ch.core.geom(); return { aw: G.aw, lo: G.lo, hi: G.hi, label: ch.core.scaleLabel(G.hi), pair: document.querySelector('.tc-head h3').textContent }; });
+t('a forex pair to four places, not five (0.6604, not 0.66041)', /^\d\.\d{3,4}$/.test(qF.label) && qF.aw <= 56, JSON.stringify(qF));
+
+/* Editing a trade: its chart on top, the position drawn from the form — and following it */
+console.log('  -- Edit trade: the position follows the form --');
+await p.evaluate(async () => { const { store } = await import('/js/store.js'); await store.updateTrade('g1', { oanda: { account: 'x', trade: '1' } }); });
+await go('#/trades', 300); await go('#/edit/g1', 300); await chartReady();
+const pos = () => p.evaluate(() => { const d = document.querySelector('.tc')?.__chart?.position(); return d && { type: d.type, entry: d.pts[0].p, sl: d.sl, tp: d.tp, pnl: d.closed?.pnl, always: d.style.always }; });
+const P0 = await pos();
+t('Edit opens with the trade’s chart, the position drawn: entry, stop, target, its own result, the labels on', P0 && P0.type === 'long' && P0.entry === G_IN && P0.sl === +(G_IN - 4.5).toFixed(2) && P0.tp === +(G_IN + 13.5).toFixed(2) && P0.pnl === 3000 && P0.always, JSON.stringify(P0));
+t('…the quiet chart, the Journal lit above', await p.evaluate(() => !!document.querySelector('.tc.is-minimal') && /Edit trade/.test(document.querySelector('.head').innerText) && document.querySelector('.tb-tab.is-on')?.dataset.section === 'journal'));
+const S2 = +(G_IN - 3).toFixed(2);
+await p.fill('input.is-stop', String(S2)); await settle(150);
+t('a new stop: the box follows at once', (await pos())?.sl === S2, JSON.stringify(await pos()));
+t('…and a synced trade’s risk follows it (its size is what OANDA filled): 1% × 3 ÷ 4.5', await p.inputValue('input.is-risk') === '0.6667', await p.inputValue('input.is-risk'));
+await p.fill('input.is-stop', String(+(G_IN - 4.5).toFixed(2))); await settle(100);
+const T2 = +(G_IN + 20).toFixed(2);
+await p.fill('input.is-target', String(T2)); await settle(150);
+t('a new target: the box follows', (await pos())?.tp === T2, JSON.stringify(await pos()));
+await p.click('.trade-form button.dir:not(.is-on)'); await settle(150);
+t('turned short: the box turns over', (await pos())?.type === 'short');
+await p.click('.trade-form button.dir:not(.is-on)'); await settle(150);
+await p.click('.head .btn-primary'); await settle(600);
+const g1r = await p.evaluate(async () => (await import('/js/store.js')).store.trades.find(x => x.id === 'g1'));
+t('saved with the target you set', g1r.takeProfit === T2 && await p.evaluate(() => location.hash === '#/trades'), JSON.stringify({ tp: g1r.takeProfit }));
+await go('#/new', 300);
+t('a new trade has no chart to show yet', await p.evaluate(() => !document.querySelector('.main .tc')));
+await p.evaluate(() => { window.__fullTradeChart = true; });
 
 t('no errors on the page', errs.length === 0, errs.slice(0, 3).join(' | '));
 await b.close();

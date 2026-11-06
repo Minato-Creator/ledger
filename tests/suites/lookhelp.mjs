@@ -72,7 +72,7 @@ export async function paletteNames(p) {
   return names;
 }
 
-/** '' (None) or a background's name ('Torii', 'Moon', 'Water'…). */
+/** '' (None) or a background's name ('Samurai Path', 'Rain'…). */
 export async function pickBackground(p, name) {
   await openLook(p, 'custom');
   await p.evaluate(n => [...document.querySelectorAll('.lk-bg')].find(b => (n ? b.title === n : b.classList.contains('is-none')))?.click(), name);

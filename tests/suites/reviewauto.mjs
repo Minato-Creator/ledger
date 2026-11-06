@@ -126,6 +126,7 @@ await p.addInitScript(({ ACCT, TR, PB }) => {
     ['data/trades.json', JSON.stringify({ version: 1, trades: TR })], ['data/playbook.json', JSON.stringify(PB)]]));
 }, { ACCT, TR, PB });
 await p.addInitScript(FAKE_FS);
+await p.addInitScript(() => { window.__fullTradeChart = true; });   // the trade page's chart with its tools (it is quiet by default)
 await p.goto('http://127.0.0.1:8777/index.html', { waitUntil: 'domcontentloaded' });
 await p.waitForSelector('.topbar', { timeout: 8000 });
 const settle = (ms = 300) => p.waitForTimeout(ms);

@@ -47,6 +47,7 @@ await p.addInitScript(({ ACCT, TR, PB, OLD, KEY }) => {
     ['data/drawings.json', JSON.stringify({ version: 1, lines: { XAU_USD: [OLD] } })]]));
 }, { ACCT, TR, PB, OLD, KEY });
 await p.addInitScript(FAKE_FS);
+await p.addInitScript(() => { window.__fullTradeChart = true; });   // the trade page's chart with its tools (it is quiet by default)
 await p.goto('http://127.0.0.1:8777/index.html', { waitUntil: 'domcontentloaded' });
 await p.waitForSelector('.topbar', { timeout: 8000 });
 const settle = (ms = 200) => p.waitForTimeout(ms);
@@ -214,7 +215,7 @@ await p.mouse.click(box.x + mid.x, box.y + mid.y); await settle(100);
 S = await C();
 t('click it: selected — two round handles at its ends', S.sel === T1.id && S.shapes.find(s => s.id === T1.id).handles.length === 2);
 await p.mouse.move(box.x + a1.x, box.y + a1.y); await settle(60);
-t('…over a handle, the move pointer', await p.evaluate(() => document.querySelector('.tc-plot').dataset.cursor === 'move'));
+t('…over a line’s end, the plain arrow, TradingView’s way', await p.evaluate(() => document.querySelector('.tc-plot').dataset.cursor === 'default'));
 await p.mouse.down(); await p.mouse.move(box.x + a1.x + 60, box.y + a1.y + 40, { steps: 5 }); await p.mouse.up(); await settle(200);
 let T1b = (await gold()).find(d => d.id === T1.id);
 t('drag a handle: that end moves, the other stays', T1b.pts[0].t === T1.pts[0].t && T1b.pts[0].p === T1.pts[0].p && T1b.pts[1].t > T1.pts[1].t && T1b.pts[1].p < T1.pts[1].p, JSON.stringify([T1.pts, T1b.pts]));

@@ -45,11 +45,19 @@ await p.waitForTimeout(500);
 
 console.log('  -- the shell --');
 await p.evaluate(() => { location.hash = '#/'; }); await p.waitForTimeout(400);
-ok('seven sections in the top bar', await p.evaluate(() => [...document.querySelectorAll('.tb-tab > span:not(.count)')].map(a => a.textContent).join(' · ')),
-   'Dashboard · Journal · Plan · Analytics · Lab · Replay · Playbook');
+ok('six sections in the top bar (the Playbook is in Settings)', await p.evaluate(() => [...document.querySelectorAll('.tb-tab > span:not(.count)')].map(a => a.textContent).join(' · ')),
+   'Dashboard · Journal · Plan · Analytics · Lab · Replay');
 ok('the one you are on is marked', await p.evaluate(() => document.querySelector('.tb-tab.is-on > span:not(.count)')?.textContent), 'Dashboard');
 await p.evaluate(() => { location.hash = '#/calendar'; }); await p.waitForTimeout(450);
 ok('the calendar is part of the journal', await p.evaluate(() => document.querySelector('.tb-tab.is-on > span:not(.count)')?.textContent), 'Journal');
+/* the Playbook: Settings → Trading, with the way back to Settings */
+await p.evaluate(() => { location.hash = '#/settings'; }); await p.waitForTimeout(450);
+ok('Settings → Trading lists the Playbook', await p.evaluate(() => { const g = [...document.querySelectorAll('.st-group')].find(x => /Trading/.test(x.textContent)); return !!g && [...g.querySelectorAll('.st-row')].some(r => /^\s*Playbook/.test(r.innerText)); }), true);
+await p.evaluate(() => { [...document.querySelectorAll('.st-row')].find(r => /^\s*Playbook/.test(r.innerText)).click(); }); await p.waitForTimeout(450);
+ok('…which opens it inside Settings, with the way back', await p.evaluate(() => location.hash === '#/settings/playbook' && /Playbook/.test(document.querySelector('.head h1')?.textContent) && !!document.querySelector('.head .st-back') && !document.querySelector('.tb-tab.is-on')), true);
+await p.evaluate(() => { location.hash = '#/playbook'; }); await p.waitForTimeout(450);
+ok('the old address still opens it', await p.evaluate(() => /Playbook/.test(document.querySelector('.head h1')?.textContent) && !!document.querySelector('.head .st-back')), true);
+await p.evaluate(() => { location.hash = '#/calendar'; }); await p.waitForTimeout(450);
 t('and the journal carries its count', await p.evaluate(() => document.querySelector('.tb-tab.is-on .count')?.textContent === '1'));
 ok('and the journal shares its tabs', await p.evaluate(() => [...document.querySelectorAll('.head .sn-tab')].map(a => a.textContent).join(' · ')), 'Trades · Calendar · Review');
 ok('with Calendar chosen', await p.evaluate(() => document.querySelector('.head .sn-tab.is-on')?.textContent), 'Calendar');
@@ -68,7 +76,7 @@ console.log('  -- opening the sheet --');
 await p.evaluate(() => { location.hash = '#/settings'; }); await p.waitForTimeout(400);
 await click('.st-row[data-row="Appearance"]', 600);
 t('Appearance opens as a sheet', await p.evaluate(() => !!document.querySelector('.sheet.is-look')));
-ok('four tabs', await p.evaluate(() => [...document.querySelectorAll('.lk-tabs .sn-tab')].map(x => x.textContent).join(' · ')), 'Themes · Colours · Custom · Money');
+ok('three tabs — no Colours', await p.evaluate(() => [...document.querySelectorAll('.lk-tabs .sn-tab')].map(x => x.textContent).join(' · ')), 'Themes · Custom · Money');
 ok('a new journal opens on Light', await attr('look'), 'light');
 ok('five themes to choose from', await p.evaluate(() => document.querySelectorAll('.lk-theme').length), 5);
 const lightFrame = await lum('body');
@@ -97,18 +105,13 @@ await click('.lk-actions .lk-icon[aria-label="Redo"]', 750);
 ok('redo comes forward', await attr('look'), 'midnight');
 await click('.lk-theme[data-theme-id="light"]', 750);
 
-console.log('  -- colours --');
-await click('.lk-tabs [data-tab="colours"]', 400);
-await click('.lk-dot[aria-label="Blue"]', 1300);
-ok('accent follows', await cssVar('--accent'), '#2563EB');
-ok('and the primary buttons wear it', await p.evaluate(() => getComputedStyle(document.querySelector('.lk-save')).backgroundColor), 'rgb(37, 99, 235)');
-await p.evaluate(() => [...document.querySelectorAll('.lk-opts .lk-opt')].find(b => /Navy/.test(b.textContent))?.click()); await p.waitForTimeout(500);
-ok('text tone follows', (await cssVar('--ink')).toUpperCase(), '#0F1C36');
+console.log('  -- the font, in Custom --');
+await click('.lk-tabs [data-tab="custom"]', 400);
+ok('the accent is the theme’s own ink', (await cssVar('--accent')).toUpperCase(), '#0E0F11');
+t('Font sits in Custom', await p.evaluate(() => [...document.querySelectorAll('.lk-sec h3')].some(h => h.textContent === 'Font') && document.querySelectorAll('.lk-fonts .lk-font').length === 5));
 await p.evaluate(() => [...document.querySelectorAll('.lk-fonts .lk-font')].find(b => /Geist/.test(b.textContent))?.click()); await p.waitForTimeout(500);
 ok('the font changes', await attr('font'), 'geist');
 t('everywhere', /Geist/.test(await p.evaluate(() => getComputedStyle(document.body).fontFamily)));
-await p.evaluate(() => [...document.querySelectorAll('.lk-opts .lk-opt')].find(b => /Accent/.test(b.textContent))?.click()); await p.waitForTimeout(500);
-t('lines can take the accent', /37, 99, 235/.test(await cssVar('--line')), await cssVar('--line'));
 
 console.log('  -- money --');
 await click('.lk-tabs [data-tab="money"]', 400);
@@ -137,7 +140,7 @@ ok('two looks saved', await p.evaluate(() => document.querySelectorAll('.lk-save
 await p.evaluate(() => [...document.querySelectorAll('.lk-saved-row')].find(r => /Day/.test(r.textContent))?.querySelector('.lk-apply')?.click());
 await p.waitForTimeout(800);
 ok('wearing one puts it all back', await attr('look'), 'light');
-ok('accent included', await cssVar('--accent'), '#2563EB');
+ok('font included', await attr('font'), 'geist');
 
 const hm = d => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 const now = new Date(await p.evaluate(() => Date.now()));
@@ -160,7 +163,6 @@ t('Escape closes the sheet', await p.evaluate(() => !document.querySelector('.sh
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('.welcome-title, .topbar', { timeout: 8000 });
 ok('theme survived a reload', await attr('look'), 'light');
-ok('accent survived', await cssVar('--accent'), '#2563EB');
 ok('font survived', await attr('font'), 'geist');
 await p.evaluate(() => { location.hash = '#/settings'; }); await p.waitForTimeout(400);
 await click('.st-row[data-row="Appearance"]', 600);

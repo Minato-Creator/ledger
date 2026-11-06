@@ -1,26 +1,25 @@
 /* ============================================================
    appearance.js — the Appearance sheet.
 
-   Everything about how Laminar looks, in one place, laid out in four tabs:
+   Everything about how Laminar looks, in one place, laid out in three tabs:
    Themes (the frame, page and cards, your saved looks, day and night),
-   Colours (accent, text tone, lines, typeface), Custom (the video behind
-   it all, glass, motion, the colours of your setups) and Money (what a win,
+   Custom (the video behind it all, the writing, the typeface, glass) and Money (what a win,
    a loss and a scratch are drawn in, and the guardrails).
 
    Every change is applied the moment it is made and kept in an undo trail
    for as long as the sheet is open. Nothing here is a draft: close the sheet
    and the look is the one you left it on.
    ============================================================ */
-import { el, icon, toast, confirmButton } from '../ui.js';
+import { el, svg, icon, toast, confirmButton, MARK_G } from '../ui.js';
 import * as c from '../calc.js';
 import { sheet } from '../sheet.js';
-import { BACKGROUNDS, findBackground } from '../backgrounds.js';
+import { BACKGROUNDS, findBackground, FADES, fadeCss } from '../backgrounds.js';
 import { probeVideo, nameFrom } from '../clip.js';
-import { playable } from '../store.js';
+import { playable, backgroundOf, bgSlot, bgSwap, bgClear } from '../store.js';
 import { glide } from '../shell.js';
 import {
-  THEMES, themeOf, ACCENTS, TONES, LINES, FONTS, fontOf, MOTIONS,
-  tokensFor, swatchesOf, describeLook, isHex, inkFor,
+  THEMES, themeOf, FONTS, fontOf,
+  tokensFor, swatchesOf, describeLook,
 } from '../look.js';
 
 /* One palette for money colours. Any colour may be a win and any a loss —
@@ -53,25 +52,70 @@ const MONEY_PRESETS = [
   ['Colour-blind safe', { profit: '#2563EB', loss: '#F97316', flat: '' }],
 ];
 
-const TABS = [['themes', 'Themes'], ['colours', 'Colours'], ['custom', 'Custom'], ['money', 'Money']];
+const TABS = [['themes', 'Themes'], ['custom', 'Custom'], ['money', 'Money']];
 let lastTab = 'themes';
 
 /* ============================================================ */
 export function openAppearance(store, nav, { tab } = {}) {
-  const st = { tab: tab || lastTab, past: [], future: [], naming: false, menu: null };
+  const st = { tab: TABS.some(([k]) => k === (tab || lastTab)) ? (tab || lastTab) : 'custom', past: [], future: [], naming: false, menu: null, picked: null };
   const body = el('div', { class: 'lk' });
   let refreshTimer;
-  const refreshApp = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => nav.refresh(), 140); };
+  const refreshApp = (ms = 140) => { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => nav.refresh(), ms); };
 
   /* Every change goes through here: remember the look before it, make it,
      redraw. An origin (the click) makes a theme change spread from where you
-     clicked, where the browser can. */
-  async function change(fn, origin) {
+     clicked, where the browser can. A background has no origin: it fades in
+     over the last one, behind the app and in the preview, and the app under
+     the sheet is redrawn only once that is done (`settle`), so nothing
+     competes with the fade. */
+  async function change(fn, origin, { settle = 140 } = {}) {
     st.past.push(store.snapshotLook());
     if (st.past.length > 40) st.past.shift();
     st.future = [];
     await reveal(origin, fn);
-    paint(); refreshApp();
+    paint(); refreshApp(settle);
+  }
+  const BG_SETTLE = 760;
+
+  /* ---------- the preview of the background ----------
+     The dashboard, drawn lightly on the picture: the top bar, a heading,
+     three figures, the curve and a short list — panels in the theme and glass
+     you have, the writing on the picture in the colour Text picked. The
+     picture is the still (the clip itself is playing behind the sheet). One
+     piece for as long as the sheet is open: a new background fades in over
+     the last, as it does behind the app. */
+  let pv = null;
+  function preview() {
+    const look = store.look, th = themeOf(look.theme), t = tokensFor(look);
+    if (!pv) {
+      pv = { el: el('div', { class: 'lk-pv' }), key: null };
+      pv.scrim = el('i', { class: 'lk-pv-scrim', 'aria-hidden': 'true' });
+      pv.el.append(pv.scrim, dashboardSketch());
+    }
+    const id = store.hasBackground ? store.background : '';
+    const bg = id ? backgroundOf(id, store.fade) : null;
+    const key = !bg ? '' : bg.fade ? 'fade:' + fadeCss(bg.fade) : bg.src;
+    if (key !== pv.key) {
+      const first = pv.key == null;
+      pv.key = key;
+      if (bg) bgSwap(pv.el, bgSlot(bg, { still: true }), { before: pv.scrim, instant: first }); else bgClear(pv.el);
+    }
+    pv.el.classList.toggle('has-pic', !!bg);
+    const glass = store.glass, clear = store.glassMode === 'clear';
+    const pic = document.documentElement.dataset.picInk;
+    const onPic = !bg ? t['--ink'] : pic === 'white' ? '#FFFFFF' : pic === 'black' ? '#111214' : pic === 'grey-l' ? '#DCDDE2' : pic === 'grey-d' ? '#3A3B40' : t['--ink'];
+    const v = {
+      '--pv-frame': th.frame,
+      '--pv-panel': !glass ? th.card : clear ? (th.paper ? 'rgba(255,255,255,calc(.66 - .6 * var(--clear-k, .65)))' : 'rgba(10,10,12,calc(.55 - .51 * var(--clear-k, .65)))')
+        : (th.paper ? 'rgba(255,255,255,.6)' : 'rgba(12,12,14,.55)'),
+      '--pv-blur': !glass ? 'none' : clear ? 'blur(calc(3px - 2.6px * var(--clear-k, .65)))' : 'blur(8px)',
+      '--pv-edge': th.paper ? '0 1px 2px rgba(0,0,0,.06), inset 0 0 0 1px rgba(0,0,0,.05)' : 'inset 0 0 0 1px rgba(255,255,255,.07)',
+      '--pv-ink': t['--ink'], '--pv-ink-4': t['--ink-4'], '--pv-on-pic': onPic,
+      '--pv-win': store.colours.profit, '--pv-loss': store.colours.loss,
+      '--pv-font': fontOf(look.font).stack,
+    };
+    for (const [k, val] of Object.entries(v)) pv.el.style.setProperty(k, val);
+    return pv.el;
   }
   async function travel(from, to) {
     if (!from.length) return;
@@ -81,33 +125,30 @@ export function openAppearance(store, nav, { tab } = {}) {
     paint(); refreshApp();
   }
 
-  function paint() {
+  /* fresh: the sheet has just opened or the tab has just changed, so the page comes in; any other change
+     redraws it as it stands — nothing slides or fades again because a switch was flipped */
+  function paint({ fresh = false } = {}) {
     const look = store.look;
     const scroller = body.querySelector('.lk-scroll');
-    const y = scroller ? scroller.scrollTop : 0;
+    const y = scroller && !fresh ? scroller.scrollTop : 0;
     body.replaceChildren(
-      hero(store, look),
-      el('button', { class: 'sheet-x lk-close', 'aria-label': 'Close', title: 'Close', onClick: () => api?.close() },
-        icon('close', 14, 'currentColor', 2)),
+      el('div', { class: 'lk-top' },
+        tabsRow(),
+        el('div', { class: 'lk-actions' },
+          el('button', { class: 'lk-icon', title: 'Undo', 'aria-label': 'Undo', disabled: !st.past.length,
+            onClick: () => travel(st.past, st.future) }, icon('undo', 15, 'currentColor', 1.8)),
+          el('button', { class: 'lk-icon', title: 'Redo', 'aria-label': 'Redo', disabled: !st.future.length,
+            onClick: () => travel(st.future, st.past) }, icon('redo', 15, 'currentColor', 1.8))),
+        el('button', { class: 'sheet-x lk-close', 'aria-label': 'Close', title: 'Close', onClick: () => api?.close() },
+          icon('close', 14, 'currentColor', 2))),
       el('div', { class: 'lk-scroll' },
-        el('div', { class: 'lk-top' },
-          el('h2', { class: 'lk-title' }, TABS.find(([k]) => k === st.tab)[1]),
-          el('div', { class: 'lk-sub' }, describeLook(look)),
-          el('div', { class: 'lk-actions' },
-            el('button', { class: 'lk-icon', title: 'Undo', 'aria-label': 'Undo', disabled: !st.past.length,
-              onClick: () => travel(st.past, st.future) }, icon('undo', 15, 'currentColor', 1.8)),
-            el('button', { class: 'lk-icon', title: 'Redo', 'aria-label': 'Redo', disabled: !st.future.length,
-              onClick: () => travel(st.future, st.past) }, icon('redo', 15, 'currentColor', 1.8)),
-            st.naming ? nameField() : el('button', { class: 'btn btn-primary lk-save', onClick: () => { st.naming = true; paint(); body.querySelector('.lk-name input')?.focus(); } },
-              icon('bookmark', 14, 'currentColor', 1.8), 'Save this look')),
-          tabsRow()),
-        el('div', { class: 'lk-body', 'data-tab': st.tab },
-          st.tab === 'themes' ? themesTab() : st.tab === 'colours' ? coloursTab()
-          : st.tab === 'custom' ? customTab() : moneyTab()),
+        el('div', { class: 'lk-body' + (fresh ? ' is-new' : ''), 'data-tab': st.tab },
+          st.tab === 'themes' ? themesTab() : st.tab === 'custom' ? customTab() : moneyTab()),
         el('div', { class: 'lk-foot' },
-          el('span', {}, `${themeOf(look.theme).name} theme`),
+          el('span', {}, describeLook(look)),
           el('button', { class: 'lk-reset', onClick: e => change(() => store.resetLook(), e) },
             icon('refresh', 13, 'currentColor', 1.8), 'Reset to default'))));
+    st.picked = null;
     const sc = body.querySelector('.lk-scroll');
     if (sc) sc.scrollTop = y;
   }
@@ -129,7 +170,7 @@ export function openAppearance(store, nav, { tab } = {}) {
     const glider = el('span', { class: 'sn-glide', 'aria-hidden': 'true' });
     const links = TABS.map(([k, label]) => el('button', { class: 'sn-tab' + (st.tab === k ? ' is-on' : ''), role: 'tab',
       'aria-selected': String(st.tab === k), 'data-tab': k,
-      onClick: () => { if (st.tab !== k) { st.tab = k; lastTab = k; paint(); body.querySelector('.lk-scroll').scrollTop = 0; } } }, label));
+      onClick: () => { if (st.tab !== k) { st.tab = k; lastTab = k; paint({ fresh: true }); } } }, label));
     const bar = el('div', { class: 'subnav lk-tabs', role: 'tablist' }, glider, ...links);
     glide(bar, 'look-tabs', links.find(l => l.classList.contains('is-on')), glider);
     return bar;
@@ -138,10 +179,12 @@ export function openAppearance(store, nav, { tab } = {}) {
   /* ---------------- Themes ---------------- */
   function themesTab() {
     const look = store.look;
-    const cards = THEMES.map(th => {
+    const cards = THEMES.map((th, i) => {
       const on = look.theme === th.id;
-      return el('button', { class: 'lk-theme' + (on ? ' is-on' : ''), 'data-theme-id': th.id, 'aria-pressed': String(on),
-          onClick: e => { if (!on) change(() => store.setLook({ theme: th.id }), e); } },
+      /* the one just chosen settles into its ring; the rest are as they were */
+      return el('button', { class: 'lk-theme' + (on ? ' is-on' : '') + (on && st.picked === th.id ? ' is-picked' : ''), 'data-theme-id': th.id, 'aria-pressed': String(on),
+          style: { '--i': String(i) },
+          onClick: e => { if (!on) { st.picked = th.id; change(() => store.setLook({ theme: th.id }), e); } } },
         miniApp({ ...look, theme: th.id }, store),
         el('div', { class: 'lk-theme-t' },
           el('div', {}, el('div', { class: 'lk-theme-n' }, th.name), el('div', { class: 'lk-theme-d' }, th.note)),
@@ -170,10 +213,10 @@ export function openAppearance(store, nav, { tab } = {}) {
       el('div', { class: 'lk-themes' }, ...cards),
 
       section('Your looks', 'Saves the theme, the accent, the money colours and the background together.',
-        el('div', { class: 'lk-row-btns' },
-          el('button', { class: 'btn btn-quiet', onClick: () => file.click() }, icon('upload', 13, 'currentColor', 1.8), 'Import look'),
-          el('button', { class: 'btn btn-quiet', onClick: () => { st.naming = true; paint(); body.querySelector('.lk-name input')?.focus(); } },
-            icon('bookmark', 13, 'currentColor', 1.8), 'Save this look'), file),
+        st.naming ? nameField() : el('div', { class: 'lk-row-btns' },
+          el('button', { class: 'btn btn-quiet lk-save', onClick: () => { st.naming = true; paint(); body.querySelector('.lk-name input')?.focus(); } },
+            icon('bookmark', 13, 'currentColor', 1.8), 'Save this look'),
+          el('button', { class: 'btn btn-quiet', onClick: () => file.click() }, icon('upload', 13, 'currentColor', 1.8), 'Import look'), file),
         saved.length
           ? el('div', { class: 'lk-saved' }, ...saved.map(s => savedRow(s)))
           : el('div', { class: 'lk-empty' }, 'Nothing saved yet. Set a theme and colours you like, then save them here.')),
@@ -206,53 +249,9 @@ export function openAppearance(store, nav, { tab } = {}) {
       el('button', { class: 'btn btn-quiet lk-apply', onClick: e => change(() => store.restoreLook(s), e) }, 'Wear'));
   }
 
-  /* ---------------- Colours ---------------- */
-  function coloursTab() {
+  /* ---------------- the typeface (in Custom; the Colours tab is gone) ---------------- */
+  function fontSection() {
     const look = store.look;
-    const th = themeOf(look.theme);
-    const custom = (val, onPick, label) => {
-      const input = el('input', { type: 'color', value: val, 'aria-label': label,
-        onChange: e => onPick(e.target.value.toUpperCase()) });
-      return input;
-    };
-
-    const accents = el('div', { class: 'lk-accents' }, ...ACCENTS.map(([k, name, hex]) => {
-      const on = look.accent === k;
-      const fill = k === 'mono' ? (th.paper ? tokensFor(look)['--ink'] : '#F4F4F6') : k === 'custom' ? null : hex;
-      if (k === 'custom') {
-        const pick = custom(look.accentCustom, v => change(() => store.setLook({ accent: 'custom', accentCustom: v })), 'Your own accent');
-        return el('label', { class: 'lk-dot is-rainbow' + (on ? ' is-on' : ''), title: name },
-          pick, on ? el('span', { class: 'lk-dot-fill', style: { background: look.accentCustom } }) : null,
-          on ? icon('check', 13, inkFor(look.accentCustom), 2.6) : null);
-      }
-      return el('button', { class: 'lk-dot' + (on ? ' is-on' : ''), title: name, 'aria-label': name, style: { background: fill },
-        onClick: e => { if (!on) change(() => store.setLook({ accent: k }), e); } },
-        on ? icon('check', 13, inkFor(fill), 2.6) : null);
-    }));
-
-    const tones = el('div', { class: 'lk-opts lk-opts-3' + (th.paper ? '' : ' is-dim') }, ...TONES.map(([k, name, hex]) => {
-      const on = look.text === k;
-      if (k === 'custom') {
-        return el('label', { class: 'lk-opt' + (on ? ' is-on' : '') },
-          custom(look.textCustom, v => change(() => store.setLook({ text: 'custom', textCustom: v })), 'Your own text colour'),
-          el('span', { class: 'lk-rainbow-s' }), el('span', {}, name));
-      }
-      return el('button', { class: 'lk-opt' + (on ? ' is-on' : ''), onClick: () => { if (!on) change(() => store.setLook({ text: k })); } },
-        el('b', { style: { color: hex } }, 'Aa'), el('span', {}, name));
-    }));
-
-    const lines = el('div', { class: 'lk-opts lk-opts-2' }, ...LINES.map(([k, name]) => {
-      const on = look.lines === k;
-      const sample = tokensFor({ ...look, lines: k })['--line'];
-      if (k === 'custom') {
-        return el('label', { class: 'lk-opt' + (on ? ' is-on' : '') },
-          custom(look.linesCustom, v => change(() => store.setLook({ lines: 'custom', linesCustom: v })), 'Your own line colour'),
-          el('i', { class: 'lk-line', style: { background: look.linesCustom } }), el('span', {}, name));
-      }
-      return el('button', { class: 'lk-opt' + (on ? ' is-on' : ''), onClick: () => { if (!on) change(() => store.setLook({ lines: k })); } },
-        el('i', { class: 'lk-line', style: { background: sample } }), el('span', {}, name));
-    }));
-
     const fonts = el('div', { class: 'lk-opts lk-opts-2 lk-fonts' }, ...FONTS.map(f => {
       const on = look.font === f.id;
       return el('button', { class: 'lk-font' + (on ? ' is-on' : ''), style: { fontFamily: f.stack },
@@ -261,18 +260,11 @@ export function openAppearance(store, nav, { tab } = {}) {
         el('span', { class: 'lk-font-n' }, f.name),
         el('span', { class: 'lk-font-x' }, '+$4,320'));
     }));
-
-    return el('div', {},
-      section('Accent', 'Buttons, highlights and the page you are on.', accents),
-      section('Text', th.paper ? 'For Light and Platinum. Every tone is checked to stay easy to read.'
-                               : 'For Light and Platinum — the dark themes keep their own white.', tones),
-      section('Lines', 'The fading lines between rows and sections.', lines),
-      section('Font', 'For the whole journal.', fonts));
+    return section('Font', 'For the whole journal.', fonts);
   }
 
   /* ---------------- Custom ---------------- */
   function customTab() {
-    const look = store.look;
     const bg = store.hasBackground ? store.background : '';
     const mine = store.bgVideos;
     const upload = el('input', { type: 'file', accept: 'video/*', multiple: true, hidden: true,
@@ -297,11 +289,11 @@ export function openAppearance(store, nav, { tab } = {}) {
     const tile = (id, label, poster, src, extra = {}) => {
       const node = el('button', {
           class: 'lk-bg' + (bg === id ? ' is-on' : '') + (extra.cls || ''), title: label, 'data-bgid': id,
-          style: poster ? { backgroundImage: `url("${poster}")` } : {},
+          style: extra.image ? { backgroundImage: extra.image } : poster ? { backgroundImage: `url("${poster}")` } : {},
           onClick: e => { if (e.target.closest('.lk-bg-x')) return; if (bg !== id) change(async () => {
             const introduced = await store.setBackground(id);
             if (introduced) toast('Clear glass turned on so the video shows through — change it under Glass');
-          }, e); } },
+          }, null, { settle: BG_SETTLE }); } },
         el('span', { class: 'lk-bg-n' }, label), extra.remove || null);
       if (src) {
         let v = null;
@@ -321,7 +313,7 @@ export function openAppearance(store, nav, { tab } = {}) {
       className: 'lk-bg-x', armedClassName: 'lk-bg-x is-armed',
       onConfirm: () => change(async () => { await store.removeBgVideo(v.id); toast('Removed'); }) });
 
-    const dim = store.bgDim ?? findBackground(store.background)?.scrim ?? 0.4;
+    const dim = store.bgDim ?? findBackground(store.background)?.scrim ?? (store.background === 'fade' ? 0 : 0.4);
     const dimOut = el('span', { class: 'lk-val' }, Math.round(dim * 100) + '%');
     const dimRange = el('input', { type: 'range', min: 0, max: 0.85, step: 0.01, value: dim, class: 'sh-range lk-range',
       onInput: e => { const v = Number(e.target.value); dimOut.textContent = Math.round(v * 100) + '%'; e.target.style.setProperty('--p', (v / 0.85 * 100) + '%');
@@ -329,11 +321,30 @@ export function openAppearance(store, nav, { tab } = {}) {
       onChange: e => store.setBgDim(Number(e.target.value)) });
     dimRange.style.setProperty('--p', (dim / 0.85 * 100) + '%');
 
+    /* Fade: a few to start from, and the two colours themselves */
+    function fadeRow() {
+      const f = store.fade;
+      const pick = (which, label) => el('label', { class: 'lk-fade-c', title: label },
+        el('span', { class: 'lk-fade-sw', style: { background: f[which] } }),
+        el('span', { class: 'lk-fade-k' }, label, el('b', {}, f[which])),
+        el('input', { type: 'color', value: f[which].toLowerCase(), 'aria-label': label,
+          onChange: e => change(() => store.setFade({ [which]: e.target.value.toUpperCase() }), null, { settle: BG_SETTLE }) }));
+      return el('div', { class: 'lk-fade' },
+        el('div', { class: 'lk-fade-presets' }, ...FADES.map(([name, a, b]) => {
+          const on = f.a === a && f.b === b;
+          return el('button', { class: 'lk-dot lk-fade-p' + (on ? ' is-on' : ''), title: name, 'aria-label': name,
+            style: { backgroundImage: fadeCss({ a, b }) },
+            onClick: () => { if (!on) change(() => store.setFade({ a, b }), null, { settle: BG_SETTLE }); } });
+        })),
+        el('div', { class: 'lk-fade-pair' }, pick('a', 'From'), pick('b', 'Into')));
+    }
+
     /* what Auto (or Grey) settled on for this picture, said plainly */
     function picInkNote() {
       const k = document.documentElement.dataset.picInk;
       const now = k === 'white' ? 'white' : k === 'black' ? 'black' : k === 'grey-l' ? 'light grey' : k === 'grey-d' ? 'dark grey' : 'the theme’s';
-      return store.picInk === 'auto' || store.picInk === 'grey' ? `On this picture that is ${now}.` : '';
+      if (!bg) return store.picInk === 'auto' ? 'With nothing behind, Auto keeps the theme’s writing and only turns see-through panels that need it.' : '';
+      return store.picInk === 'auto' || store.picInk === 'grey' ? `On this ${bg === 'fade' ? 'fade' : 'picture'} that is ${now}.` : '';
     }
     /* How clear Clear is: the panels' tint and blur, live as you drag */
     function clarityRow() {
@@ -348,34 +359,27 @@ export function openAppearance(store, nav, { tab } = {}) {
       return el('div', { class: 'lk-dim' }, el('span', { class: 'lk-dim-k' }, 'Clarity'), range, out);
     }
 
-    const setups = store.playbook.setups || [];
     return el('div', {},
       section('Background', 'A video on a loop behind the whole journal, muted.',
-        el('div', { class: 'lk-bgprev' }, miniApp(look, store, { picture: true })),
+        preview(),
         el('div', { class: 'lk-bgs' },
           tile('', 'None', null, null, { cls: ' is-none' }),
+          tile('fade', 'Fade', null, null, { image: fadeCss(store.fade) }),
           ...BACKGROUNDS.map(b => tile(b.id, b.name, b.poster, () => playable(b.src))),
           ...mine.map(v => tile('yours:' + v.id, v.name, v.thumb, () => store.bgVideoUrl(v.id), { remove: removeBtn(v) })),
           el('button', { class: 'lk-bg is-add', onClick: () => upload.click(), title: 'Add a video of your own' },
             icon('plus', 18, 'currentColor', 1.8), el('span', { class: 'lk-bg-n' }, 'Add video')),
           upload),
         mine.length ? el('div', { class: 'lk-note' }, 'Yours are kept in your journal folder, so they go wherever it goes.') : null,
+        bg === 'fade' ? fadeRow() : null,
         bg ? el('div', { class: 'lk-dim' }, el('span', { class: 'lk-dim-k' }, 'Dim'), dimRange, dimOut) : null),
-      bg ? section('Text', 'For the writing on the picture — the top bar, the top of every page and, with Clear glass, the panels too. Auto reads the picture and picks white or black; Grey is the softer of the two; Theme keeps the theme’s own.',
+      section('Text', 'White or Black writes everything in it — the top bar, every page and the panels, which turn dark behind white and light behind black so it always reads. Auto reads what is behind and picks; Grey is the softer of the two; Theme keeps the theme’s own.',
         el('div', { class: 'lk-pic-ink' }, segRow(PIC_INK_LABELS, store.picInk, v => change(() => store.setPicInk(v)))),
-        (() => { const n = el('div', { class: 'lk-note lk-pic-note' }, picInkNote()); setTimeout(() => { n.textContent = picInkNote(); }, 450); return n; })()) : null,
+        (() => { const n = el('div', { class: 'lk-note lk-pic-note' }, picInkNote()); setTimeout(() => { n.textContent = picInkNote(); }, 450); return n; })()),
+      fontSection(),
       section('Glass', 'Frosted blurs the video behind the panels; Clear lets it show through.',
         segRow([['off', 'Solid'], ['frosted', 'Frosted'], ['clear', 'Clear']], store.glassMode, v => change(() => store.setGlass(v))),
-        store.glassMode === 'clear' ? clarityRow() : null),
-      section('Motion', 'Pages arriving, figures writing themselves in, tabs that slide.',
-        segRow(MOTIONS, look.motion, v => change(() => store.setLook({ motion: v }))),
-        el('div', { class: 'lk-note' }, look.motion === 'calm' ? 'Cards still arrive; figures stay put.'
-          : look.motion === 'off' ? 'Everything appears at once.' : 'Everything moves, briefly.')),
-      setups.length ? section('Setup colours', 'The chip each setup wears on a trade, in the calendar and in Analytics.',
-        el('div', { class: 'lk-chips' }, ...setups.map(su => el('label', { class: 'lk-chip' },
-          el('input', { type: 'color', value: isHex(su.color) ? su.color : '#9A9A9A', 'aria-label': `${su.name} colour`,
-            onChange: async e => { su.color = e.target.value.toUpperCase(); await store.save('playbook'); paint(); refreshApp(); } }),
-          el('i', { style: { background: su.color } }), el('span', {}, su.name))))) : null);
+        store.glassMode === 'clear' ? clarityRow() : null));
   }
 
   /* ---------------- Money ---------------- */
@@ -442,60 +446,48 @@ export function openAppearance(store, nav, { tab } = {}) {
   }
 
   let api = null;
-  paint();
+  paint({ fresh: true });
   api = sheet({ cls: 'is-look', body, label: 'Appearance', onClose: () => nav.refresh() });
 }
 
-/* ---------- the hero: the font, and the look fanned out as cards ---------- */
-function hero(store, look) {
-  const sw = swatchesOf(look);
-  const tok = tokensFor(look);
-  const all = [...sw, tok['--ink-4'] || '#888888'];
-  const font = fontOf(look.font);
-  return el('div', { class: 'lk-hero' },
-    el('div', { class: 'lk-aa', style: { fontFamily: font.stack } }, 'Aa', el('span', {}, font.name.toUpperCase())),
-    el('div', { class: 'lk-fan', 'aria-hidden': 'true' }, ...all.slice(0, 7).map((h, i) => el('span', {
-      class: 'lk-fan-c', style: { background: h, color: isHex(h) ? inkFor(h) : 'var(--ink)', '--k': String(i) } },
-      String(h).replace('#', '')))));
+/* The dashboard in outline, for the background's preview: the shapes of the
+   real one and a few figures, nothing to read beyond that. Colours come from
+   the --pv-* properties preview() sets, so one sketch serves every look. */
+function dashboardSketch() {
+  const curve = 'M0 52 C12 50 18 44 28 45 S44 50 56 41 S74 30 86 33 S104 36 116 25 S136 14 148 18 S170 10 184 6 L200 4';
+  const stat = (k, n, cls = '') => el('div', { class: 'lk-pv-p lk-pv-stat' }, el('span', { class: 'lk-pv-k' }, k), el('b', { class: cls }, n));
+  const li = (win, w, n) => el('div', { class: 'lk-pv-li' }, el('i', { class: win ? 'is-win' : 'is-loss' }), el('em', { style: { width: w + '%' } }), el('b', { class: win ? 'is-win' : 'is-loss' }, n));
+  return el('div', { class: 'lk-pv-dash', 'aria-hidden': 'true' },
+    el('div', { class: 'lk-pv-top' },
+      el('span', { class: 'lk-pv-mark' }, (() => { const m = svg('svg', { viewBox: '-2 -2 126 159', fill: 'currentColor' }); m.innerHTML = MARK_G; return m; })()),
+      el('span', { class: 'lk-pv-nav' }, ...[1, 0, 0, 0, 0].map(on => el('i', { class: on ? 'is-on' : '' }))),
+      el('span', { class: 'lk-pv-you' })),
+    el('div', { class: 'lk-pv-h' }, 'Dashboard'),
+    el('div', { class: 'lk-pv-stats' }, stat('Net P&L', '+$16,480', 'is-win'), stat('Win rate', '62%'), stat('Average', '+1.8R')),
+    el('div', { class: 'lk-pv-row' },
+      el('div', { class: 'lk-pv-p lk-pv-chart' }, el('span', { class: 'lk-pv-k' }, 'Equity'),
+        svg('svg', { viewBox: '0 0 200 60', preserveAspectRatio: 'none' },
+          svg('defs', {}, svg('linearGradient', { id: 'lk-pv-fill', x1: 0, y1: 0, x2: 0, y2: 1 },
+            svg('stop', { offset: '0', 'stop-color': 'var(--pv-win)', 'stop-opacity': '.28' }), svg('stop', { offset: '1', 'stop-color': 'var(--pv-win)', 'stop-opacity': '0' }))),
+          svg('path', { d: curve + ' L200 60 L0 60 Z', fill: 'url(#lk-pv-fill)' }),
+          svg('path', { d: curve, fill: 'none', stroke: 'var(--pv-win)', 'stroke-width': 2, 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }))),
+      el('div', { class: 'lk-pv-p lk-pv-list' }, el('span', { class: 'lk-pv-k' }, 'Recent'),
+        li(true, 62, '+2.1R'), li(false, 48, '−1R'), li(true, 70, '+3.4R'), li(true, 40, '+1.2R'))));
 }
 
-/* A tiny Laminar in a given look, drawn with that look's own colours. */
-function miniApp(look, store, { picture = false } = {}) {
+/* A tiny Laminar in a given look, drawn with that look's own colours (the theme tiles). */
+function miniApp(look, store) {
   const th = themeOf(look.theme);
   const t = tokensFor(look);
   const page = th.page === 'transparent' ? th.frame : th.page;
   const col = store.colours;
   const acc = t['--accent'];
   const bars = [0.62, 0.34, 0.86, 0.22, 0.74, 0.46, 0.9];
-  const bg = picture && store.hasBackground ? store.background : '';
-  const ours = bg && !bg.startsWith('yours:') ? findBackground(bg) : null;
-  const pic = !bg ? null : ours ? (ours.poster || null) : (store.bgVideos.find(v => 'yours:' + v.id === bg)?.thumb || null);
-  /* The still, filling the frame once (backgroundColor, not the shorthand,
-     which would put the size back to auto and tile a small still), and the
-     video itself over it, playing the way it plays behind the journal. */
-  let clip = null;
-  if (bg && picture) {
-    clip = el('video', { class: 'lk-ma-v', muted: true, loop: true, playsinline: true, 'aria-hidden': 'true' });
-    clip.muted = true;
-    const want = ours ? playable(ours.src) : store.bgVideoUrl(bg.slice(6));
-    Promise.resolve(want).then(url => {
-      if (!url || !clip.isConnected && !clip.parentNode) return;
-      clip.src = url;
-      if (document.documentElement.dataset.motion !== 'off' && !matchMedia('(prefers-reduced-motion: reduce)').matches) clip.play().catch(() => {});
-    });
-  }
-  /* Clear's tint follows the same --clear-k the journal does, so the Clarity
-     slider moves this card as it moves the real ones */
-  const clearTint = th.paper ? 'rgba(255,255,255,calc(.66 - .6 * var(--clear-k, .65)))' : 'rgba(10,10,12,calc(.55 - .51 * var(--clear-k, .65)))';
-  return el('div', { class: 'lk-mini-app' + (pic ? ' has-pic' : ''),
-      style: { backgroundColor: th.frame, backgroundImage: pic ? `url("${pic}")` : 'none' } },
-    clip, clip ? el('i', { class: 'lk-ma-scrim', 'aria-hidden': 'true' }) : null,
+  return el('div', { class: 'lk-mini-app', style: { backgroundColor: th.frame } },
     el('div', { class: 'lk-ma-top' }, ...[0, 1, 2, 3, 4].map(i => el('i', { style: { background: i === 1 ? t['--ink'] : t['--ink-4'], opacity: i === 1 ? 0.9 : 0.5 } }))),
-    el('div', { class: 'lk-ma-body', style: { background: picture && store.glass ? 'transparent' : page } },
+    el('div', { class: 'lk-ma-body', style: { background: page } },
       el('div', { class: 'lk-ma-side' }, ...[0, 1, 2, 3].map(i => el('i', { style: { background: t['--ink-4'], width: (80 - i * 12) + '%' } }))),
-      el('div', { class: 'lk-ma-card', style: { background: picture && store.glass ? (store.glassMode === 'clear' ? clearTint : (th.paper ? 'rgba(255,255,255,.6)' : 'rgba(12,12,14,.55)')) : th.card,
-          backdropFilter: picture && store.glass ? (store.glassMode === 'clear' ? 'blur(calc(4px - 3.5px * var(--clear-k, .65)))' : 'blur(8px)') : 'none',
-          color: t['--ink'], fontFamily: fontOf(look.font).stack, boxShadow: th.paper ? '0 1px 2px rgba(0,0,0,.06)' : 'none' } },
+      el('div', { class: 'lk-ma-card', style: { background: th.card, color: t['--ink'], fontFamily: fontOf(look.font).stack, boxShadow: th.paper ? '0 1px 2px rgba(0,0,0,.06)' : 'none' } },
         el('i', { class: 'lk-ma-k', style: { background: t['--ink-4'] } }),
         el('b', {}, '+$16,480'),
         el('div', { class: 'lk-ma-bars', style: { background: t['--grey-9'] || 'transparent' } },

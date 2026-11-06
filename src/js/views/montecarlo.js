@@ -101,7 +101,7 @@ export function mcPage(ctx) {
    The answer, from the headline down
    ============================================================ */
 function answer(sim, rs, D, o) {
-  const { risk, limit, H, acct } = o;
+  const { risk, limit, H } = o;
   const P = (arr, q) => M.pctile(arr, q);
   const fin = q => P(sim.finals, q) * risk;
   const dd = q => P(sim.dds, q) * risk;

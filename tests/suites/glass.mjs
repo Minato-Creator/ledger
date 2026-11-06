@@ -42,7 +42,8 @@ await p.addInitScript(FAKE_FS);
 await p.goto('http://127.0.0.1:8777/index.html',{waitUntil:'domcontentloaded'});
 await p.waitForSelector('.topbar');
 const layer = () => p.evaluate(() => {
-  const L = document.querySelector('.bg-layer'), v = L?.querySelector('video');
+  /* what plays now: the newest slot's clip (mid-fade the one going is still under it) */
+  const L = document.querySelector('.bg-layer'), v = L && [...L.querySelectorAll('.bg-slot:not(.is-under):not(.is-leaving) video')].pop();
   return { there: !!L && !L.hidden, src: v?.getAttribute('src') || '', poster: v?.getAttribute('poster') || '', paused: v ? v.paused : null,
            muted: v ? v.muted : null, loop: v ? v.loop : null, ready: v ? v.readyState : 0 };
 });
@@ -61,19 +62,19 @@ t('and glass off', (await root()).glass !== 'on');
 
 await p.evaluate(()=>location.hash='#/settings'); await p.waitForTimeout(500);
 const picks = await backgroundNames(p);
-t('the pictures are gone: None plus seven videos', picks.length === 8 && !picks.some(n => /Lounge|Ridge|Canopy/.test(n)), picks.join(', '));
+t('the pictures are gone: None, Fade, plus four videos', picks.length === 6 && picks[1] === 'Fade' && !picks.some(n => /Lounge|Ridge|Canopy/.test(n)), picks.join(', '));
 await openLook(p, 'custom');
 t('None is selected', await p.evaluate(()=>document.querySelector('.lk-bg.is-none').classList.contains('is-on')));
-t('every video tile shows its still', await p.evaluate(()=>[...document.querySelectorAll('.lk-bg:not(.is-none):not(.is-add)')].every(n=>/url\(/.test(getComputedStyle(n).backgroundImage))));
+t('every video tile shows its still', await p.evaluate(()=>[...document.querySelectorAll('.lk-bg:not(.is-none):not(.is-add):not([data-bgid="fade"])')].every(n=>/url\(/.test(getComputedStyle(n).backgroundImage))));
 t('three kinds of glass to choose from', await p.evaluate(()=>[...document.querySelectorAll('.lk-seg button')].map(x=>x.textContent).join(',').includes('Solid,Frosted,Clear')));
 await closeLook(p);
 
 /* ---------- a video ---------- */
-await pickBackground(p, 'Torii');
+await pickBackground(p, 'Samurai Path');
 await p.waitForTimeout(900);
 let r = await root(), L = await layer();
-t('the video plays behind the app', r.bg === 'torii' && L.there && /media\/backgrounds\/torii\.mp4$/.test(L.src) && L.paused === false, JSON.stringify(L));
-t('muted and on a loop, with its still as the poster', L.muted === true && L.loop === true && /torii\.jpg$/.test(L.poster));
+t('the video plays behind the app', r.bg === 'path' && L.there && /media\/backgrounds\/path\.mp4$/.test(L.src) && L.paused === false, JSON.stringify(L));
+t('muted and on a loop, with its still as the poster', L.muted === true && L.loop === true && /path\.jpg$/.test(L.poster));
 t('the first video brings Clear glass, so it can be seen', r.glass === 'on' && r.kind === 'clear', JSON.stringify(r));
 t('a bright video is held down hard', r.scrim >= .5 && r.scrim <= .75, String(r.scrim));
 t('the app sits above it', await p.evaluate(()=>getComputedStyle(document.getElementById('app')).zIndex === '1'
@@ -106,29 +107,28 @@ t('and it is kept', await p.evaluate(()=>JSON.parse(window.__files.get('data/acc
 for (const [hash,name] of [['#/','dashboard'],['#/trades','trades'],['#/calendar','calendar'],['#/analytics','analytics'],['#/replay','replay'],['#/playbook','playbook'],['#/new','new trade']]) {
   const before = errs.length;
   await p.evaluate(h=>location.hash=h, hash); await p.waitForTimeout(360);
-  const ok = await p.evaluate(()=>document.documentElement.dataset.bg === 'torii'
+  const ok = await p.evaluate(()=>document.documentElement.dataset.bg === 'path'
     && document.documentElement.dataset.glass === 'on'
     && document.querySelectorAll('.bg-layer').length === 1
     && /rgba\(/.test(getComputedStyle(document.querySelector('.card')).backgroundColor));
   t(`it holds on ${name}`, ok && errs.length === before);
 }
-t('the clip was not restarted by changing page', await p.evaluate(()=>document.querySelector('.bg-layer video').currentTime > .5));
+t('the clip was not restarted by changing page', await p.evaluate(()=>[...document.querySelectorAll('.bg-layer .bg-slot video')].pop().currentTime > .5));
 await p.evaluate(()=>location.hash='#/'); await p.waitForTimeout(500);
 await p.screenshot({ path: OUT+'/glass-dash.png' });
 
-/* Motion: Off keeps the first frame, as a picture */
-await openLook(p, 'custom');
-await p.evaluate(()=>[...document.querySelectorAll('.lk-seg button')].find(b=>b.textContent==='Off')?.click());
+/* Motion: Off keeps the first frame, as a picture (Motion is on Settings' own list now) */
+await p.evaluate(()=>location.hash='#/settings'); await p.waitForTimeout(450);
+await p.evaluate(()=>[...document.querySelectorAll('.st-row[data-row="Motion"] button')].find(b=>b.textContent==='Off')?.click());
 await p.waitForTimeout(400);
 t('Motion: Off holds the video still', (await layer()).paused === true);
-await p.evaluate(()=>[...document.querySelectorAll('.lk-seg button')].find(b=>b.textContent==='Full')?.click());
+await p.evaluate(()=>[...document.querySelectorAll('.st-row[data-row="Motion"] button')].find(b=>b.textContent==='Full')?.click());
 await p.waitForTimeout(500);
 t('and Full plays it again', (await layer()).paused === false);
-await closeLook(p);
 
 await p.reload({waitUntil:'domcontentloaded'}); await p.waitForTimeout(1200);
 r = await root();
-t('everything survives a reload', r.bg === 'torii' && r.kind === 'clear' && Math.abs(r.scrim - .2) < .001 && (await layer()).there, JSON.stringify(r));
+t('everything survives a reload', r.bg === 'path' && r.kind === 'clear' && Math.abs(r.scrim - .2) < .001 && (await layer()).there, JSON.stringify(r));
 
 // light theme with the video
 await setTheme(p, 'light');
@@ -155,6 +155,7 @@ await p.click(`.lk-bg[data-bgid="yours:${mine?.id}"] .lk-bg-x`); await p.waitFor
 await p.click(`.lk-bg[data-bgid="yours:${mine?.id}"] .lk-bg-x`); await p.waitForTimeout(600);
 const A2 = await p.evaluate(()=>JSON.parse(window.__files.get('data/accounts.json')));
 t('removing it takes it out of the list and the folder', (A2.bgVideos || []).length === 0 && await p.evaluate(f => !window.__files.has(f), mine?.file));
+await p.waitForTimeout(300);   // the picture fades out (650 ms) rather than vanishing
 t('…and nothing plays in its place', !A2.background && !(await layer()).there);
 await closeLook(p);
 

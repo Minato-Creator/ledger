@@ -81,30 +81,6 @@ export function outlookTab(store, acct, trades, ctx, from = null) {
   return body;
 }
 
-/** The last 30 days in one line, for the top of the Outlook page. */
-export function outlookStrip(store, acct, nav) {
-  const from = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); })();
-  const trades = store.tradesFor(acct.id).filter(t => t.date >= from);
-  const B = oe.biasBuckets(store, acct, trades);
-  const calls = oe.callsBetween(store, from, c.todayISO());
-  const strip = el('button', { class: 'ao-strip', title: 'Analytics → Outlook', onClick: () => { setOutlookTab(); nav.go('#/analytics'); } });
-  const fig = (k, v, cls = '') => el('span', { class: 'ao-sf ' + cls }, el('i', {}, k), el('b', {}, v));
-  const paint = G => strip.replaceChildren(
-    el('span', { class: 'ao-sk' }, 'Last 30 days'),
-    fig('bias right', !calls.length ? '—' : !G ? '…' : G.rate == null ? '—' : c.pct(G.rate, 0), G && G.rate != null ? (G.rate >= 0.5 ? 'is-pos' : 'is-neg') : ''),
-    fig('with it', `${rTxt(B.same.r)} (${B.same.n})`, sign(B.same.r)),
-    fig('against it', `${rTxt(B.diff.r)} (${B.diff.n})`, sign(B.diff.r)),
-    fig('no bias', `${rTxt(B.none.r)} (${B.none.n})`, sign(B.none.r)),
-    el('span', { class: 'ao-sgo' }, '›'));
-  paint(null);
-  if (calls.length) oe.gradeCalls(store, calls).then(paint).catch(() => {});
-  return strip;
-}
-let wantTab = null;
-const setOutlookTab = () => { wantTab = 'outlook'; };
-/** Analytics asks once whether it was sent here for its Outlook tab. */
-export const takeWantedTab = () => { const t = wantTab; wantTab = null; return t; };
-
 function niceDate(iso) {
   const d = new Date(iso + 'T00:00:00Z');
   return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()]} ${d.getUTCDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]}`;

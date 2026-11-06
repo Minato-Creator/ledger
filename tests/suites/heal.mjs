@@ -122,6 +122,21 @@ const CASES = [
       t('   the dead rows are dropped, the real one kept', r.trades === 1 && r.ids[0] === 't1', JSON.stringify(r));
     } },
 
+  { name: 'dupes',
+    why: 'the same trade twice (an import run twice), which an edit or a delete would only half reach',
+    files: {
+      'data/accounts.json': ACCOUNTS,
+      'data/trades.json': JSON.stringify({version:1,trades:[TRADE(), TRADE({id:'t2'}), TRADE(), TRADE({id:'t2'})]}),
+      'data/playbook.json': JSON.stringify({version:3,setups:[],tagGroups:[],sessions:[]}),
+    },
+    expect: async (q) => {
+      const r = await q.evaluate(async () => {
+        const { store } = await import('/js/store.js');
+        return { ids: store.trades.map(x => x.id) };
+      });
+      t('   each trade once', JSON.stringify(r.ids.slice().sort()) === '["t1","t2"]', JSON.stringify(r));
+    } },
+
   { name: 'notavault',
     why: 'a zip that is not a vault at all',
     files: { 'holiday.txt': 'photos of a beach' },

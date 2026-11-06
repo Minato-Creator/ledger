@@ -49,11 +49,9 @@ const go = async (sub = 'accounts') => { await page.evaluate(s => { location.has
 await go('');
 const txt = () => page.evaluate(() => document.querySelector('.main').innerText);
 const rows = await page.evaluate(() => [...document.querySelectorAll('.st-row')].map(r => r.dataset.row));
-ok('one row each, grouped', rows.join(' · '), 'Profile · Accounts · Risk rules · Charts & prices · Import trades · Appearance · Vault & data · Trades as a spreadsheet');
+ok('one row each, grouped', rows.join(' · '), 'Profile · Accounts · Playbook · Charts & prices · Import trades · Appearance · Motion · Intro · Vault & data · Trades as a spreadsheet');
 ok('grouped under three headings', await page.evaluate(() => [...document.querySelectorAll('.st-gk')].map(n => n.textContent).join(' · ')), 'Account · Trading · App');
-await page.locator('.st-search').fill('vault');
-await page.waitForTimeout(200);
-ok('search narrows the list', await page.evaluate(() => [...document.querySelectorAll('.st-row')].filter(r => !r.hidden).map(r => r.dataset.row).join(',')), 'Vault & data');
+ok('no search box: the list is short enough to read', await page.evaluate(() => !document.querySelector('.st-search, .st-view input[placeholder*="Search"]')), true);
 await go('vault');
 ok('the vault is one box', (await txt()).match(/^Vault$/gm)?.length, 1);
 ok('the Spreadsheet box is gone', /Spreadsheet/.test(await txt()), false);

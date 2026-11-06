@@ -167,10 +167,10 @@ await p.evaluate(() => [...document.querySelectorAll('.rv-item')].find(x => /NAS
 const kp = await p.evaluate(() => [...document.querySelectorAll('.rv-pill')].map(x => x.textContent));
 t('the weekly review says the same', kp.includes('Red folderUSD - NFP, USD - Unemployment') && kp.includes('Bank holidayChina') && !kp.some(x => /United States/.test(x)), JSON.stringify(kp));
 await go('#/trades', 500);
-await p.evaluate(() => { const s = [...document.querySelectorAll('.tr-bar select')].find(x => x.options[0].text === 'News · all'); s.value = 'holiday'; s.dispatchEvent(new Event('change', { bubbles: true })); }); await settle(300);
+await p.click('.tr-chip[data-all="News · all"]'); await settle(120); await p.click('.pop-filter .pop-item[data-v="holiday"]'); await settle(300);
 const hn = await p.evaluate(() => document.querySelectorAll('.tbl-body > *').length);
 t('Trades → bank holiday: the calendar’s days', hn === KIND.holiday.length, `${hn} vs ${KIND.holiday.length}`);
-await p.evaluate(() => { const s = [...document.querySelectorAll('.tr-bar select')].find(x => x.options[0].text === 'News · all'); s.value = 'all'; s.dispatchEvent(new Event('change', { bubbles: true })); }); await settle(200);
+await p.click('.tr-chip[data-all="News · all"]'); await settle(120); await p.click('.pop-filter .pop-item[data-v="all"]'); await settle(200);
 
 /* ===================== the wire lists this week only ===================== */
 await go('#/wire', 900);

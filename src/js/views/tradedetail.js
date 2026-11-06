@@ -1,8 +1,8 @@
-import { el, icon, toast, confirmButton, lightbox } from '../ui.js';
+import { el, icon, toast, confirmButton, lightbox, demoTag } from '../ui.js';
 import { pairMark, instrumentName } from '../flags.js';
 import * as c from '../calc.js';
 import { tradeShotsOf } from '../store.js';
-import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS, holidayName } from '../questions.js';
+import { CONFIDENCE, EMOTION_AFTER, EXIT_REASONS, MISTAKES, DELIVERY, NEWS } from '../questions.js';
 import { newsText, holidayText, dayRedFolders } from '../newsday.js';
 import { newsLabel, localTime } from '../news.js';
 import { heldAsked, heldOf, heldText } from '../questions.js';
@@ -38,7 +38,7 @@ export function tradeDetail(store, nav, id) {
     el('button', { style: { width: '32px', height: '32px', borderRadius: '12px', background: 'var(--grey-8)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
       onClick: () => nav.go('#/trades') }, icon('chevleft', 15, 'var(--grey-1)', 2)),
     pairMark(t.pair, 30),
-    el('h1', {}, t.pair),
+    el('h1', {}, t.pair, demoTag(t)),
     el('span', { class: 'sub' }, [instrumentName(t.pair), c.longDate(t.date), sessionName, account.name].filter(Boolean).join(' · ')),
     el('div', { class: 'spacer' }),
     canShare(t) ? el('button', { class: 'btn btn-quiet td-share', onClick: () => openShare(store, nav, t.id) }, icon('share', 14, 'currentColor', 1.9), 'Share') : null,
@@ -81,7 +81,8 @@ export function tradeDetail(store, nav, id) {
      scrolls to them. */
   const left = el('div', { class: 'td-left', style: { width: '780px', flex: 'none', display: 'flex', flexDirection: 'column', gap: '8px',
                                                       minHeight: 0, overflowY: 'auto' } },
-    tradeChart(store, nav, t),
+    /* the quiet chart; the suites that test the tools, legend and small print open the full one here */
+    tradeChart(store, nav, t, { minimal: !window.__fullTradeChart }),
     howItWent(t, store.data.news),
     el('div', { class: 'card', style: { flex: 'none', minHeight: '170px' } },
       el('div', { class: 'eyebrow' }, 'Journal'),

@@ -1,9 +1,10 @@
 /* ============================================================
    chart/settings.js — how every chart looks: TradingView's Chart Settings.
 
-   One set for the whole app (the trade page, the weekly review, the Outlook
+   One set for the journal (the trade page, the weekly review, the Outlook
    and Replay all read it), kept in the vault in data/drawings.json under
-   `settings`, so it travels with a backup. Saved templates sit beside it
+   `settings`, so it travels with a backup; the Lab keeps its own beside it
+   (`labSettings`). Saved templates sit beside it
    under `settingTemplates`.
 
    While the dialog is open the charts show the draft (preview); Cancel puts
@@ -53,26 +54,33 @@ export function merge(base, over) {
   return out;
 }
 
-/* ---------- live: the settings every chart paints with ---------- */
-let saved = null, shown = null;
+/* ---------- live: the settings every chart paints with ----------
+   Two sets: 'main', every chart in the journal, and 'lab', the Lab's own
+   (data/drawings.json `labSettings`), so changing the Lab's chart leaves
+   every other chart as it was. The Lab starts from the main set until it is
+   saved there once. */
+const KEY = { main: 'settings', lab: 'labSettings' };
+const scopeOf = sc => (sc === 'lab' ? 'lab' : 'main');
+const state = { main: { saved: null, shown: null }, lab: { saved: null, shown: null } };
 const listeners = new Set();
-export function onSettings(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-const tell = () => { for (const fn of [...listeners]) { try { fn(shown); } catch { /* a chart that went away */ } } };
+export function onSettings(fn, scope = 'main') { const e = { fn, scope: scopeOf(scope) }; listeners.add(e); return () => listeners.delete(e); }
+const tell = sc => { for (const e of [...listeners]) if (e.scope === sc) { try { e.fn(state[sc].shown); } catch { /* a chart that went away */ } } };
 
-export function chartSettings(store) {
-  const raw = store?.data?.drawings?.settings;
-  if (!saved || saved.__raw !== raw) { saved = merge(DEFAULTS, raw); Object.defineProperty(saved, '__raw', { value: raw }); shown = null; }
-  return shown || saved;
+export function chartSettings(store, scope = 'main') {
+  const sc = scopeOf(scope), st = state[sc], d = store?.data?.drawings;
+  const raw = sc === 'lab' ? (d?.labSettings ?? d?.settings) : d?.settings;
+  if (!st.saved || st.saved.__raw !== raw) { st.saved = merge(DEFAULTS, raw); Object.defineProperty(st.saved, '__raw', { value: raw }); st.shown = null; }
+  return st.shown || st.saved;
 }
 /** Charts show `draft` until it is saved or dropped. */
-export function preview(draft) { shown = draft; tell(); }
-export function dropPreview() { shown = null; tell(); }
-export async function saveSettings(store, s) {
-  const d = store.data.drawings;
-  d.settings = structuredClone(s);
-  saved = null; shown = null;
+export function preview(draft, scope = 'main') { state[scopeOf(scope)].shown = draft; tell(scopeOf(scope)); }
+export function dropPreview(scope = 'main') { state[scopeOf(scope)].shown = null; tell(scopeOf(scope)); }
+export async function saveSettings(store, s, scope = 'main') {
+  const sc = scopeOf(scope), d = store.data.drawings;
+  d[KEY[sc]] = structuredClone(s);
+  state[sc].saved = null; state[sc].shown = null;
   await store.save('drawings');
-  tell();
+  tell(sc);
 }
 
 /* ---------- templates (Template ▾ in the dialog) ---------- */

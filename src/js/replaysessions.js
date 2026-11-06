@@ -43,7 +43,7 @@ export function healReplay(r) {
     if (!Array.isArray(s.trades)) { s.trades = []; changed = true; }
     if (![1, 2, 3, 4].includes(s.layout)) { s.layout = 1; changed = true; }
     if (!Array.isArray(s.tfs) || s.tfs.length !== 4) { s.tfs = [5, 60, 240, 15]; changed = true; }
-    if (!s.ind || typeof s.ind !== 'object' || Array.isArray(s.ind)) { s.ind = { sessions: true, news: true, rsi: false }; changed = true; }
+    if (!s.ind || typeof s.ind !== 'object' || Array.isArray(s.ind)) { s.ind = { sessions: false, news: false, rsi: false }; changed = true; }
   }
   return changed;
 }
@@ -52,7 +52,7 @@ export function healReplay(r) {
 export async function createSession(store, { name, inst, from, to, groupId = null, balance, risk, riskMode }) {
   const st = settingsOf(store);
   const s = { id: id('rs'), name: String(name || '').trim() || 'Session', groupId: groupId || null, inst, from, to, at: from,
-    layout: 1, tfs: [5, 60, 240, 15], ind: { sessions: true, news: true, rsi: false }, balance: Number.isFinite(balance) ? balance : st.balance,
+    layout: 1, tfs: [5, 60, 240, 15], ind: { sessions: false, news: false, rsi: false }, balance: Number.isFinite(balance) ? balance : st.balance,
     risk: Number.isFinite(risk) ? risk : st.risk, riskMode: riskMode || st.riskMode,
     trades: [], created: new Date().toISOString(), opened: null, finished: false };
   sessionsOf(store).push(s);

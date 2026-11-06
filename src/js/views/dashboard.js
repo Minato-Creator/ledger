@@ -1,4 +1,4 @@
-import { el, svg, icon, ft, fitted } from '../ui.js';
+import { el, svg, icon, ft, fitted, demoTag } from '../ui.js';
 import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
 import { hoverLayer, readRow, unitKit } from './chartkit.js';
@@ -44,7 +44,7 @@ const bigFigure = (text, u) => {
    held at the final figure's, so the trades and days beside it never shift.
    Motion off, or the system asking for less, and it simply reads. */
 let shown = null;                                   // { key, d, r } — what the headline last read
-const COUNT_IN = 1600, COUNT_CHANGE = 900;          // ms
+const COUNT_IN = 2000, COUNT_CHANGE = 1100;          // ms
 const still = () => document.documentElement.dataset.motion === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches;
 function countUp(node, key, d, r, f, u, fresh) {
   const from = fresh || !shown || shown.key !== key ? { d: 0, r: 0 } : { d: shown.d, r: shown.r };
@@ -302,7 +302,7 @@ function recentCard(store, acct, nav) {
       return el('button', { class: 'db-tr', onClick: () => nav.go('#/trade/' + t.id) },
         pairMark(t.pair, 24),
         el('span', { class: 'p' }, t.pair || '—',
-          el('i', { class: t.side === 'buy' ? 'up' : 'dn', title: t.side === 'buy' ? 'Long' : 'Short' }, t.side === 'buy' ? '↑' : '↓'),
+          el('i', { class: t.side === 'buy' ? 'up' : 'dn', title: t.side === 'buy' ? 'Long' : 'Short' }, t.side === 'buy' ? '↑' : '↓'), demoTag(t),
           el('small', {}, [setup ? setup.name : 'No setup', c.shortDate(t.date) + (t.timeOpen ? ' ' + t.timeOpen : '')].join(' · '))),
         el('span', { class: 'r ' + tone }, r == null || !isFinite(r) ? '—' : c.rFmt(r, 1)),
         el('span', { class: 'n' }, c.isForward(t) ? ft() : c.tradeFig(u, acct, t, { decimals: 0 })));
@@ -317,7 +317,7 @@ export function tradeRow(t, acct, store, cols, nav) {
   return el('div', { class: 'tbl-row', style: { gridTemplateColumns: cols, cursor: 'pointer' },
                      onClick: () => nav.go('#/trade/' + t.id) },
     el('span', { style: { display: 'flex', alignItems: 'center', gap: '9px' } },
-      el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair)),
+      el('span', { class: 'ins has-mark' }, pairMark(t.pair, 20), t.pair, demoTag(t))),
     el('span', { class: 'td', style: { color: long ? 'var(--green)' : 'var(--orange)' } }, long ? '▲ Long' : '▼ Short'),
     el('span', { class: 'td' }, c.shortDate(t.date)),
     el('span', { style: { fontSize: '12px', color: 'var(--grey-3)' } }, setup ? setup.name : '—'),

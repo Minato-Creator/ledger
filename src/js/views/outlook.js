@@ -40,7 +40,6 @@ const BIASES = [
 ];
 
 const newId = () => 'ob_' + crypto.randomUUID().slice(0, 6);
-const newShotId = () => crypto.randomUUID().slice(0, 8);
 const blankInstrument = () => ({ id: newId(), pair: '', bias: 'neutral', notes: '', shots: [] });
 
 /* ============================================================

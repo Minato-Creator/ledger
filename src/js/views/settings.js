@@ -8,9 +8,11 @@
 import { el, icon, toast } from '../ui.js';
 import * as c from '../calc.js';
 import { toCSV } from '../csv.js';
-import { describeLook } from '../look.js';
+import { describeLook, MOTIONS } from '../look.js';
+import { INTROS, introMode, setIntroMode } from '../intro.js';
 import { accountBoard } from './acctboard.js';
-import { oandaKeyCard } from './oandakey.js';
+import { oandaKeyCard, finnhubKeyCard } from './oandakey.js';
+import { playbook } from './playbook.js';
 import { profileFill } from '../shell.js';
 import { probeVideo, probeImage } from '../clip.js';
 import { prepare as prepareImage } from '../shots.js';
@@ -318,29 +320,33 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
         el('div', { class: 'st-hero-d' }, store.folderName ? `${store.folderName} · ${store.accounts.length} account${store.accounts.length === 1 ? '' : 's'}` : `${store.accounts.length} accounts`)),
       el('button', { class: 'btn btn-primary', onClick: () => nav.go('#/settings/profile') }, icon('pencil', 13, 'currentColor', 1.9), 'Edit')));
 
-  const search = el('input', { class: 'field st-search', placeholder: 'Search settings', 'aria-label': 'Search settings',
-    onInput: e => {
-      const q = e.target.value.trim().toLowerCase();
-      for (const g of listEl.querySelectorAll('.st-group')) {
-        let any = false;
-        for (const r of g.querySelectorAll('.st-row')) {
-          const hit = !q || r.textContent.toLowerCase().includes(q);
-          r.hidden = !hit; any = any || hit;
-        }
-        g.hidden = !any;
-      }
-    } });
+  /* a setting chosen right on its row: Motion and the Intro (moved here from Appearance → Custom) */
+  const choice = (options, current, onPick) => el('div', { class: 'seg st-seg', role: 'group' }, ...options.map(([v, label]) =>
+    el('button', { type: 'button', class: v === current ? 'is-on' : '', 'aria-pressed': String(v === current), onClick: () => { if (v !== current) onPick(v); } }, label)));
+  const ctlRow = (ic, title, note, ctl) => el('div', { class: 'st-row is-ctl', 'data-row': title },
+    el('span', { class: 'st-ic' }, icon(ic, 16, 'currentColor', 1.7)),
+    el('span', { class: 'st-t' }, el('span', { class: 'st-n' }, title), el('span', { class: 'st-d' }, note)),
+    ctl);
+  const motion = store.look.motion, intro = introMode();
 
   const listEl = el('div', { class: 'st-groups' },
     group('Account',
       row('user', 'Profile', 'Your name, picture, colour and banner', () => nav.go('#/settings/profile')),
       row('firms', 'Accounts', `${store.accounts.length} active · evals, funded and live, payouts`, () => nav.go('#/settings/accounts'))),
     group('Trading',
-      row('shield', 'Risk rules', 'Daily loss cap, trades a day, default risk', () => nav.go('#/playbook')),
-      row('chart', 'Charts & prices', 'Your OANDA key for the trade chart', () => nav.go('#/settings/charts')),
+      /* one row: the risk rules are on the Playbook's page */
+      row('playbook', 'Playbook', 'Setups, tags, sessions and your risk rules', () => nav.go('#/settings/playbook')),
+      row('chart', 'Charts & prices', 'Your OANDA key, and a stock-price key for Markets', () => nav.go('#/settings/charts')),
       row('upload', 'Import trades', 'From a broker or FX Replay CSV', () => nav.go('#/import'))),
     group('App',
       row('palette', 'Appearance', describeLook(look), () => openLook?.()),
+      ctlRow('play', 'Motion', motion === 'calm' ? 'Cards still arrive; figures stay put'
+        : motion === 'off' ? 'Everything appears at once' : 'Pages arriving, figures writing themselves in, tabs that slide',
+        choice(MOTIONS, motion, async v => { await store.setLook({ motion: v }); nav.refresh({ keepFocus: true }); })),
+      ctlRow('film', 'Intro', motion === 'off' ? 'Motion is Off, so it does not play'
+        : intro === 'short' ? 'The opening, quicker — about two seconds' : intro === 'off' ? 'Laminar opens straight on your journal'
+        : 'The L, the name, a wave through the dots — a click skips it',
+        choice(INTROS, intro, v => { setIntroMode(v); nav.refresh({ keepFocus: true }); })),
       row('vault', 'Vault & data',
         store.isPreview ? 'A preview copy — nothing here is saved'
         : store.isLocal ? 'Your journal is saved inside this browser — export it now and then'
@@ -355,10 +361,11 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
   if (page === 'profile') return sub('Profile', 'Your name, picture and banner', profileCard);
   if (page === 'accounts') return accountBoard(store, nav, { openNew: newAccount });
   if (page === 'vault') return sub('Vault & data', 'Where your journal lives', vaultCard);
-  if (page === 'charts') return sub('Charts & prices', 'OANDA', oandaKeyCard());
+  if (page === 'charts') return sub('Charts & prices', 'OANDA, and stock prices for Markets', oandaKeyCard(), finnhubKeyCard());
+  if (page === 'playbook') return playbook(store, nav, { back });
 
   return el('div', { class: 'view st-view' }, head,
-    el('div', { class: 'st-col' }, hero, search, listEl));
+    el('div', { class: 'st-col' }, hero, listEl));
 }
 
 /* Where the journal lives, and — when that is a choice — the way to change it. */

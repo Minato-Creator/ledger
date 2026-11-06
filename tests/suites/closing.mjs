@@ -193,7 +193,7 @@ await go('#/trade/' + mine.id, 500);
 const cells = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll('.td-cell')].map(c => [c.querySelector('.k').textContent, c.querySelector('b').textContent])));
 t('the trade page shows all three', cells['News timing'] === 'During news' && cells.News === 'N/A' && cells['Bank holiday'] === 'United Kingdom', JSON.stringify(cells));
 await go('#/trades', 500);
-const sel = async v => { await p.evaluate(v => { const s = [...document.querySelectorAll('.tr-bar select')].find(x => x.options[0].text === 'News · all'); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }, v); await settle(250); };
+const sel = async v => { await p.click('.tr-chip[data-all="News · all"]'); await settle(120); await p.click(`.pop-filter .pop-item[data-v="${v}"]`); await settle(250); };
 const rowsN = () => p.evaluate(() => document.querySelectorAll('.tbl-body > *').length);
 const disk = await onDisk();
 await sel('during');
