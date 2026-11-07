@@ -1,5 +1,7 @@
-/* Plan → Markets (views/markets.js, markets.js): Forex & futures from OANDA
-   (his watchlist, DXY worked out), Stocks from Stooq, Crypto from CoinGecko
+/* Plan → Markets (views/markets.js, markets.js): Forex & futures from Yahoo
+   Finance in one request (his watchlist; OANDA with his key when Yahoo says
+   no, 7 Nov), Stocks from Yahoo Finance (Stooq until
+   7 Nov, when its quote address went away), Crypto from CoinGecko
    or Binance — each a bubble with its logo, name and move, sized by the
    move, green up and red down, each a lit orb on a see-through field; the
    app's own marks for forex (gold's bars), CoinGecko's coins, Elbstream's
@@ -19,7 +21,7 @@ const FAKE_FS = fs.readFileSync(HERE + 'e2e.mjs', 'utf8').match(/const FAKE_FS =
 let pass = 0, fail = 0;
 const t = (n, c, x = '') => { c ? pass++ : fail++; console.log(`  ${c ? 'ok  ' : 'FAIL'}  ${n}${x !== '' ? ' — ' + x : ''}`); };
 
-const HOSTS = /^https:\/\/(api-fxpractice\.oanda\.com|api\.coingecko\.com|data-api\.binance\.vision|stooq\.com|coin-images\.coingecko\.com|finnhub\.io|api\.elbstream\.com)\/.*/;
+const HOSTS = /^https:\/\/(api-fxpractice\.oanda\.com|api\.coingecko\.com|data-api\.binance\.vision|query1\.finance\.yahoo\.com|coin-images\.coingecko\.com|finnhub\.io|api\.elbstream\.com)\/.*/;
 const b = await pw.chromium.launch({ executablePath: CHROME });
 async function open({ key = 'test-key', fail: no = {}, seen = [], methods = [] } = {}) {
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Australia/Perth' });
@@ -55,15 +57,15 @@ await p.evaluate(() => { location.hash = '#/wire'; }); await p.waitForTimeout(30
 t('Plan: News · Outlook · Markets', await p.evaluate(() => [...document.querySelectorAll('.head .sn-tab')].map(a => a.textContent).join(' · ')) === 'News · Outlook · Markets');
 await p.evaluate(() => { location.hash = '#/markets'; }); await settle(p);
 let m = await M(p);
-t('Markets opens on Forex & futures, from OANDA', m && m.tab === 'forex' && m.src === 'OANDA', JSON.stringify(m && { tab: m.tab, src: m.src, err: m.err }));
-t('his watchlist: 16 bubbles (gold once, US100 and NAS100 one, US500 is SPX500, DXY worked out)', m.b.length === 16
+t('Markets opens on Forex & futures, from Yahoo Finance', m && m.tab === 'forex' && m.src === 'Yahoo Finance', JSON.stringify(m && { tab: m.tab, src: m.src, err: m.err }));
+t('his watchlist: 16 bubbles (gold once, US100 and NAS100 one, US500 is SPX500, DXY the index itself)', m.b.length === 16
   && ['XAUUSD', 'NAS100', 'US500', 'DXY', 'EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD', 'CADJPY', 'NZDJPY', 'AUDJPY', 'GBPJPY', 'EURJPY', 'USDJPY', 'USDCAD', 'USDCHF'].every(l => m.b.some(x => x.label === l)), m.b.map(x => x.label).join(','));
-const off = m.b.filter(x => x.key !== 'DXY' && Math.abs(x.change - FX_MOVES[x.key]) > 0.011);
+const off = m.b.filter(x => Math.abs(x.change - FX_MOVES[x.key]) > 0.011);
 t('each move is today’s against yesterday’s close', off.length === 0, JSON.stringify(off.map(x => [x.key, x.change])));
 const dxy = m.b.find(x => x.key === 'DXY');
-t('DXY from its six pairs and the index’s formula: +0.35%, as his TradingView showed', dxy && Math.abs(dxy.change - 0.35) < 0.02 && dxy.pct === '+0.35%', JSON.stringify(dxy && dxy.change));
+t('DXY: the index itself from Yahoo (DX-Y.NYB), +0.35% as his TradingView showed', dxy && Math.abs(dxy.change - 0.35) < 0.02 && dxy.pct === '+0.35%', JSON.stringify(dxy && dxy.change));
 const lvl = await p.evaluate(async base => { const M2 = await import('/js/markets.js'); return M2.dxyOf(base); }, FX_BASE);
-t('…and at a sensible level (about 99)', lvl > 95 && lvl < 105, String(lvl));
+t('…and the formula kept for when OANDA answers instead: a sensible level (about 99)', lvl > 95 && lvl < 105, String(lvl));
 const big = [...m.b].sort((a, c) => c.tr - a.tr);
 t('the further the move, the bigger the bubble: NAS100 (+2.18%) biggest, EURJPY (+0.01%) smallest', big[0].label === 'NAS100' && big[big.length - 1].label === 'EURJPY', big.map(x => x.label).join(','));
 t('green up, red down', m.b.every(x => x.c === (x.change > 0.005 ? '#2FD07F' : x.change < -0.005 ? '#F0544F' : '#8A8F98')), JSON.stringify(m.b.map(x => [x.label, x.c]).slice(0, 4)));
@@ -98,7 +100,7 @@ for (let f = 2; f < glide.length; f++) for (let i = 0; i < glide[f].b.length; i+
 }
 t('…smoothly: drawn a little further on every frame (to a fraction of a pixel, no hops), and no jolts', same / all < 0.05 && jolt < 150, `${same}/${all} frames unmoved, sharpest change ${jolt.toFixed(0)} px/s²`);
 t('the field reaches the bottom of the window', m.H > 600, String(m.H));
-t('only reads: GETs to OANDA’s candles, the day’s two candles each (the 15 and USD/SEK for DXY)', S.methods.every(x => x === 'GET') && S.seen.every(u => /oanda\.com\/v3\/instruments\/[A-Z0-9_]+\/candles$/.test(u)) && S.seen.length === 16, `${S.seen.length} requests`);
+t('one request for all sixteen (it was sixteen to OANDA, each one freezing the desktop app), and only a read', S.methods.every(x => x === 'GET') && S.seen.length === 1 && S.seen[0] === 'query1.finance.yahoo.com/v7/finance/spark', JSON.stringify(S.seen));
 
 console.log('  -- no chips --');
 t('Forex & futures: no group chips, his whole watchlist at once (Minato, 7 Nov)', await p.evaluate(() => !document.querySelector('.mk-chips, .mk-chip')) && (await M(p)).b.length === 16);
@@ -139,14 +141,14 @@ const c2 = await card();
 t('the pointer over the line moves the dot and the price with it', c2.dot !== c.dot && c2.tip !== c.tip, `${c.dot} → ${c2.dot}`);
 const before1W = S.seen.length;
 await p.click('.mk-ranges [data-range="1W"]'); await p.waitForTimeout(500);
-t('1W asks for the week’s hourly candles', S.seen.length === before1W + 1 && (await card()).ranges === '1D 1W* 1M');
+t('1W asks Yahoo for the week, hour by hour', S.seen.length === before1W + 1 && S.seen[S.seen.length - 1] === 'query1.finance.yahoo.com/v8/finance/chart/GC=F' && (await card()).ranges === '1D 1W* 1M', JSON.stringify(S.seen.slice(-2)));
 await p.keyboard.press('Escape'); await p.waitForTimeout(50);
 const going = await p.evaluate(() => { const c3 = document.querySelector('.mk-card'); return c3 ? c3.classList.contains('is-in') : null; });
 await p.waitForTimeout(350);
 t('Escape: it fades out, then is gone', going === false && !(await card()));
 await p.click('.mk-b[data-key="DXY"]', { force: true }); await p.waitForTimeout(700);
 c = await card();
-t('DXY’s card: its line worked out from its six pairs', c && c.name === 'US Dollar Index' && c.line && /^\d{2,3}\.\d{3}/.test(c.tip), JSON.stringify(c && { tip: c.tip }));
+t('DXY’s card: the index’s own line', c && c.name === 'US Dollar Index' && c.line && /^\d{2,3}\.\d{3}/.test(c.tip) && S.seen.includes('query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB'), JSON.stringify(c && { tip: c.tip }));
 await p.mouse.click(fb.x + 8, fb.y + 8); await p.waitForTimeout(350);
 t('a click on the field itself closes it', !(await card()));
 t('no page errors', S.errs.length === 0, S.errs.slice(0, 2).join(' | '));
@@ -173,8 +175,19 @@ t('what was kept shows at once, without asking again while it is fresh', m.b.len
 await S.ctx.close();
 S = await open({ key: null }); p = S.p;
 await p.evaluate(() => { location.hash = '#/markets'; }); await settle(p, 1200);
+t('no OANDA key needed: all sixteen from Yahoo just the same', (await M(p)).b.length === 16 && (await M(p)).src === 'Yahoo Finance');
+await S.ctx.close();
+S = await open({ fail: { yahoo: true } }); p = S.p;
+await p.evaluate(() => { location.hash = '#/markets'; }); await settle(p, 1500);
+m = await M(p);
+const dx2 = m.b.find(x => x.key === 'DXY');
+t('Yahoo saying no, with an OANDA key: OANDA answers instead, DXY worked out from its six pairs', m.src === 'OANDA' && m.b.length === 16 && dx2 && Math.abs(dx2.change - 0.35) < 0.02,
+  JSON.stringify({ src: m.src, n: m.b.length, dxy: dx2 && dx2.change }));
+await S.ctx.close();
+S = await open({ key: null, fail: { yahoo: true } }); p = S.p;
+await p.evaluate(() => { location.hash = '#/markets'; }); await settle(p, 1200);
 const nk = await p.evaluate(() => ({ empty: document.querySelector('.mk-empty:not([hidden])')?.innerText || '', btn: !!document.querySelector('.mk-empty .btn') }));
-t('no OANDA key: it says where to add one, with a way there', /OANDA key/.test(nk.empty) && nk.btn, JSON.stringify(nk));
+t('Yahoo saying no and no OANDA key: it says so, and where a key would go, with a way there', /Yahoo Finance/.test(nk.empty) && /OANDA key/.test(nk.empty) && nk.btn, JSON.stringify(nk));
 await S.ctx.close();
 
 /* ===================== crypto ===================== */
@@ -211,12 +224,16 @@ await S.ctx.close();
 console.log('stocks');
 S = await open(); p = S.p;
 await p.evaluate(() => { location.hash = '#/markets'; }); await settle(p, 600);
+const sparkBefore = S.seen.filter(u => u === 'query1.finance.yahoo.com/v7/finance/spark').length;   /* the Forex tab's one */
 await p.click('.mk-tabs [data-tab="stocks"]'); await settle(p, 4500);
 m = await M(p);
-t('Stocks: fifty US companies, from Stooq, no key', m.tab === 'stocks' && m.src === 'Stooq' && m.b.length === 50, JSON.stringify({ src: m.src, n: m.b.length, err: m.err }));
-const nv = m.b.find(x => x.label === 'NVDA'), aa = m.b.find(x => x.label === 'AAPL');
-t('each against yesterday’s close (read once a day and kept)', nv && Math.abs(nv.change - 3.4) < 0.02 && aa && Math.abs(aa.change - 1.2) < 0.02, JSON.stringify([nv?.change, aa?.change]));
-t('one request for all fifty prices', S.seen.filter(u => u === 'stooq.com/q/l/').length === 1);
+t('Stocks: fifty US companies, from Yahoo Finance, no key', m.tab === 'stocks' && m.src === 'Yahoo Finance' && m.b.length === 50, JSON.stringify({ src: m.src, n: m.b.length, err: m.err }));
+const nv = m.b.find(x => x.label === 'NVDA'), aa = m.b.find(x => x.label === 'AAPL'), bk = m.b.find(x => x.label === 'BRK.B');
+t('each against yesterday’s close, as Yahoo gives it', nv && Math.abs(nv.change - 3.4) < 0.002 && aa && Math.abs(aa.change - 1.2) < 0.002, JSON.stringify([nv?.change, aa?.change]));
+t('…Berkshire too, asked for as Yahoo writes it (BRK-B)', bk && Math.abs(bk.change - 0.2) < 0.002, JSON.stringify(bk));
+t('three requests for all fifty — Yahoo takes twenty at most', S.seen.filter(u => u === 'query1.finance.yahoo.com/v7/finance/spark').length - sparkBefore === 3,
+  JSON.stringify(S.seen.filter(u => /yahoo/.test(u))));
+t('the old source is not asked at all', !S.seen.some(u => /stooq/.test(u)));
 t('all fifty wear a logo (a picture or their ticker chip), the smallest too', await p.evaluate(() => { const ls = [...document.querySelectorAll('.mk-b .mk-logo')]; return ls.length === 50 && ls.every(e => e.getBoundingClientRect().width >= 12 && getComputedStyle(e).display !== 'none' && e.querySelector('img, .mk-mono')); }));
 const co = await p.evaluate(() => { const q = k => document.querySelector(`.mk-b[data-key="${k}"] .mk-logo`), cr = document.querySelector('.mk-credit.is-logos');
   return { aapl: q('AAPL').querySelector('img')?.getAttribute('src'), aok: q('AAPL').querySelector('img')?.naturalWidth > 0, msft: q('MSFT').querySelector('.mk-mono')?.dataset.l, brk: q('BRK.B').querySelector('.mk-mono')?.dataset.l,
@@ -231,18 +248,28 @@ await p.click('.mk-chip[data-group="All"]'); await settle(p, 1600);
 await p.click('.mk-b[data-key="NVDA"]', { force: true }); await p.waitForTimeout(800);
 c = await card();
 t('NVDA’s card: 1M · 3M · 1Y of daily closes', c && c.name === 'Nvidia' && c.ranges === '1M* 3M 1Y' && c.line && /^\$\d/.test(c.price), JSON.stringify(c));
+t('…from Yahoo’s daily chart', S.seen.includes('query1.finance.yahoo.com/v8/finance/chart/NVDA'));
+t('…a year of it on 1Y, a day with no close left out, not drawn as a drop to nothing', await p.evaluate(async () => {
+  const M2 = await import('/js/markets.js'); const pts = await M2.lineFor('stocks', { key: 'NVDA', label: 'NVDA', yahoo: 'NVDA' }, '1Y');
+  return pts.length === 250 && pts.every(([t, v]) => Number.isFinite(t) && Number.isFinite(v) && v > 0); }));
 t('no page errors', S.errs.length === 0, S.errs.slice(0, 2).join(' | '));
 await S.ctx.close();
-S = await open({ fail: { stooq: true } }); p = S.p;
+S = await open({ fail: { yahoo: true } }); p = S.p;
 await p.evaluate(() => { location.hash = '#/markets'; }); await settle(p, 600);
 await p.click('.mk-tabs [data-tab="stocks"]'); await settle(p, 1500);
 const sq = await p.evaluate(() => document.querySelector('.mk-empty:not([hidden])')?.innerText || '');
-t('Stooq turning requests away: said plainly, with the steadier way', /Stooq/.test(sq) && /Finnhub/.test(sq), sq);
+t('Yahoo turning requests away: said plainly, with the other way in', /Yahoo Finance/.test(sq) && /429/.test(sq) && /Finnhub/.test(sq), sq);
+t('…and nothing else on the box: no stray "null", no long address', !/null|https?:\/\//.test(sq), sq);
+t('an error from the desktop shell is cut to the host and its answer (a Finnhub key never shown)', await p.evaluate(async () => {
+  const { tidyError } = await import('/js/markets.js');
+  const u = 'https://finnhub.io/api/v1/quote?symbol=AAPL&token=SECRET1234';
+  return tidyError(`${u}: status code 404`, u) === 'finnhub.io said 404' && tidyError('finnhub.io said 429', u) === 'finnhub.io said 429'
+    && !/SECRET/.test(tidyError(`${u}: Connection Failed`, u)); }));
 
 console.log('  -- a Finnhub key, later --');
 await p.evaluate(() => { window.__finnhubGap = 0; location.hash = '#/settings/charts'; }); await p.waitForTimeout(500);
 const fh = await p.evaluate(() => [...document.querySelectorAll('.ok-card h2')].map(h => h.textContent).join(' · '));
-t('Settings → Charts & prices: the OANDA key, then an optional one for stock prices', fh === 'Charts · Stock prices (optional)', fh);
+t('Settings → Charts & prices: the OANDA key, which OANDA trades show, then an optional key for stock prices', fh === 'Charts · OANDA trades from · Stock prices (optional)', fh);
 await p.fill('.fh-card input', 'abcdef1234567890xyz'); await p.click('.fh-save'); await p.waitForTimeout(300);
 t('…saved on this computer, not in the vault', await p.evaluate(() => localStorage.getItem('quire:setting:finnhubKey')) === 'abcdef1234567890xyz');
 await p.evaluate(() => { location.hash = '#/markets'; }); await p.waitForTimeout(400);

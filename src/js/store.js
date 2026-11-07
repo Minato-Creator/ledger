@@ -52,6 +52,10 @@ const LEGACY = {
   playbook: 'playbook.json',
   replay:   'replay/weeks.json',
 };
+/* the daily copies (store.keepDaily): which files, and where */
+const BACKUPS = 'data/backups', BACKUP_INDEX = 'data/backups/index.json';
+const KEEP_DAILY = ['accounts', 'trades', 'playbook', 'outlooks', 'replay', 'review', 'lab'];
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const MANIFEST = 'vault.json';
 export const SHOTS = 'screenshots';
 
@@ -470,9 +474,9 @@ class Store {
 
   /* ---------- files ----------
      A name may carry folder segments, e.g. 'replay/weeks.json'. A file that
-     is not there yet, or that somebody has emptied or mangled by hand, comes
-     back as the fallback rather than throwing — the folder is the user's to
-     poke at, and a bad file should not brick the app. */
+     is not there yet comes back as the fallback. (readJSON is the plain
+     version, for files nothing depends on; the journal's own files open
+     through readFile, below.) */
   async readJSON(name, fallback) {
     let text;
     try { text = await fs.readText(name); }
@@ -482,7 +486,76 @@ class Store {
     catch { return structuredClone(fallback); }
   }
 
-  async writeJSON(name, value) { return fs.writeText(name, JSON.stringify(value, null, 2)); }
+  /* ============================================================
+     Opening a journal file without ever losing it (7 Nov)
+
+     Before, anything that went wrong reading a file — one left half-written
+     when the app was closed in the middle of a save, one held for a moment by
+     OneDrive or a virus scan — came back as an empty journal, and opening
+     wrote that empty journal straight back over the real one. Minato lost his
+     trades that way. Now:
+     - only a file that is truly not there opens empty (a new vault);
+     - one that is there but empty or garbled is kept aside as <name>.damaged
+       and the last good copy opened in its place — <name>.bak, the version
+       before the last save (the desktop app keeps it), or failing that the
+       newest of the daily copies in data/backups;
+     - one that cannot be read at all, or is damaged with no good copy
+       anywhere, is "guarded": left exactly as it is on disk, and nothing is
+       written to it for the rest of the session. The app says so.
+     ============================================================ */
+  async readFile(name, fallback) {
+    let text = null, failed = false;
+    try { text = await fs.readText(name); } catch { failed = true; }
+    if (!failed && text && text.trim()) {
+      try { return { value: JSON.parse(text), state: 'ok', text }; } catch { /* damaged — below */ }
+    }
+    if (failed && !(await fs.exists(name).catch(() => true))) {
+      /* not there: a new vault — or a file lost between two steps of a save, if a copy says otherwise */
+      const copy = await this.lastGoodCopy(name);
+      return copy ? { value: copy.value, state: 'recovered', from: copy.from } : { value: structuredClone(fallback), state: 'missing' };
+    }
+    if (!failed && text && text.trim()) await fs.writeText(name + '.damaged', text).catch(() => {});
+    const copy = await this.lastGoodCopy(name);
+    if (copy && !failed) return { value: copy.value, state: 'recovered', from: copy.from };
+    return { value: copy ? copy.value : structuredClone(fallback), state: 'guarded', from: copy?.from || null };
+  }
+
+  /* the version before the last save, then the daily copies, newest first */
+  async lastGoodCopy(name) {
+    for (const n of [name + '.bak', ...(await this.dailyCopiesOf(name))]) {
+      try { const t = await fs.readText(n); if (t && t.trim()) return { value: JSON.parse(t), from: n }; } catch { /* the next one */ }
+    }
+    return null;
+  }
+
+  /* ---------- a copy a day, for a week ----------
+     The first time each day the journal opens cleanly, each of its main files
+     is copied as it was read into data/backups/<file>-<weekday>.json — seven
+     copies that roll over by themselves, no listing or tidying needed.
+     index.json says which day each was taken. */
+  async keepDaily(key, text) {
+    const d = new Date(), day = DAYS[d.getDay()], today = todayISO(), slot = `${key}-${day}`;
+    const idx = await this.readJSON(BACKUP_INDEX, {});
+    if (idx[slot] === today) return;
+    await fs.writeText(`${BACKUPS}/${slot}.json`, text);
+    idx[slot] = today;
+    await fs.writeText(BACKUP_INDEX, JSON.stringify(idx, null, 2));
+  }
+  async dailyCopiesOf(name) {
+    const key = Object.keys(FILES).find(k => FILES[k] === name);
+    if (!key) return [];
+    const idx = await this.readJSON(BACKUP_INDEX, {});
+    return Object.entries(idx).filter(([slot]) => slot.startsWith(key + '-'))
+      .sort((a, b) => String(b[1]).localeCompare(String(a[1]))).map(([slot]) => `${BACKUPS}/${slot}.json`);
+  }
+
+  /* files that could not be read this session are never written over */
+  isGuarded(name) { return !!this.guarded?.has(name); }
+
+  async writeJSON(name, value) {
+    if (this.isGuarded(name)) { console.warn(`Laminar is not saving ${name}: it could not be read when the journal opened, so it is left as it is.`); return; }
+    return fs.writeText(name, JSON.stringify(value, null, 2));
+  }
   async writeText(name, text)  { return fs.writeText(name, text); }
   async ensureDir(name)        { return fs.ensureDir(name); }
   async exists(name)           { return fs.exists(name); }
@@ -491,18 +564,17 @@ class Store {
   async load() {
     await this.tidyVault();
     await this.ensureDir('data');
-    const [accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings] = await Promise.all([
-      this.readJSON(FILES.accounts, defaultAccounts()),
-      this.readJSON(FILES.trades,   { version: 1, trades: [] }),
-      this.readJSON(FILES.playbook, defaultPlaybook()),
-      this.readJSON(FILES.replay,   { version: 1, weeks: {} }),
-      this.readJSON(FILES.outlooks, { version: 1, days: {} }),
-      this.readJSON(FILES.news,     { version: 1, fetchedAt: null, events: [] }),
-      this.readJSON(FILES.wire,     { version: 1, fetchedAt: null, seenAt: null, items: [] }),
-      this.readJSON(FILES.lab,      defaultLab()),
-      this.readJSON(FILES.review,   { version: 1, weeks: {} }),
-      this.readJSON(FILES.drawings, { version: 1, lines: {} }),
-    ]);
+    const fallbacks = {
+      accounts: defaultAccounts(), trades: { version: 1, trades: [] }, playbook: defaultPlaybook(), replay: { version: 1, weeks: {} },
+      outlooks: { version: 1, days: {} }, news: { version: 1, fetchedAt: null, events: [] }, wire: { version: 1, fetchedAt: null, seenAt: null, items: [] },
+      lab: defaultLab(), review: { version: 1, weeks: {} }, drawings: { version: 1, lines: {} },
+    };
+    const keys = Object.keys(fallbacks);
+    const got = await Promise.all(keys.map(k => this.readFile(FILES[k], fallbacks[k])));
+    /* how each file opened: ok, missing (new), recovered (from a copy) or guarded (left alone) */
+    this.fileStates = Object.fromEntries(keys.map((k, i) => [k, { state: got[i].state, from: got[i].from || null }]));
+    this.guarded = new Set(keys.filter((k, i) => got[i].state === 'guarded').map(k => FILES[k]));
+    const [accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings] = got.map(g => g.value);
     this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings };
     this.heal();
     this.migrate();
@@ -510,7 +582,8 @@ class Store {
     this.loadBgVideo();
 
     // A brand new folder gets its scaffolding written out immediately, so the
-    // user can see real files appear rather than wondering if it worked.
+    // user can see real files appear rather than wondering if it worked. (A
+    // guarded file is skipped by writeJSON: it stays exactly as it was.)
     await Promise.all([
       this.writeJSON(FILES.accounts, accounts),
       this.writeJSON(FILES.trades, trades),
@@ -529,6 +602,11 @@ class Store {
       }, null, 2)),
     ]);
     if (this.pendingMigration) { this.pendingMigration = false; }
+    /* today's copy of each file that opened cleanly, as it was on disk (in the background) */
+    /* (one after another: they share index.json) */
+    const daily = keys.map((k, i) => [k, got[i]]).filter(([k, g]) => KEEP_DAILY.includes(k) && g.state === 'ok');
+    this.dailyDone = (async () => { for (const [k, g] of daily) await this.keepDaily(k, g.text); })()
+      .catch(e => console.warn('daily copy not made:', e?.message || e));
     this.emit();
   }
 
@@ -1121,8 +1199,34 @@ class Store {
      set — so it reads both and keeps them apart itself. Everything else still
      goes through `tradesFor`. */
   everyTradeFor(accountId) {
-    return this.trades.filter(t => t.accountId === accountId);
+    return this.trades.filter(t => t.accountId === accountId && this.shownTrade(t));
   }
+
+  /* ============================================================
+     OANDA trades from a day you choose (7 Nov)
+
+     Settings → Charts & prices → Start from. A trade that came in from OANDA
+     and opened before that day is left out of every page — through inScope
+     below, the one place they all ask, and everyTradeFor above. Nothing is
+     deleted: the sync still keeps OANDA's whole history in the file, so an
+     earlier date, or none, brings them straight back. Trades you added
+     yourself (forward tests included) are never touched by it.
+     ============================================================ */
+  get oandaSince() {
+    const d = this.data.accounts.oandaSince;
+    return typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+  }
+  async setOandaSince(day) {
+    if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) this.data.accounts.oandaSince = day;
+    else delete this.data.accounts.oandaSince;
+    await this.save('accounts');
+  }
+  shownTrade(t) {
+    const since = this.oandaSince;
+    return !(since && t?.oanda && typeof t.date === 'string' && t.date < since);
+  }
+  /** OANDA trades the start date is leaving out, across every account. */
+  get oandaHidden() { return this.trades.filter(t => !this.shownTrade(t)); }
 
   /* ============================================================
      Live, or live and the tests as well
@@ -1139,6 +1243,7 @@ class Store {
      already logged moves.
      ============================================================ */
   inScope(t) {
+    if (!this.shownTrade(t)) return false;
     const scope = this.tradeScope;
     if (scope === 'all') return true;
     const fwd = t.mode === 'forward';
@@ -1561,7 +1666,9 @@ class Store {
     await this.save('accounts');
   }
 
-  async addAccount(acc) {
+  /* `select: false` makes it beside the others without switching to it — the
+     OANDA sync's way, so a sync never changes which account you are looking at */
+  async addAccount(acc, { select = true } = {}) {
     const account = {
       id: 'acc_' + crypto.randomUUID().slice(0, 8),
       name: acc.name.trim(),
@@ -1579,7 +1686,7 @@ class Store {
     };
     for (const k of ['kind', 'firm', 'firmName']) if (account[k] === undefined) delete account[k];
     this.data.accounts.accounts.push(account);
-    this.data.accounts.activeAccountId = account.id;
+    if (select) this.data.accounts.activeAccountId = account.id;
     await this.save('accounts');
     return account;
   }

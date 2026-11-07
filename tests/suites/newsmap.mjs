@@ -14,6 +14,9 @@ const t = (n, c, x = '') => { c ? pass++ : fail++; console.log(`  ${c ? 'ok  ' :
 
 const b = await pw.chromium.launch({ executablePath: CHROME });
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Australia/Perth' });
+/* a Wednesday morning in Perth, every time: "later today" and "well into the week" were taken from
+   the real clock, so on a weekend or late at night the red folders fell into the next day or week (7 Nov) */
+await ctx.clock.setFixedTime(new Date('2026-11-04T09:00:00+08:00'));
 /* the feeds stay out of it: the page works from what it holds */
 await ctx.route(/^https:\/\/(investinglive\.com|nfs\.faireconomy\.media)\/.*/, r => r.abort());
 const p = await ctx.newPage();

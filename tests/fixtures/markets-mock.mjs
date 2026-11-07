@@ -1,12 +1,16 @@
 /* Stand-ins for the four sources behind Plan → Markets, each in its own
    format: OANDA's daily and intraday candles, CoinGecko's coin list and
-   market chart, Binance's 24-hour tickers, and Stooq's CSV quotes and daily
-   history; and Elbstream's company logos. The forex moves are Minato's
+   market chart, Binance's 24-hour tickers, and Yahoo Finance's spark quotes
+   (twenty a request at most, as the real one insists) and daily chart; and
+   Elbstream's company logos. The forex moves are Minato's
    watchlist as he showed it (6 Nov). */
 export const FX_MOVES = { XAU_USD: -0.28, NAS100_USD: 2.18, SPX500_USD: 0.87, EUR_USD: -0.35, GBP_USD: -0.42, AUD_USD: -0.76, NZD_USD: -0.82,
-  CAD_JPY: -0.05, NZD_JPY: -0.44, AUD_JPY: -0.41, GBP_JPY: -0.05, EUR_JPY: 0.01, USD_JPY: 0.37, USD_CAD: 0.41, USD_CHF: 0.15, USD_SEK: 0.2 };
+  CAD_JPY: -0.05, NZD_JPY: -0.44, AUD_JPY: -0.41, GBP_JPY: -0.05, EUR_JPY: 0.01, USD_JPY: 0.37, USD_CAD: 0.41, USD_CHF: 0.15, USD_SEK: 0.2, DXY: 0.35 };
 export const FX_BASE = { XAU_USD: 4075.08, NAS100_USD: 27139.0, SPX500_USD: 6890.4, EUR_USD: 1.1532, GBP_USD: 1.3091, AUD_USD: 0.6498, NZD_USD: 0.5655,
-  CAD_JPY: 108.95, NZD_JPY: 86.71, AUD_JPY: 99.62, GBP_JPY: 200.71, EUR_JPY: 176.82, USD_JPY: 153.32, USD_CAD: 1.4073, USD_CHF: 0.8062, USD_SEK: 9.512 };
+  CAD_JPY: 108.95, NZD_JPY: 86.71, AUD_JPY: 99.62, GBP_JPY: 200.71, EUR_JPY: 176.82, USD_JPY: 153.32, USD_CAD: 1.4073, USD_CHF: 0.8062, USD_SEK: 9.512, DXY: 99.868 };
+/* the forex tab's symbols as Yahoo writes them (markets.js FOREX `yahoo`) */
+const FX_YAHOO = { 'GC=F': 'XAU_USD', 'NQ=F': 'NAS100_USD', 'ES=F': 'SPX500_USD', 'DX-Y.NYB': 'DXY' };
+const fxOfYahoo = sym => FX_YAHOO[sym] || (/^([A-Z]{3})([A-Z]{3})=X$/.test(sym) ? sym.replace(/^([A-Z]{3})([A-Z]{3})=X$/, '$1_$2') : null);
 export const COINS = [
   ['bitcoin', 'btc', 'Bitcoin', 104250, 2.1, 2.07e12], ['ethereum', 'eth', 'Ethereum', 2593.16, 0.23, 3.1e11], ['tether', 'usdt', 'Tether', 1.0, 0.01, 1.8e11],
   ['ripple', 'xrp', 'XRP', 2.31, -1.4, 1.3e11], ['binancecoin', 'bnb', 'BNB', 951.2, 0.6, 1.3e11], ['solana', 'sol', 'Solana', 162.5, 4.2, 9.0e10],
@@ -44,24 +48,32 @@ export function geckoMarkets(now = Date.now()) {
     current_price: price, market_cap: cap, market_cap_rank: i + 1, price_change_percentage_24h: ch,
     sparkline_in_7d: { price: walk(id, price, 168, 3600, Math.floor(now / 1000), 0.004).map(p => p[1]) } }));
 }
-export const stooqSym = l => l.toLowerCase().replace('.', '-') + '.us';
 const stockBase = l => 40 + (Math.abs(hash(l)) % 460) + 0.37;
-export function stooqQuotes(symbols, day = '2026-11-06') {
-  const lines = ['Symbol,Date,Time,Open,High,Low,Close,Volume'];
-  for (const s of symbols) {
-    const l = s.replace(/\.us$/, '').replace('-', '.').toUpperCase(), prev = stockBase(l), mv = STOCK_MOVES[l] ?? ((Math.abs(hash(l + 'm')) % 300) / 100 - 1.5);
-    const close = prev * (1 + mv / 100);
-    lines.push(`${s.toUpperCase()},${day},22:00:05,${(prev * 1.001).toFixed(2)},${(Math.max(prev, close) * 1.004).toFixed(2)},${(Math.min(prev, close) * 0.996).toFixed(2)},${close.toFixed(2)},1234567`);
+const stockMove = l => STOCK_MOVES[l] ?? ((Math.abs(hash(l + 'm')) % 300) / 100 - 1.5);
+/* Yahoo writes BRK.B as BRK-B */
+export function yahooMeta(sym, now = Math.floor(Date.now() / 1000)) {
+  /* a forex-tab symbol: his watchlist's price now (FX_BASE) and move (FX_MOVES), as OANDA's stand-in has them */
+  const fx = fxOfYahoo(sym);
+  if (fx && FX_BASE[fx] != null) {
+    const price = FX_BASE[fx], prev = price / (1 + FX_MOVES[fx] / 100);
+    return { currency: 'USD', symbol: sym, instrumentType: fx === 'DXY' ? 'INDEX' : 'CURRENCY', regularMarketTime: now, regularMarketPrice: price,
+      regularMarketChangePercent: +FX_MOVES[fx].toFixed(4), chartPreviousClose: +prev.toFixed(5), dataGranularity: '1d', range: '1d' };
   }
-  return lines.join('\n');
+  const l = sym.replace('-', '.'), prev = stockBase(l), mv = stockMove(l);
+  return { currency: 'USD', symbol: sym, instrumentType: 'EQUITY', regularMarketTime: now, regularMarketPrice: +(prev * (1 + mv / 100)).toFixed(2),
+    regularMarketChangePercent: +mv.toFixed(3), chartPreviousClose: +prev.toFixed(2), priceHint: 2, dataGranularity: '1d', range: '1d' };
 }
-export function stooqHistory(sym, days = 12, today = '2026-11-06') {
-  const l = sym.replace(/\.us$/, '').replace('-', '.').toUpperCase(), prev = stockBase(l), mv = STOCK_MOVES[l] ?? ((Math.abs(hash(l + 'm')) % 300) / 100 - 1.5);
-  const t0 = Date.parse(today + 'T00:00:00Z') / 1000, rows = ['Date,Open,High,Low,Close,Volume'];
-  const pts = walk(l, prev, days, 86400, t0 - 86400, 0.012);
-  for (const [t, p] of pts) rows.push(`${new Date(t * 1000).toISOString().slice(0, 10)},${p.toFixed(2)},${(p * 1.01).toFixed(2)},${(p * 0.99).toFixed(2)},${p.toFixed(2)},100000`);
-  rows.push(`${today},${prev.toFixed(2)},${prev.toFixed(2)},${prev.toFixed(2)},${(prev * (1 + mv / 100)).toFixed(2)},100000`);
-  return rows.join('\n');
+export function yahooSpark(symbols, now = Math.floor(Date.now() / 1000)) {
+  return { spark: { result: symbols.map(s => { const meta = yahooMeta(s, now);
+    return { symbol: s, response: [{ meta, timestamp: [now], indicators: { quote: [{ close: [meta.regularMarketPrice] }] } }] }; }), error: null } };
+}
+/* a company's daily closes, with one day missing its close (as Yahoo's data sometimes is) */
+export function yahooChart(sym, range = '1mo', now = Math.floor(Date.now() / 1000), interval = '1d') {
+  const step = { '15m': 900, '60m': 3600, '1h': 3600 }[interval] || 86400, meta = yahooMeta(sym, now);
+  const n = step === 900 ? 96 : step === 3600 ? (range === '5d' ? 120 : 480) : ({ '1mo': 22, '3mo': 63, '1y': 251 }[range] || 22);
+  const pts = walk(sym + range + interval, meta.regularMarketPrice, n, step, now, step === 86400 ? 0.012 : 0.002);
+  const close = pts.map(([, p], i) => (i === 3 ? null : +p.toFixed(2)));
+  return { chart: { result: [{ meta: { ...meta, range }, timestamp: pts.map(([t]) => t), indicators: { quote: [{ close }] } }], error: null } };
 }
 
 /** A Playwright route handler for all four; `fail` names sources that should say no (e.g. { coingecko: true }). */
@@ -70,7 +82,6 @@ export function marketsRoute({ fail = {}, seen = [] } = {}) {
     const u = new URL(route.request().url());
     seen.push(u.host + u.pathname);
     const json = b => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) });
-    const text = b => route.fulfill({ status: 200, contentType: 'text/csv', body: b });
     if (/oanda\.com$/.test(u.host)) {
       const m = u.pathname.match(/^\/v3\/instruments\/([A-Z0-9_]+)\/candles$/);
       if (!m) return route.fulfill({ status: 404, body: '{}' });
@@ -89,10 +100,16 @@ export function marketsRoute({ fail = {}, seen = [] } = {}) {
       if (u.pathname.endsWith('/klines')) { const s = u.searchParams.get('symbol'), c = COINS.find(x => x[1].toUpperCase() + 'USDT' === s);
         return json(walk(s, c ? c[3] : 1, +u.searchParams.get('limit') || 96, 3600, Math.floor(Date.now() / 1000), 0.006).map(([t, p]) => [t * 1000, String(p), String(p), String(p), String(p), '1'])); }
     }
-    if (u.host === 'stooq.com') {
-      if (fail.stooq) return route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>Exceeded the daily hits limit</body></html>' });
-      if (u.pathname === '/q/l/') return text(stooqQuotes((u.searchParams.get('s') || '').split(/[ +]/).filter(Boolean)));
-      if (u.pathname === '/q/d/l/') return text(stooqHistory(u.searchParams.get('s') || 'aapl.us', 30));
+    if (u.host === 'query1.finance.yahoo.com') {
+      if (fail.yahoo) return route.fulfill({ status: 429, contentType: 'text/plain', body: 'Edge: Too Many Requests' });
+      if (u.pathname === '/v7/finance/spark') {
+        const syms = (u.searchParams.get('symbols') || '').split(',').filter(Boolean);
+        if (syms.length > 20) return route.fulfill({ status: 400, contentType: 'application/json',
+          body: JSON.stringify({ spark: { result: null, error: { code: 'Bad Request', description: 'Number of symbols needs to be less than or equal to 20' } } }) });
+        return json(yahooSpark(syms));
+      }
+      const ch = u.pathname.match(/^\/v8\/finance\/chart\/([^/]+)$/);
+      if (ch) return json(yahooChart(decodeURIComponent(ch[1]), u.searchParams.get('range') || '1mo', undefined, u.searchParams.get('interval') || '1d'));
     }
     /* a company's logo: a plain square for two of them, none for the rest (so the ticker chip shows) */
     if (u.host === 'api.elbstream.com') {

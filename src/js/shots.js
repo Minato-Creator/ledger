@@ -18,6 +18,8 @@
 
 /** Where a trade's screenshot lives. Named off the trade, so the folder is
     browsable and nothing is orphaned by a rename. */
+import { isTauri } from './fs.js';
+
 export const shotName = (tradeId, slot) => `screenshots/${tradeId}-${slot}.jpg`;
 
 const MAX_EDGE = 2200;          // wider than this is detail no screen shows
@@ -90,6 +92,50 @@ export function imageOnClipboard(e) {
     }
   }
   return null;
+}
+
+/* ---------- a TradingView snapshot link (7 Nov) ----------
+   In TradingView, camera → Copy link gives tradingview.com/x/<id>/ — a public
+   picture of the chart as it was when taken (unlike a /chart/ layout link,
+   which only opens inside TradingView). The picture itself is kept at
+   s3.tradingview.com/snapshots/<first letter>/<id>.png. Pasted or dropped on
+   a trade's Charts box, the picture is fetched and saved like any screenshot,
+   so it stays with the trade even if the link stops working. */
+const TV_X = /^\s*https?:\/\/(?:[a-z]{2,3}\.)?tradingview\.com\/x\/([A-Za-z0-9]{4,20})\/?(?:[?#]\S*)?\s*$/;
+const TV_S3 = /^\s*https:\/\/s3\.tradingview\.com\/snapshots\/[a-z0-9]\/([A-Za-z0-9]{4,20})\.png\s*$/;
+export function snapshotOf(text) {
+  const s = String(text || '').trim().split(/\s+/)[0] || '';
+  const m = TV_X.exec(s) || TV_S3.exec(s);
+  if (!m) return null;
+  const id = m[1], at = c => `https://s3.tradingview.com/snapshots/${c}/${id}.png`;
+  /* the folder is the id's first letter, written small; as written, should that ever change */
+  const images = [...new Set([at(id[0].toLowerCase()), at(id[0])])];
+  return { id, link: `https://www.tradingview.com/x/${id}/`, image: images[0], images };
+}
+async function snapshotBlob(url) {
+  if (isTauri()) {
+    /* the desktop's own rules keep the page to itself; the shell fetches it (main.rs fetch_image) */
+    const b64 = await window.__TAURI__.core.invoke('fetch_image', { url });
+    const bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: bytes[0] === 0xFF ? 'image/jpeg' : 'image/png' });
+  }
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`TradingView said ${res.status}`);
+  const blob = await res.blob();
+  if (blob.type && !/^image\//.test(blob.type)) throw new Error('TradingView did not send a picture');
+  return blob;
+}
+/** The picture behind a snapshot link, as a file ready for prepare(). */
+export async function fetchSnapshot(snap) {
+  let last = null;
+  for (const url of snap.images || [snap.image]) {
+    try {
+      const blob = await snapshotBlob(url);
+      return new File([blob], `tradingview-${snap.id}.${blob.type === 'image/jpeg' ? 'jpg' : 'png'}`, { type: blob.type || 'image/png' });
+    } catch (e) { last = e; }
+  }
+  throw last || new Error('no picture');
 }
 
 /** A file dragged onto something, if it is an image. */

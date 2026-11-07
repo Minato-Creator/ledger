@@ -79,7 +79,7 @@ export function markets(store, nav) {
     el('button', { type: 'button', role: 'tab', class: k === tab ? 'is-on' : '', 'data-tab': k, 'aria-selected': String(k === tab),
       onClick: () => { if (k === tab) return; tab = k; try { localStorage.setItem(TAB_KEY, k); } catch { /* remembered for now only */ } nav.refresh({ keepFocus: true }); } }, label)));
   function paintHead() {
-    const src = data?.source ? `${data.source}${data.source === 'Stooq' ? ' (can lag)' : ''}` : '';
+    const src = data?.source || '';
     const age = data?.at ? Math.round((Date.now() - data.at) / 60000) : null;
     stamp.textContent = busy ? 'asking…' : age == null ? '' : `${src} · ${age < 1 ? 'just now' : age < 60 ? `${age}m ago` : `${Math.floor(age / 60)}h ago`}`;
     err.textContent = busy ? '' : error ? (data ? `${error} Showing the last prices.` : '') : '';
@@ -145,14 +145,17 @@ export function markets(store, nav) {
     const none = !data?.items?.length;
     empty.hidden = !none;
     if (!none) return;
-    empty.replaceChildren(
+    /* (replaceChildren writes a null out as the word "null" — so only what is there) */
+    empty.replaceChildren(...[
       el('strong', {}, busy ? 'Asking for the prices…' : error ? 'No prices yet' : 'Nothing here yet'),
       el('span', {}, busy ? '' : error || ''),
-      !busy && /OANDA key/.test(error || '') ? el('button', { class: 'btn btn-light', onClick: () => nav.go('#/settings/charts') }, 'Add your OANDA key') : null);
+      !busy && /OANDA key/.test(error || '') ? el('button', { class: 'btn btn-light', onClick: () => nav.go('#/settings/charts') }, 'Add your OANDA key')
+        : !busy && /Finnhub key/.test(error || '') ? el('button', { class: 'btn btn-light', onClick: () => nav.go('#/settings/charts') }, 'Open Settings') : null,
+    ].filter(Boolean));
   }
   const tick = setInterval(() => {
-    if (!fieldEl.isConnected) { if (fieldEl.__seen) clearInterval(tick); return; }
-    fieldEl.__seen = true;
+    /* gone (or never shown, fifteen seconds on): this page's timer stops for good */
+    if (!fieldEl.isConnected) { clearInterval(tick); return; }
     paintHead();
     if (!document.hidden && !busy && (!data || Date.now() - data.at > M.EVERY[tab])) pull();
   }, 15000);

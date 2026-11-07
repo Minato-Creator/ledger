@@ -12,52 +12,116 @@
 
    Every command returns Result<_, String> so a failure arrives in the UI as
    a message rather than an unhandled rejection.
+
+   Off the window's thread (7 Nov). A plain #[tauri::command] runs on the
+   main thread — the one that draws the window and takes its clicks — so
+   while it waited on the disk or, worse, the network (OANDA, the prices, the
+   news), the whole app stood still with it: the desktop app went slow where
+   the web page did not. Everything that touches the disk or the network now
+   runs on Tauri's pool of blocking threads (`off_main`); the page asks and
+   is answered exactly as before. The page keeps calls on one file in the
+   order it made them (fs.js), since the main thread no longer does.
    ============================================================ */
 
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
-#[tauri::command]
-fn read_text(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
+/// Do blocking work — a file, a request — away from the window's thread, and
+/// hand back its answer.
+async fn off_main<T, F>(work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
 }
 
-/// Writes a file, creating the folders above it first. Journal files are
-/// small, so this is a plain whole-file write — no partial states to reason
-/// about.
 #[tauri::command]
-fn write_text(path: String, contents: String) -> Result<(), String> {
-    if let Some(parent) = Path::new(&path).parent() {
+async fn read_text(path: String) -> Result<String, String> {
+    off_main(move || std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))).await
+}
+
+/// Writes a file, creating the folders above it first.
+#[tauri::command]
+async fn write_text(path: String, contents: String) -> Result<(), String> {
+    off_main(move || write_text_now(&path, &contents)).await
+}
+
+/* Never a half-written file (7 Nov). A plain write cut off part way — the app
+   closed by Windows while it was "Not Responding", a crash, the power — left
+   a file with half a journal in it, and the next opening read that as no
+   journal at all. Now the new text goes to <name>.tmp beside it, is made
+   whole on disk, and then takes the old file's place in one step: a cut-off
+   save leaves the old file or the new one, never half of either. The file it
+   replaces is kept as <name>.bak first, so the version before the last save
+   is always one step away (store.js opens it when the file itself is
+   damaged). If the swap is refused — a sync client or an editor holding the
+   file open — it is written in place, as before. */
+fn write_text_now(path: &str, contents: &str) -> Result<(), String> {
+    use std::io::Write;
+    let target = Path::new(path);
+    if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    std::fs::write(&path, contents).map_err(|e| format!("{path}: {e}"))
+    let tmp = beside(target, "tmp");
+    let written = (|| -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(contents.as_bytes())?;
+        f.sync_all()
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return std::fs::write(target, contents).map_err(|e2| format!("{path}: {e2} (and {e})"));
+    }
+    if target.exists() {
+        let _ = std::fs::copy(target, beside(target, "bak"));
+    }
+    match std::fs::rename(&tmp, target) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let _ = std::fs::remove_file(&tmp);
+            std::fs::write(target, contents).map_err(|e| format!("{path}: {e}"))
+        }
+    }
+}
+
+/// `<name>.<ext>` in the same folder: trades.json → trades.json.bak.
+fn beside(p: &Path, ext: &str) -> PathBuf {
+    let mut name = p.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".");
+    name.push(ext);
+    p.with_file_name(name)
 }
 
 /* Screenshots. They cross the bridge as base64 because that is what a JSON
    IPC call can carry, and land as real image files you can open from the
    folder — the point of keeping the journal as files at all. */
 #[tauri::command]
-fn read_image(path: String) -> Result<Option<String>, String> {
-    match std::fs::read(&path) {
+async fn read_image(path: String) -> Result<Option<String>, String> {
+    off_main(move || match std::fs::read(&path) {
         Ok(bytes) => Ok(Some(b64_encode(&bytes))),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("{path}: {e}")),
-    }
+    })
+    .await
 }
 
 #[tauri::command]
-fn write_image(path: String, data: String) -> Result<(), String> {
-    let bytes = b64_decode(&data).ok_or_else(|| format!("{path}: not valid base64"))?;
-    if let Some(parent) = Path::new(&path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-    }
-    std::fs::write(&path, bytes).map_err(|e| format!("{path}: {e}"))
+async fn write_image(path: String, data: String) -> Result<(), String> {
+    off_main(move || {
+        let bytes = b64_decode(&data).ok_or_else(|| format!("{path}: not valid base64"))?;
+        if let Some(parent) = Path::new(&path).parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        std::fs::write(&path, bytes).map_err(|e| format!("{path}: {e}"))
+    })
+    .await
 }
 
 /// Show a folder in the operating system's own file manager. Every platform
 /// spells this differently and none of them need a crate for it.
 #[tauri::command]
-fn open_path(path: String) -> Result<(), String> {
+async fn open_path(path: String) -> Result<(), String> {
     let program = if cfg!(target_os = "windows") {
         "explorer"
     } else if cfg!(target_os = "macos") {
@@ -65,21 +129,25 @@ fn open_path(path: String) -> Result<(), String> {
     } else {
         "xdg-open"
     };
-    std::process::Command::new(program)
-        .arg(&path)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("{path}: {e}"))
+    off_main(move || {
+        std::process::Command::new(program)
+            .arg(&path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("{path}: {e}"))
+    })
+    .await
 }
 
 /// Removing one file. Already gone counts as done.
 #[tauri::command]
-fn delete_path(path: String) -> Result<(), String> {
-    match std::fs::remove_file(&path) {
+async fn delete_path(path: String) -> Result<(), String> {
+    off_main(move || match std::fs::remove_file(&path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(format!("{path}: {e}")),
-    }
+    })
+    .await
 }
 
 /* Base64, by hand. Pulling a crate in for forty lines would add a dependency
@@ -117,21 +185,26 @@ fn b64_decode(text: &str) -> Option<Vec<u8>> {
 }
 
 #[tauri::command]
-fn make_dir(path: String) -> Result<(), String> {
-    std::fs::create_dir_all(&path).map_err(|e| format!("{path}: {e}"))
+async fn make_dir(path: String) -> Result<(), String> {
+    off_main(move || std::fs::create_dir_all(&path).map_err(|e| format!("{path}: {e}"))).await
 }
 
+/* (a folder on a cloud drive can take a moment to answer even this) */
 #[tauri::command]
-fn path_exists(path: String) -> bool {
-    Path::new(&path).exists()
+async fn path_exists(path: String) -> Result<bool, String> {
+    off_main(move || Ok(Path::new(&path).exists())).await
 }
 
 /// Renames a folder where it stands. Used once: a journal folder made while
 /// the app was still called Ledger becomes "Quire". It never overwrites — if
 /// the new name is taken, nothing happens and the old folder is kept.
 #[tauri::command]
-fn rename_dir(from: String, to: String) -> Result<(), String> {
-    let (f, t) = (Path::new(&from), Path::new(&to));
+async fn rename_dir(from: String, to: String) -> Result<(), String> {
+    off_main(move || rename_dir_now(&from, &to)).await
+}
+
+fn rename_dir_now(from: &str, to: &str) -> Result<(), String> {
+    let (f, t) = (Path::new(from), Path::new(to));
     if !f.is_dir() {
         return Err(format!("{from}: not a folder"));
     }
@@ -167,6 +240,133 @@ fn default_folder(app: tauri::AppHandle) -> Result<String, String> {
     Ok(base.join("Quire").to_string_lossy().to_string())
 }
 
+/* A TradingView snapshot, as a picture (7 Nov). The Charts box takes a
+   snapshot link (camera → Copy link: tradingview.com/x/<id>/) and saves the
+   picture behind it, which TradingView keeps at
+   s3.tradingview.com/snapshots/<letter>/<id>.png. One host, that one shape
+   of address, reading only, no bigger than a screenshot should be, and only
+   a PNG or JPEG comes back — as base64, like read_image. */
+#[tauri::command]
+async fn fetch_image(url: String) -> Result<String, String> {
+    off_main(move || fetch_image_now(&url)).await
+}
+
+fn check_image_url(url: &str) -> Result<(), String> {
+    let refuse = || Err(format!("not a TradingView snapshot: {url}"));
+    let Some(rest) = url.strip_prefix("https://s3.tradingview.com/snapshots/") else { return refuse() };
+    let mut parts = rest.split('/');
+    let (Some(dir), Some(file), None) = (parts.next(), parts.next(), parts.next()) else { return refuse() };
+    let Some(id) = file.strip_suffix(".png") else { return refuse() };
+    let ok = dir.len() == 1
+        && dir.chars().all(|c| c.is_ascii_alphanumeric())
+        && (4..=20).contains(&id.len())
+        && id.chars().all(|c| c.is_ascii_alphanumeric());
+    if ok { Ok(()) } else { refuse() }
+}
+
+fn fetch_image_now(url: &str) -> Result<String, String> {
+    use std::io::Read;
+    check_image_url(url)?;
+    const MOST: u64 = 16 * 1024 * 1024;
+    let res = ureq::get(url)
+        .timeout(std::time::Duration::from_secs(20))
+        .set("User-Agent", "Mozilla/5.0 (compatible; Laminar)")
+        .call();
+    match res {
+        Ok(r) => {
+            let mut bytes = Vec::new();
+            r.into_reader().take(MOST + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+            if bytes.len() as u64 > MOST {
+                return Err("that picture is too big to be a chart".into());
+            }
+            let png = bytes.starts_with(&[0x89, b'P', b'N', b'G']);
+            let jpeg = bytes.starts_with(&[0xFF, 0xD8, 0xFF]);
+            if !png && !jpeg {
+                return Err("TradingView did not send a picture".into());
+            }
+            Ok(b64_encode(&bytes))
+        }
+        Err(ureq::Error::Status(code, _)) => Err(format!("s3.tradingview.com said {code}")),
+        Err(_) => Err("could not reach s3.tradingview.com".into()),
+    }
+}
+
+/* Journals on this computer (7 Nov). Laminar can lose track of the folder
+   it was using — its settings file reset, and it opens a new, empty journal
+   while the real one sits somewhere else (Minato's on another drive, in
+   D:\<name>\Documents). This finds folders holding a Laminar journal — a
+   vault.json that says "quire-vault" — in, or one level inside, the usual
+   places: Documents, the home folder and the desktop, and on Windows the same
+   folders kept on any other drive (X:\<name>\Documents, X:\Users\<name>\...).
+   Names and that one small file are read; nothing is opened or changed. */
+#[tauri::command]
+async fn find_vaults(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for p in [app.path().document_dir(), app.path().home_dir(), app.path().desktop_dir()]
+        .into_iter()
+        .flatten()
+    {
+        roots.push(p);
+    }
+    let user = app
+        .path()
+        .home_dir()
+        .ok()
+        .and_then(|h| h.file_name().map(|n| n.to_os_string()));
+    off_main(move || {
+        if cfg!(target_os = "windows") {
+            if let Some(name) = &user {
+                for letter in b'C'..=b'Z' {
+                    let drive = PathBuf::from(format!("{}:\\", letter as char));
+                    if !drive.is_dir() {
+                        continue;
+                    }
+                    for base in [drive.join(name), drive.join("Users").join(name)] {
+                        roots.push(base.join("Documents"));
+                        roots.push(base.join("Desktop"));
+                        roots.push(base);
+                    }
+                }
+            }
+        }
+        Ok(vaults_in(&roots))
+    })
+    .await
+}
+
+/// Each root, and each folder directly inside it, that holds a Laminar vault.
+fn vaults_in(roots: &[PathBuf]) -> Vec<String> {
+    let is_vault = |dir: &Path| {
+        std::fs::read_to_string(dir.join("vault.json"))
+            .map(|t| t.contains("quire-vault"))
+            .unwrap_or(false)
+    };
+    let mut found: Vec<String> = Vec::new();
+    let mut add = |dir: &Path| {
+        let s = dir.to_string_lossy().to_string();
+        if !found.iter().any(|f| f.eq_ignore_ascii_case(&s)) {
+            found.push(s);
+        }
+    };
+    for root in roots {
+        if !root.is_dir() {
+            continue;
+        }
+        if is_vault(root) {
+            add(root);
+        }
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let dir = entry.path();
+                if dir.is_dir() && is_vault(&dir) {
+                    add(&dir);
+                }
+            }
+        }
+    }
+    found
+}
+
 /// The allowlist, on its own so it can be tested without a network.
 ///
 /// A webview that can ask the shell to fetch any URL is a hole: a page bug,
@@ -179,13 +379,15 @@ fn check_url(url: &str) -> Result<(), String> {
        the app is a deliberate line here, not something a URL can decide. */
     /* Plan → Markets (6 Nov): coin prices from CoinGecko's keyless API or
        Binance's public market data, and company prices from Stooq, or from
-       Finnhub once a key is added — reading only, like the rest. */
+       Finnhub once a key is added — reading only, like the rest. 7 Nov:
+       Stooq's quote address went away, so company prices come from Yahoo
+       Finance's public chart host instead, and Stooq is off the list. */
     const ALLOWED: [&str; 6] = [
         "nfs.faireconomy.media",
         "investinglive.com",
         "api.coingecko.com",
         "data-api.binance.vision",
-        "stooq.com",
+        "query1.finance.yahoo.com",
         "finnhub.io",
     ];
 
@@ -252,8 +454,12 @@ fn check_query(query: &str) -> Result<(), String> {
 /// goes in the Authorization header and nowhere else, and only to OANDA's
 /// practice or live API.
 #[tauri::command]
-fn fetch_oanda(path: String, token: String, live: bool) -> Result<String, String> {
-    check_oanda_path(&path)?;
+async fn fetch_oanda(path: String, token: String, live: bool) -> Result<String, String> {
+    off_main(move || fetch_oanda_now(&path, &token, live)).await
+}
+
+fn fetch_oanda_now(path: &str, token: &str, live: bool) -> Result<String, String> {
+    check_oanda_path(path)?;
     let token = token.trim();
     if token.is_empty() || token.len() > 200 || !token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err("that key does not look like an OANDA key".into());
@@ -287,16 +493,34 @@ fn fetch_oanda(path: String, token: String, live: bool) -> Result<String, String
 /// the page, and a general-purpose "fetch anything" handed to a webview is a
 /// hole, not a feature.
 #[tauri::command]
-fn fetch_text(url: String) -> Result<String, String> {
-    check_url(&url)?;
+async fn fetch_text(url: String) -> Result<String, String> {
+    off_main(move || fetch_text_now(&url)).await
+}
 
-    let res = ureq::get(&url)
+fn fetch_text_now(url: &str) -> Result<String, String> {
+    check_url(url)?;
+    let host = host_of(url);
+
+    /* "compatible; Laminar": it says what is asking, in the form servers
+       expect — Yahoo turns away requests that carry no browser-style name */
+    let res = ureq::get(url)
         .timeout(std::time::Duration::from_secs(20))
-        .set("User-Agent", "Laminar")
-        .call()
-        .map_err(|e| e.to_string())?;
+        .set("User-Agent", "Mozilla/5.0 (compatible; Laminar)")
+        .call();
+    match res {
+        Ok(r) => r.into_string().map_err(|e| e.to_string()),
+        /* the host and its answer, never the whole address: the message is
+           shown on screen, and a Finnhub address carries its key */
+        Err(ureq::Error::Status(code, _)) => Err(format!("{host} said {code}")),
+        Err(_) => Err(format!("could not reach {host}")),
+    }
+}
 
-    res.into_string().map_err(|e| e.to_string())
+/// The host of an https address already passed by check_url.
+fn host_of(url: &str) -> String {
+    let rest = url.strip_prefix("https://").unwrap_or(url);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    authority.split(':').next().unwrap_or("").to_string()
 }
 
 fn main() {
@@ -323,7 +547,9 @@ fn main() {
             path_sep,
             config_dir,
             default_folder,
-            fetch_text
+            fetch_text,
+            find_vaults,
+            fetch_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running Laminar");
@@ -333,7 +559,14 @@ fn main() {
    it would quietly corrupt every screenshot the desktop app ever saved. */
 #[cfg(test)]
 mod url_tests {
-    use super::check_url;
+    use super::{check_url, host_of};
+
+    #[test]
+    fn an_error_names_the_host_not_the_address() {
+        assert_eq!(host_of("https://finnhub.io/api/v1/quote?symbol=AAPL&token=secret"), "finnhub.io");
+        assert_eq!(host_of("https://query1.finance.yahoo.com/v7/finance/spark?symbols=AAPL"), "query1.finance.yahoo.com");
+        assert_eq!(host_of("https://investinglive.com:443/feed/"), "investinglive.com");
+    }
 
     #[test]
     fn allows_the_named_hosts_over_https() {
@@ -343,7 +576,8 @@ mod url_tests {
         assert!(check_url("https://investinglive.com/feed/centralbank/").is_ok());
         assert!(check_url("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=60").is_ok());
         assert!(check_url("https://data-api.binance.vision/api/v3/ticker/24hr?type=MINI").is_ok());
-        assert!(check_url("https://stooq.com/q/l/?s=aapl.us+msft.us&f=sd2t2ohlcv&h&e=csv").is_ok());
+        assert!(check_url("https://query1.finance.yahoo.com/v7/finance/spark?symbols=AAPL,BRK-B&range=1d&interval=1d").is_ok());
+        assert!(check_url("https://query1.finance.yahoo.com/v8/finance/chart/BRK-B?range=1mo&interval=1d").is_ok());
         assert!(check_url("https://finnhub.io/api/v1/quote?symbol=AAPL&token=x").is_ok());
     }
 
@@ -361,8 +595,13 @@ mod url_tests {
             "https://api.coingecko.com.evil.example/x",     // the market hosts, spoofed
             "https://coingecko.com/api/v3/ping",            // only the API host, not the site
             "https://api.binance.com/api/v3/order",         // Binance's trading API is not on the list
-            "https://stooq.com@evil.example/q/l/",
-            "http://stooq.com/q/l/",                        // not https
+            "https://stooq.com/q/l/?s=aapl.us",             // off the list since 7 Nov
+            "https://query1.finance.yahoo.com.evil.example/v8/finance/chart/AAPL", // Yahoo, spoofed
+            "https://query1.finance.yahoo.com@evil.example/v8/finance/chart/AAPL",
+            "https://evilquery1.finance.yahoo.com/x",
+            "https://finance.yahoo.com/quote/AAPL",         // only the data host, not the site
+            "https://query2.finance.yahoo.com/v8/finance/chart/AAPL", // nor its twin
+            "http://query1.finance.yahoo.com/v8/finance/chart/AAPL",  // not https
             "https://finnhub.io.evil.example/api/v1/quote",
             "file:///etc/passwd",
             "https://127.0.0.1/x",
@@ -407,8 +646,78 @@ mod tests {
 }
 
 #[cfg(test)]
+mod image_url_tests {
+    use super::check_image_url;
+
+    #[test]
+    fn only_tradingview_snapshots() {
+        assert!(check_image_url("https://s3.tradingview.com/snapshots/k/krNx1I9g.png").is_ok());
+        assert!(check_image_url("https://s3.tradingview.com/snapshots/a/AbC123de.png").is_ok());
+        for bad in [
+            "http://s3.tradingview.com/snapshots/k/krNx1I9g.png",
+            "https://s3.tradingview.com.evil.example/snapshots/k/krNx1I9g.png",
+            "https://s3.tradingview.com@evil.example/snapshots/k/krNx1I9g.png",
+            "https://www.tradingview.com/x/krNx1I9g/",
+            "https://s3.tradingview.com/snapshots/k/krNx1I9g.png?x=1",
+            "https://s3.tradingview.com/snapshots/kk/krNx1I9g.png",
+            "https://s3.tradingview.com/snapshots/k/../krNx1I9g.png",
+            "https://s3.tradingview.com/snapshots/k/sub/krNx1I9g.png",
+            "https://s3.tradingview.com/snapshots/k/krNx1I9g.svg",
+            "https://s3.tradingview.com/other/k/krNx1I9g.png",
+        ] {
+            assert!(check_image_url(bad).is_err(), "should refuse {bad}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod find_tests {
+    use super::vaults_in;
+
+    #[test]
+    fn finds_journals_one_level_in_and_nothing_else() {
+        let base = std::env::temp_dir().join(format!("laminar-find-{}", std::process::id()));
+        let docs = base.join("Documents");
+        for d in ["Ledger Vault/data", "Quire/data", "Photos", "Other"] {
+            std::fs::create_dir_all(docs.join(d)).unwrap();
+        }
+        std::fs::write(docs.join("Ledger Vault").join("vault.json"), "{\"kind\":\"quire-vault\"}").unwrap();
+        std::fs::write(docs.join("Quire").join("vault.json"), "{\"kind\":\"quire-vault\"}").unwrap();
+        std::fs::write(docs.join("Other").join("vault.json"), "{\"kind\":\"something-else\"}").unwrap();
+        let mut found = vaults_in(&[docs.clone(), docs.clone(), base.join("missing")]);
+        found.sort();
+        let names: Vec<String> = found
+            .iter()
+            .map(|f| std::path::Path::new(f).file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["Ledger Vault", "Quire"]);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use super::write_text_now;
+
+    #[test]
+    fn writes_whole_and_keeps_the_one_before_as_bak() {
+        let base = std::env::temp_dir().join(format!("laminar-write-{}", std::process::id()));
+        let file = base.join("data").join("trades.json");
+        let path = file.to_string_lossy().to_string();
+        write_text_now(&path, "{\"v\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{\"v\":1}");
+        assert!(!base.join("data").join("trades.json.bak").exists(), "nothing to keep the first time");
+        write_text_now(&path, "{\"v\":2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{\"v\":2}");
+        assert_eq!(std::fs::read_to_string(base.join("data").join("trades.json.bak")).unwrap(), "{\"v\":1}");
+        assert!(!base.join("data").join("trades.json.tmp").exists(), "no half-file left behind");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+}
+
+#[cfg(test)]
 mod rename_tests {
-    use super::rename_dir;
+    use super::rename_dir_now as rename_dir;
 
     #[test]
     fn renames_a_folder_and_keeps_what_is_inside() {
@@ -417,7 +726,7 @@ mod rename_tests {
         let to = base.join("Quire");
         std::fs::create_dir_all(from.join("data")).unwrap();
         std::fs::write(from.join("data").join("trades.json"), "{}").unwrap();
-        rename_dir(from.to_string_lossy().into(), to.to_string_lossy().into()).unwrap();
+        rename_dir(&from.to_string_lossy(), &to.to_string_lossy()).unwrap();
         assert!(!from.exists());
         assert_eq!(std::fs::read_to_string(to.join("data").join("trades.json")).unwrap(), "{}");
         std::fs::remove_dir_all(&base).unwrap();
@@ -430,7 +739,7 @@ mod rename_tests {
         let to = base.join("Quire");
         std::fs::create_dir_all(&from).unwrap();
         std::fs::create_dir_all(&to).unwrap();
-        assert!(rename_dir(from.to_string_lossy().into(), to.to_string_lossy().into()).is_err());
+        assert!(rename_dir(&from.to_string_lossy(), &to.to_string_lossy()).is_err());
         assert!(from.exists() && to.exists());
         std::fs::remove_dir_all(&base).unwrap();
     }
@@ -438,7 +747,7 @@ mod rename_tests {
     #[test]
     fn refuses_something_that_is_not_a_folder() {
         let p = std::env::temp_dir().join(format!("quire-rename-c-{}", std::process::id()));
-        assert!(rename_dir(p.to_string_lossy().into(), p.with_extension("x").to_string_lossy().into()).is_err());
+        assert!(rename_dir(&p.to_string_lossy(), &p.with_extension("x").to_string_lossy()).is_err());
     }
 }
 

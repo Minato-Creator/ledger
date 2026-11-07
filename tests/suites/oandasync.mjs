@@ -87,7 +87,12 @@ await p.evaluate(() => { location.hash = '#/import'; }); await p.waitForTimeout(
 t('nothing asked of OANDA until you press it', SEEN.length === 0);
 
 console.log('  -- the first sync --');
+/* every accounts.json the sync writes, to see that none of them — not even one in passing — switched you over */
+await p.evaluate(async () => { const { fs } = await import('/js/fs.js'); const w = fs.writeText; window.__activeWritten = [];
+  fs.writeText = (n, c) => { if (n === 'data/accounts.json') window.__activeWritten.push(JSON.parse(c).activeAccountId); return w(n, c); }; });
 await p.click('.im-oanda-go'); await p.waitForTimeout(1500);
+const written = await p.evaluate(() => window.__activeWritten);
+t('no save along the way ever switched you to the new account, even for a moment', written.length >= 1 && written.every(x => x === 'acc_1'), JSON.stringify(written));
 let F = await files();
 const acct = F['data/accounts.json'].accounts.find(a => a.firm === 'oanda');
 t('a journal account of its own, OANDA Demo, at OANDA', acct && acct.name === 'OANDA Demo' && acct.kind === 'live' && acct.currency === 'USD', JSON.stringify(acct));
@@ -174,6 +179,43 @@ t('pressing it brings the new trade in', !!T('52'), String(F['data/trades.json']
 t('…and the top-up is not taken twice', F['data/accounts.json'].accounts.find(a => a.firm === 'oanda').adjustments.filter(x => x.kind === 'funding').length === 1);
 t('…from another account it stays there, your trades still on screen', F['data/accounts.json'].activeAccountId === 'acc_1'
   && await p.evaluate(() => /USDJPY|USD\/JPY/.test(document.querySelector('.main').innerText) && /in OANDA Demo/.test(document.querySelector('#toast')?.innerText || '')));
+
+console.log('  -- a synced trade you moved to another account --');
+await p.evaluate(async id => { const { store } = await import('/js/store.js'); await store.updateTrade(id, { accountId: 'acc_1' }); }, `oanda-${ACC}-41`);
+await p.click('.jr-sync'); await p.waitForTimeout(1500);
+F = await files();
+t('stays where you put it after the next sync, not pulled back to OANDA Demo', T('41')?.accountId === 'acc_1' && T('41').netResult === 246.8, JSON.stringify(T('41') && [T('41').accountId, T('41').netResult]));
+t('…and nothing went missing: every trade still there', F['data/trades.json'].trades.some(x => x.id === 'apex-1') && F['data/trades.json'].trades.filter(x => x.oanda).length === 5,
+  String(F['data/trades.json'].trades.length));
+
+console.log('  -- OANDA trades from a day you choose (Settings → Charts & prices) --');
+/* a forward test of your own in the OANDA account, before the day — it must stay */
+await p.evaluate(async () => { const { store } = await import('/js/store.js'); const jr = store.data.accounts.oanda.laminarId;
+  store.data.trades.trades.push({ id: 'mine-fwd', accountId: jr, mode: 'forward', pair: 'EURUSD', side: 'buy', status: 'closed', date: '2026-09-01', netResult: 50, tagIds: [] });
+  await store.save('trades'); await store.setTradeScope('all'); });
+await p.evaluate(() => { location.hash = '#/settings/charts'; }); await p.waitForTimeout(700);
+const osText = () => p.evaluate(() => document.querySelector('.os-card .os-status')?.innerText || '');
+t('the card is there, under your key: every OANDA trade shows to begin with', await p.evaluate(() => {
+  const cards = [...document.querySelectorAll('.ok-card')].map(c => c.querySelector('h2')?.textContent);
+  return cards[0] === 'Charts' && cards[1] === 'OANDA trades from'; }) && /Every OANDA trade shows · 5 synced/.test(await osText()), await osText());
+await p.fill('.os-card .os-date', '2026-09-17'); await p.waitForTimeout(500);
+t('a date typed in: the older ones are left out, and it says how many', /2 older OANDA trades left out · 3 shown/.test(await osText()), await osText());
+const vis = await p.evaluate(async () => { const { store } = await import('/js/store.js'); const jr = store.data.accounts.oanda.laminarId;
+  return { jr: store.allTradesFor(jr).map(x => x.id.replace(/^oanda-.*-/, '#')).sort(), acc1: store.allTradesFor('acc_1').map(x => x.id.replace(/^oanda-.*-/, '#')).sort() }; });
+t('…OANDA Demo shows only those from that day — and your own forward test from before it', JSON.stringify(vis.jr) === JSON.stringify(['#48', '#50', '#52', 'mine-fwd']), JSON.stringify(vis.jr));
+t('…in your other account too: the older OANDA one left out, your own trade still there', JSON.stringify(vis.acc1) === JSON.stringify(['apex-1']), JSON.stringify(vis.acc1));
+F = await files();
+t('…nothing deleted: all five OANDA trades still in the file, and the day kept with the journal',
+  F['data/trades.json'].trades.filter(x => x.oanda).length === 5 && F['data/accounts.json'].oandaSince === '2026-09-17');
+await p.evaluate(async () => { const { syncOanda } = await import('/js/oandasync.js'); const { store } = await import('/js/store.js'); window.__r = await syncOanda(store); });
+const r2 = await p.evaluate(() => ({ added: window.__r.added, updated: window.__r.updated }));
+F = await files();
+t('a sync afterwards keeps them in the file but never calls them new', r2.added === 0 && F['data/trades.json'].trades.filter(x => x.oanda).length === 5, JSON.stringify(r2));
+await p.click('.os-card .os-clear'); await p.waitForTimeout(500);
+F = await files();
+t('Show all: every one back at once, and the day gone from the journal', /Every OANDA trade shows · 5 synced/.test(await osText()) && !('oandaSince' in F['data/accounts.json'])
+  && await p.evaluate(async () => { const { store } = await import('/js/store.js'); return store.allTradesFor(store.data.accounts.oanda.laminarId).length === 5; }), await osText());
+await p.evaluate(async () => { const { store } = await import('/js/store.js'); store.data.trades.trades = store.data.trades.trades.filter(x => x.id !== 'mine-fwd'); await store.save('trades'); await store.setTradeScope('live'); });
 
 console.log('  -- a key OANDA will not take --');
 await p.unroute?.(/x/);

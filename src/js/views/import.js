@@ -302,7 +302,7 @@ function oandaCard(store, nav) {
     const cred = await cd.getKey();
     const link = store.data.accounts.oanda || null;
     const into = link?.laminarId ? store.accounts.find(a => a.id === link.laminarId) : null;
-    const count = into ? store.trades.filter(t => t.accountId === into.id && t.oanda).length : 0;
+    const count = into ? store.trades.filter(t => t.accountId === into.id && t.oanda && store.shownTrade(t)).length : 0;
     const go = el('button', { class: 'btn btn-primary im-oanda-go', disabled: busy || !cred, onClick: run },
       icon('refresh', 14, 'currentColor', 1.9), busy ? (note || 'Syncing…') : into ? 'Sync now' : 'Sync from OANDA');
     const auto = into ? el('label', { class: 'im-oanda-auto' },

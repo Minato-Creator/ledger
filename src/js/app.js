@@ -296,15 +296,72 @@ async function boot() {
   }
   render();
   intro.ready();
+  fileNotice();
+  await findYourJournal();
   quietSync();
+}
+
+/* ============================================================
+   Your journal, found (7 Nov)
+
+   Minato's desktop app lost track of his vault (its settings file reset) and
+   opened a new, empty journal, while his 29 trades sat untouched in
+   D:\bagus\Documents\Ledger Vault. Now, on the desktop: when the journal that
+   opened has no trades of your own (synced OANDA ones do not count) and
+   another journal on this computer does, Laminar opens that one instead —
+   the one with the most of your trades — and says so. Once: the folder it
+   moved to is remembered (vaultFound), so a journal you later choose to keep
+   empty on purpose is left alone. The empty one is not changed or deleted.
+   ============================================================ */
+const samePath = (a, b) => String(a || '').replace(/[\\/]+$/, '').toLowerCase() === String(b || '').replace(/[\\/]+$/, '').toLowerCase();
+async function findYourJournal() {
+  try {
+    if (!store.isNative || store.trades.some(t => !t.oanda)) return;
+    if (await fs.getSetting('vaultFound')) return;
+    const here = store.folderPath;
+    const found = (await fs.findVaults()).filter(p => !samePath(p, here));
+    const looks = (await Promise.all(found.map(p => fs.peekVault(p).catch(() => null)))).filter(v => v && v.own > 0);
+    if (!looks.length) return;
+    looks.sort((a, b) => b.own - a.own || String(b.latest).localeCompare(String(a.latest)));
+    const best = looks[0];
+    if (!(await store.createVault(best.path))) return;
+    await fs.setSetting('vaultFound', best.path).catch(() => {});
+    render();
+    fileNotice();
+    toast(`Your journal is back — ${best.own} trade${best.own === 1 ? '' : 's'} in ${best.path}. The empty one Laminar had opened${here ? ` (${here})` : ''} is left as it was.`);
+  } catch (e) { console.warn('looking for your journal:', e?.message || e); }
+}
+
+/* When a journal file could not be opened cleanly (store.readFile, 7 Nov): a
+   file opened from its last good copy is said once; one left alone because it
+   could not be read stays on screen, since nothing is saved to it until the
+   app is opened again. */
+const FILE_WORDS = { accounts: 'accounts', trades: 'trades', playbook: 'playbook', replay: 'replay', outlooks: 'outlooks', news: 'news',
+  wire: 'news feed', lab: 'lab', review: 'reviews', drawings: 'chart drawings' };
+const listOf = ks => { const w = ks.map(k => FILE_WORDS[k] || k); return w.length < 2 ? w.join('') : w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1]; };
+function fileNotice() {
+  const S = store.fileStates || {};
+  const guarded = Object.keys(S).filter(k => S[k].state === 'guarded');
+  const recovered = Object.keys(S).filter(k => S[k].state === 'recovered');
+  document.querySelector('.file-notice')?.remove();
+  if (guarded.length) {
+    const many = guarded.length > 1;
+    document.body.append(el('div', { class: 'file-notice', role: 'alert' },
+      el('strong', {}, `Laminar could not open your ${listOf(guarded)} file${many ? 's' : ''}`),
+      el('span', {}, `${many ? 'They are' : 'It is'} left exactly as ${many ? 'they were' : 'it was'}, and nothing will be saved to ${many ? 'them' : 'it'} until you open the app again. `
+        + 'Close Laminar and reopen it. If this keeps happening, a copy from each of the last seven days is in your vault’s data/backups folder.')));
+  }
+  if (recovered.length) toast(`Your ${listOf(recovered)} file${recovered.length > 1 ? 's were' : ' was'} damaged — Laminar opened the last good copy and kept the damaged one beside it`, 'warn');
 }
 
 /* Your OANDA trades come in by themselves each time the journal opens, once
    you have synced them the first time (Import trades → OANDA). Quietly: a
    word when something new arrived, nothing when it did not, and a failure
-   (offline, a key changed) waits for the button. */
+   (offline, a key changed) waits for the button. Never while the trades or
+   accounts file is being left alone (above): there is nothing safe to add to. */
 async function quietSync() {
   if (!autoSyncs(store)) return;
+  if (store.isGuarded('data/trades.json') || store.isGuarded('data/accounts.json')) return;
   try {
     const r = await syncOanda(store);
     if (r.added || r.updated) {

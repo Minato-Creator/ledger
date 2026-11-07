@@ -3,7 +3,7 @@ import { pairMark, instrumentOf, instrumentName } from '../flags.js';
 import * as c from '../calc.js';
 import { acctMark } from './acctlogo.js';
 import { todayISO, tradeShotsOf, newShotId } from '../store.js';
-import { prepare, imageOnClipboard, imageOnDrop, readableSize } from '../shots.js';
+import { prepare, imageOnClipboard, imageOnDrop, readableSize, snapshotOf, fetchSnapshot } from '../shots.js';
 import { CONFIDENCE, EMOTION_AFTER, EXEC_TFS, MISTAKES, DELIVERY, EXIT_REASONS, NEWS, HOLIDAYS, holidayName, heldAsked, heldOf } from '../questions.js';
 import { heldEditor } from './held.js';
 import { guessAssetClass } from '../broker.js';
@@ -360,7 +360,12 @@ export function addTrade(store, nav, existingId = null) {
         onClick: () => picker.click(),
         onDragOver: e => { e.preventDefault(); shotWrap.classList.add('is-over'); },
         onDragLeave: () => shotWrap.classList.remove('is-over'),
-        onDrop: e => { e.preventDefault(); shotWrap.classList.remove('is-over'); takeMany(imagesOnDrop(e)); } },
+        onDrop: e => { e.preventDefault(); shotWrap.classList.remove('is-over');
+          const imgs = imagesOnDrop(e);
+          /* a TradingView snapshot link dragged in from the browser */
+          const snap = imgs.length ? null : snapshotOf(e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text'));
+          snap ? takeSnapshot(snap) : takeMany(imgs); },
+        title: 'Drop or paste a picture — or a TradingView snapshot link (camera → Copy link)' },
         icon(nodes.length ? 'plus' : 'image', nodes.length ? 14 : 19, 'var(--grey-5)', nodes.length ? 2 : 1.6),
         nodes.length ? null
           : el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } }, 'Drop, paste or click')));
@@ -377,9 +382,23 @@ export function addTrade(store, nav, existingId = null) {
      row give you three charts in the order you took them. */
   function onPaste(e) {
     const file = imageOnClipboard(e);
-    if (!file) return;
+    if (file) { e.preventDefault(); take(file); return; }
+    /* a TradingView snapshot link (7 Nov) — pasted anywhere but into a text field, where it is just text */
+    if (e.target?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+    const snap = snapshotOf(e.clipboardData?.getData('text'));
+    if (!snap) return;
     e.preventDefault();
-    take(file);
+    takeSnapshot(snap);
+  }
+  async function takeSnapshot(snap) {
+    toast('Getting the chart from TradingView…');
+    let file;
+    try { file = await fetchSnapshot(snap); }
+    catch (err) {
+      toast(`Could not get that chart from TradingView (${err?.message || err}). In TradingView, camera → Copy image, then paste it here.`, 'warn');
+      return;
+    }
+    await take(file);
   }
 
   /* ---------- session ----------

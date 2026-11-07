@@ -100,8 +100,29 @@ function memoryBackend() {
    ============================================================ */
 const CONFIG_FILE = 'ledger.json';        // remembers which folder you chose
 
+/* One file, one thing at a time, in the order asked (7 Nov). The shell now
+   does its disk work off the window's thread, so calls no longer wait in line
+   by themselves there — two saves of trades.json could finish the wrong way
+   round and leave the older one on disk. Calls on the same path queue here,
+   each starting when the one before it has finished (well or not); calls on
+   different files still go side by side. */
+const ON_A_PATH = new Set(['read_text', 'write_text', 'read_image', 'write_image', 'delete_path', 'make_dir', 'path_exists', 'rename_dir']);
+const lines = new Map();
+export function inLine(key, job) {
+  const before = lines.get(key) || Promise.resolve();
+  const turn = before.then(job, job);
+  const done = turn.then(() => {}, () => {});
+  lines.set(key, done);
+  done.then(() => { if (lines.get(key) === done) lines.delete(key); });
+  return turn;
+}
+
 function tauriBackend() {
-  const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+  const invoke = (cmd, args) => {
+    const call = () => window.__TAURI__.core.invoke(cmd, args);
+    const key = ON_A_PATH.has(cmd) ? (args?.path ?? args?.from) : null;
+    return key ? inLine(key, call) : call();
+  };
   let root = null;                        // absolute path to the journal folder
   let sep = '/';
 
@@ -110,9 +131,25 @@ function tauriBackend() {
 
   const configPath = async () => join(await invoke('config_dir'), CONFIG_FILE);
 
-  async function readConfig() {
-    try { return JSON.parse(await invoke('read_text', { path: await configPath() })); }
-    catch { return {}; }
+  /* The settings file — which folder, your OANDA key. Not there: a first run,
+     nothing set. There but unreadable or damaged: the copy from before its
+     last save (<name>.bak, kept by the shell), and if that fails too, a save
+     of a setting is refused rather than writing every other setting away
+     (7 Nov — "had to grab a new api" may well have been this). */
+  async function readConfig({ strict = false } = {}) {
+    const path = await configPath();
+    let text = null;
+    try { text = await invoke('read_text', { path }); }
+    catch { if (!(await invoke('path_exists', { path }).catch(() => true))) return {}; }
+    for (const t of [text, await invoke('read_text', { path: path + '.bak' }).catch(() => null)]) {
+      if (t && t.trim()) { try { return JSON.parse(t); } catch { /* the next */ } }
+    }
+    if (!strict) return {};
+    /* there but not readable just now (held open elsewhere): nothing written over it */
+    if (text == null) throw new Error('Laminar could not read its settings file just now — try again in a moment.');
+    /* damaged, with no good copy: kept aside to look at, and started again from the folder in use */
+    await invoke('write_text', { path: path + '.damaged', contents: text }).catch(() => {});
+    return root ? { folder: root } : {};
   }
   async function writeConfig(cfg) {
     await invoke('write_text', { path: await configPath(), contents: JSON.stringify(cfg, null, 2) });
@@ -144,7 +181,7 @@ function tauriBackend() {
        say — live in the app's own config beside "which folder", never in
        the vault you might copy or share. */
     async getSetting(k) { return (await readConfig())[k] ?? null; },
-    async setSetting(k, v) { const cfg = await readConfig(); if (v == null) delete cfg[k]; else cfg[k] = v; await writeConfig(cfg); },
+    async setSetting(k, v) { const cfg = await readConfig({ strict: true }); if (v == null) delete cfg[k]; else cfg[k] = v; await writeConfig(cfg); },
     isSupported: () => true,
     get folderName() { return root ? root.split(/[\\/]/).filter(Boolean).pop() : null; },
     get folderPath() { return root; },
@@ -168,8 +205,17 @@ function tauriBackend() {
     async adopt(path) {
       root = path;
       await invoke('make_dir', { path: root });
-      await writeConfig({ folder: root });
+      /* the folder changes; the other settings (your OANDA key) stay — it used to write the folder alone (7 Nov) */
+      await writeConfig({ ...(await readConfig()), folder: root });
       return true;
+    },
+    /* journals elsewhere on this computer (main.rs find_vaults), and a look inside one without opening it */
+    findVaults: () => invoke('find_vaults'),
+    async peekVault(path) {
+      const t = await invoke('read_text', { path: join(path, 'data', 'trades.json') });
+      const trades = (JSON.parse(t).trades || []);
+      const own = trades.filter(x => !x.oanda);
+      return { path, own: own.length, total: trades.length, latest: own.map(x => x.date || '').sort().pop() || null };
     },
     async reveal() {
       if (!root) return false;
@@ -509,6 +555,8 @@ export const fs = {
      the file manager. Elsewhere these say so by answering null and false. */
   suggest: () => (active.suggest ? active.suggest() : Promise.resolve(null)),
   adopt:   p => (active.adopt ? active.adopt(p) : Promise.resolve(false)),
+  findVaults: () => (active.findVaults ? active.findVaults() : Promise.resolve([])),
+  peekVault:  p => (active.peekVault ? active.peekVault(p) : Promise.resolve(null)),
   reveal:  () => (active.reveal ? active.reveal() : Promise.resolve(false)),
   /* Per-computer settings kept out of the vault (an API key). The desktop
      app keeps them in its own config file; a browser keeps them in its own

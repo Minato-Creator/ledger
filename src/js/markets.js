@@ -3,15 +3,21 @@
    has moved today, for the bubbles, and its recent line, for the card.
 
    Three tabs, three sources, none asking you to sign up (Minato, 6 Nov):
-   - Forex & futures: his TradingView watchlist, from OANDA with the key
-     Laminar already has — the day is OANDA's (17:00 New York), the move
-     against yesterday's close. DXY is not an OANDA instrument, so it is
-     worked out from its six pairs with the index's own formula: it moves
-     with the real one, but is not ICE's number to the decimal.
-   - Stocks: fifty large US companies, from Stooq (no key; prices can lag and
-     the service can say no). With a Finnhub key in Settings the quotes come
-     from Finnhub instead, live, and nothing else changes. The day's base
-     (yesterday's close) is read once a day per company and kept.
+   - Forex & futures: his TradingView watchlist, from Yahoo Finance — all
+     sixteen in one request, no key (7 Nov: sixteen OANDA requests on every
+     visit froze the desktop app, then still the slowest tab). Each quote is
+     against yesterday's close. Yahoo has no spot gold, so gold is COMEX gold
+     futures (GC=F), NAS100 and US500 their futures (NQ=F, ES=F, round the
+     clock like the CFDs) — the moves match, the prices sit a little apart
+     from a broker's; DXY is the index itself (DX-Y.NYB). If Yahoo says no and
+     there is an OANDA key, the tab asks OANDA as before (DXY then worked out
+     from its six pairs with the index's own formula).
+   - Stocks: fifty large US companies, from Yahoo Finance's public chart data
+     (no key) — twenty companies a request, so three requests, each quote
+     carrying its own move against yesterday's close. With a Finnhub key in
+     Settings the quotes come from Finnhub instead, and nothing else changes.
+     (Stooq was the source until 7 Nov: its quote address went away in
+     October and its history now waits behind a browser check.)
    - Crypto: the top coins by size from CoinGecko's keyless API — one request
      gives every coin's price, 24-hour move and a week of hourly prices — or,
      when CoinGecko is busy, Binance's public market data.
@@ -27,10 +33,10 @@ import { fs } from './fs.js';
 /* ---------- what is on each tab ---------- */
 /* his watchlist, in his groups (gold is in two of them; it is shown once, in his own) */
 export const FOREX = [
-  { key: 'XAU_USD', label: 'XAUUSD', name: 'Gold', group: 'Minato', kind: 'metal' },
-  { key: 'NAS100_USD', label: 'NAS100', name: 'Nasdaq 100', group: 'Minato', kind: 'index', badge: '100' },
-  { key: 'SPX500_USD', label: 'US500', name: 'S&P 500', group: 'Minato', kind: 'index', badge: '500' },
-  { key: 'DXY', label: 'DXY', name: 'US Dollar Index', group: 'Minato', kind: 'dxy' },
+  { key: 'XAU_USD', label: 'XAUUSD', name: 'Gold', group: 'Minato', kind: 'metal', yahoo: 'GC=F' },
+  { key: 'NAS100_USD', label: 'NAS100', name: 'Nasdaq 100', group: 'Minato', kind: 'index', badge: '100', yahoo: 'NQ=F' },
+  { key: 'SPX500_USD', label: 'US500', name: 'S&P 500', group: 'Minato', kind: 'index', badge: '500', yahoo: 'ES=F' },
+  { key: 'DXY', label: 'DXY', name: 'US Dollar Index', group: 'Minato', kind: 'dxy', yahoo: 'DX-Y.NYB' },
   { key: 'EUR_USD', label: 'EURUSD', name: 'Euro / US Dollar', group: 'USD' },
   { key: 'GBP_USD', label: 'GBPUSD', name: 'British Pound / US Dollar', group: 'USD' },
   { key: 'AUD_USD', label: 'AUDUSD', name: 'Australian Dollar / US Dollar', group: 'USD' },
@@ -44,13 +50,16 @@ export const FOREX = [
   { key: 'USD_CAD', label: 'USDCAD', name: 'US Dollar / Canadian Dollar', group: 'Others' },
   { key: 'USD_CHF', label: 'USDCHF', name: 'US Dollar / Swiss Franc', group: 'Inverse for EUR/USD' },
 ];
+/* a pair as Yahoo writes it: EURUSD=X */
+for (const f of FOREX) if (!f.yahoo) f.yahoo = f.label + '=X';
 export const FOREX_GROUPS = ['Minato', 'USD', 'JPY', 'Others', 'Inverse for EUR/USD'];
 /* DXY = 50.14348112 × EURUSD^−0.576 × USDJPY^0.136 × GBPUSD^−0.119 × USDCAD^0.091 × USDSEK^0.042 × USDCHF^0.036 */
 const DXY_W = [['EUR_USD', -0.576], ['USD_JPY', 0.136], ['GBP_USD', -0.119], ['USD_CAD', 0.091], ['USD_SEK', 0.042], ['USD_CHF', 0.036]];
 const DXY_K = 50.14348112;
 export const dxyOf = px => DXY_K * DXY_W.reduce((m, [k, w]) => m * Math.pow(px[k], w), 1);
 
-const S = (label, name, sector) => ({ key: label, label, name, sector, stooq: label.toLowerCase().replace('.', '-') + '.us' });
+/* `yahoo`: the ticker as Yahoo writes it (BRK.B is BRK-B) */
+const S = (label, name, sector) => ({ key: label, label, name, sector, yahoo: label.replace('.', '-') });
 export const STOCKS = [
   ...[['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['NVDA', 'Nvidia'], ['AVGO', 'Broadcom'], ['ORCL', 'Oracle'], ['AMD', 'AMD'], ['ADBE', 'Adobe'],
     ['CRM', 'Salesforce'], ['INTC', 'Intel'], ['QCOM', 'Qualcomm'], ['CSCO', 'Cisco'], ['PLTR', 'Palantir']].map(([l, n]) => S(l, n, 'Technology')),
@@ -87,9 +96,22 @@ const COIN_NAMES = { BTC: 'Bitcoin', ETH: 'Ethereum', XRP: 'XRP', BNB: 'BNB', SO
 
 /* ---------- asking ---------- */
 const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI__;
-const CG = 'https://api.coingecko.com/api/v3', BN = 'https://data-api.binance.vision/api/v3', SQ = 'https://stooq.com', FH = 'https://finnhub.io/api/v1';
+const CG = 'https://api.coingecko.com/api/v3', BN = 'https://data-api.binance.vision/api/v3', YH = 'https://query1.finance.yahoo.com', FH = 'https://finnhub.io/api/v1';
+/* what went wrong, said with the host and its answer — never the whole address,
+   which is long, and for Finnhub carries the key */
+export function tidyError(msg, url) {
+  let host = '';
+  try { host = new URL(url).host; } catch { /* not an address */ }
+  const s = String(msg || 'no answer');
+  const code = /status code (\d{3})/.exec(s);
+  if (code && host) return `${host} said ${code[1]}`;
+  return host ? s.split(url).join(host) : s;
+}
 async function getText(url) {
-  if (isTauri()) return window.__TAURI__.core.invoke('fetch_text', { url });
+  if (isTauri()) {
+    try { return await window.__TAURI__.core.invoke('fetch_text', { url }); }
+    catch (e) { throw new Error(tidyError(e?.message || e, url)); }
+  }
   const res = await fetch(url, { cache: 'no-store' });
   const text = await res.text();
   if (!res.ok) throw new Error(`${new URL(url).host} said ${res.status}`);
@@ -125,8 +147,28 @@ async function oandaDaily(cred, inst) {
   return { price: last[4], base: prev ? prev[4] : last[1], at: last[0] };
 }
 export async function loadForex() {
+  let why = null;
+  try {
+    const j = await getJSON(`${YH}/v7/finance/spark?symbols=${FOREX.map(f => encodeURIComponent(f.yahoo)).join(',')}&range=1d&interval=1d`);
+    const meta = new Map();
+    for (const x of j?.spark?.result || []) { const m = x?.response?.[0]?.meta; if (m && x.symbol) meta.set(String(x.symbol).toUpperCase(), m); }
+    const items = FOREX.map(f => {
+      const q = yahooQuote(meta.get(f.yahoo.toUpperCase()));
+      return q ? { ...f, ...q, dp: f.kind === 'dxy' ? 3 : cd.decimalsOf(f.key) } : null;
+    }).filter(Boolean);
+    if (items.length) {
+      const v = { at: Date.now(), source: 'Yahoo Finance', items };
+      keep('forex', v);
+      return v;
+    }
+    why = j?.spark?.error?.description || 'no prices';
+  } catch (e) { why = e?.message || String(e); }
+  /* Yahoo said no: OANDA, with your key, as before */
   const cred = await cd.getKey();
-  if (!cred) throw Object.assign(new Error('Add your OANDA key in Settings → Charts & prices to see these.'), { needsKey: true });
+  if (!cred) throw Object.assign(new Error(`Yahoo Finance did not answer with prices (${why}). Try Refresh in a minute — or add your OANDA key in Settings → Charts & prices, and Laminar will ask OANDA instead.`), { needsKey: true });
+  return loadForexOanda(cred);
+}
+async function loadForexOanda(cred) {
   const insts = [...new Set([...FOREX.filter(f => f.kind !== 'dxy').map(f => f.key), ...DXY_W.map(([k]) => k)])];
   const got = await pool(insts, 4, inst => oandaDaily(cred, inst));
   const by = new Map(insts.map((k, i) => [k, got[i]]));
@@ -180,33 +222,21 @@ export async function loadCrypto() {
 }
 
 /* ---------- Stocks ---------- */
-/** Stooq's CSV, as rows of { header: value }, with its N/D left out. */
-export function parseCsv(text) {
-  const lines = String(text || '').trim().split(/\r?\n/);
-  if (lines.length < 2 || /<html|<!doctype/i.test(lines[0])) return [];
-  const head = lines[0].split(',').map(h => h.trim().toLowerCase());
-  return lines.slice(1).map(l => { const v = l.split(','); return Object.fromEntries(head.map((h, i) => [h, v[i]?.trim()])); });
+const num0 = v => (v == null || v === '' ? NaN : +v);
+/** A company's price and the day's move, out of the meta Yahoo sends with each chart. */
+export function yahooQuote(meta) {
+  const price = num0(meta?.regularMarketPrice);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const given = num0(meta?.regularMarketChangePercent);
+  /* asked for one day, its "previous close" is yesterday's close */
+  return { price, change: Number.isFinite(given) ? given : pct(price, num0(meta?.chartPreviousClose)) };
 }
-const ymd = d => `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
-const BASES = 'laminar:markets:stock-bases';
-/* yesterday's close for each company, read once a day and kept: { day, close: { AAPL: 268.1, … } } */
-async function stockBases(today) {
-  let b = null;
-  try { b = JSON.parse(localStorage.getItem(BASES) || 'null'); } catch { /* none */ }
-  if (!b || b.day !== today) b = { day: today, close: {} };
-  const need = STOCKS.filter(s => !(s.key in b.close));
-  if (need.length) {
-    const to = new Date(), from = new Date(Date.now() - 12 * 86400e3);
-    await pool(need, 3, async s => {
-      const rows = parseCsv(await getText(`${SQ}/q/d/l/?s=${s.stooq}&i=d&d1=${ymd(from)}&d2=${ymd(to)}`));
-      /* the last full day before today's (Stooq's dates are the exchange's) */
-      const done = rows.filter(r => r.date && r.date.replace(/-/g, '') < today && Number.isFinite(+r.close));
-      if (done.length) b.close[s.key] = +done[done.length - 1].close;
-    });
-    try { localStorage.setItem(BASES, JSON.stringify(b)); } catch { /* not kept */ }
-  }
-  return b.close;
-}
+const SPARK_MAX = 20; /* Yahoo: "Number of symbols needs to be less than or equal to 20" */
+const yahooWhy = e => {
+  const m = String(e?.message || e || '');
+  if (/\b429\b/.test(m)) return 'Yahoo Finance is turning requests away for a moment (429). Try Refresh in a minute — or add a free Finnhub key in Settings.';
+  return `Yahoo Finance did not answer with prices (${m || 'no answer'}). Try Refresh in a minute — or add a free Finnhub key in Settings.`;
+};
 export async function loadStocks() {
   const fh = await fs.getSetting('finnhubKey').catch(() => null);
   if (fh) {
@@ -220,20 +250,18 @@ export async function loadStocks() {
     const items = got.filter(x => x && !x.error);
     if (items.length) { const v = { at: Date.now(), source: 'Finnhub', items }; keep('stocks', v); return v; }
   }
-  const rows = parseCsv(await getText(`${SQ}/q/l/?s=${STOCKS.map(s => s.stooq).join('+')}&f=sd2t2ohlcv&h&e=csv`));
-  if (!rows.length) throw new Error('Stooq did not answer with prices. It sometimes turns requests away; a Finnhub key in Settings is the steadier way.');
-  const bySym = new Map(rows.map(r => [String(r.symbol || '').toLowerCase(), r]));
-  const day = rows.map(r => (r.date || '').replace(/-/g, '')).filter(Boolean).sort().pop() || ymd(new Date());
-  const bases = await stockBases(day).catch(() => ({}));
-  const items = STOCKS.map(s => {
-    const r = bySym.get(s.stooq);
-    const price = r ? +r.close : NaN, open = r ? +r.open : NaN;
-    if (!Number.isFinite(price)) return null;
-    const base = bases[s.key];
-    return { ...s, price, change: Number.isFinite(base) ? pct(price, base) : pct(price, open), sinceOpen: !Number.isFinite(base) };
-  }).filter(Boolean);
-  if (!items.length) throw new Error('Stooq had no prices for these companies just now.');
-  const v = { at: Date.now(), source: 'Stooq', items };
+  /* twenty at a time, one request after another */
+  const groups = [];
+  for (let i = 0; i < STOCKS.length; i += SPARK_MAX) groups.push(STOCKS.slice(i, i + SPARK_MAX));
+  const got = await pool(groups, 1, g => getJSON(`${YH}/v7/finance/spark?symbols=${g.map(s => encodeURIComponent(s.yahoo)).join(',')}&range=1d&interval=1d`));
+  const meta = new Map();
+  for (const r of got) for (const x of (r && !r.error && r.spark?.result) || []) {
+    const m = x?.response?.[0]?.meta;
+    if (m && x.symbol) meta.set(String(x.symbol).toUpperCase(), m);
+  }
+  const items = STOCKS.map(s => { const q = yahooQuote(meta.get(s.yahoo)); return q ? { ...s, ...q } : null; }).filter(Boolean);
+  if (!items.length) throw new Error(yahooWhy(got.find(r => r?.error)?.error));
+  const v = { at: Date.now(), source: 'Yahoo Finance', items };
   keep('stocks', v);
   return v;
 }
@@ -243,7 +271,8 @@ export const loaders = { forex: loadForex, stocks: loadStocks, crypto: loadCrypt
 export const EVERY = { forex: 60e3, stocks: 5 * 60e3, crypto: 3 * 60e3 };
 
 /* ---------- the card's line: [unix seconds, price] ---------- */
-export const RANGES = { forex: [['1D', 'M15', 96], ['1W', 'H1', 120], ['1M', 'H4', 180]], crypto: [['1D'], ['1W'], ['1M']], stocks: [['1M', 31], ['3M', 92], ['1Y', 366]] };
+/* forex: [label, OANDA granularity, count, Yahoo range, Yahoo interval] */
+export const RANGES = { forex: [['1D', 'M15', 96, '1d', '15m'], ['1W', 'H1', 120, '5d', '60m'], ['1M', 'H4', 180, '1mo', '1h']], crypto: [['1D'], ['1W'], ['1M']], stocks: [['1M', '1mo'], ['3M', '3mo'], ['1Y', '1y']] };
 const lines = new Map();
 export async function lineFor(tab, item, range) {
   const id = `${tab}:${item.key}:${range}`, hit = lines.get(id);
@@ -253,9 +282,22 @@ export async function lineFor(tab, item, range) {
   return pts;
 }
 async function forexLine(item, range) {
-  const [, gran, count] = RANGES.forex.find(([r]) => r === range);
+  const [, gran, count, span, iv] = RANGES.forex.find(([r]) => r === range);
+  const sym = item.yahoo || FOREX.find(f => f.key === item.key)?.yahoo;
+  let why = null;
+  if (sym) {
+    try {
+      /* (Yahoo's own spelling in the path: GC=F, not GC%3DF) */
+      const j = await getJSON(`${YH}/v8/finance/chart/${encodeURIComponent(sym).replace(/%3D/g, '=')}?range=${span}&interval=${iv}`);
+      const r = j?.chart?.result?.[0], ts = r?.timestamp || [], close = r?.indicators?.quote?.[0]?.close || [];
+      const pts = ts.map((t, i) => [+t, num0(close[i])]).filter(([t, v]) => Number.isFinite(t) && Number.isFinite(v));
+      if (pts.length) return pts;
+      why = new Error('no line from Yahoo Finance');
+    } catch (e) { why = e; }
+  }
+  /* Yahoo said no: OANDA's candles, with your key */
   const cred = await cd.getKey();
-  if (!cred) throw new Error('No OANDA key');
+  if (!cred) throw why || new Error('No OANDA key');
   const get = async inst => cd.parseCandles(await cd.call(`/v3/instruments/${inst}/candles?granularity=${gran}&count=${count}&price=M`, cred));
   if (item.kind !== 'dxy') return (await get(item.key)).map(r => [r[0], r[4]]);
   /* DXY: its six pairs, candle by candle where all six have one */
@@ -281,9 +323,10 @@ async function cryptoLine(item, range) {
   const pts = w.map((p, i) => [Math.round(end - (w.length - 1 - i) * step), p]);
   return range === '1D' ? pts.slice(-25) : pts;
 }
+/* a company's daily closes from Yahoo's chart (a day with no close — a gap in its data — left out) */
 async function stockLine(item, range) {
-  const days = RANGES.stocks.find(([r]) => r === range)[1];
-  const to = new Date(), from = new Date(Date.now() - days * 86400e3);
-  const rows = parseCsv(await getText(`${SQ}/q/d/l/?s=${item.stooq}&i=d&d1=${ymd(from)}&d2=${ymd(to)}`));
-  return rows.filter(r => r.date && Number.isFinite(+r.close)).map(r => [Date.parse(r.date + 'T21:00:00Z') / 1000, +r.close]);
+  const span = RANGES.stocks.find(([r]) => r === range)[1];
+  const j = await getJSON(`${YH}/v8/finance/chart/${encodeURIComponent(item.yahoo || item.label.replace('.', '-'))}?range=${span}&interval=1d`);
+  const r = j?.chart?.result?.[0], ts = r?.timestamp || [], close = r?.indicators?.quote?.[0]?.close || [];
+  return ts.map((t, i) => [+t, num0(close[i])]).filter(([t, c]) => Number.isFinite(t) && Number.isFinite(c));
 }

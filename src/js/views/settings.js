@@ -11,7 +11,7 @@ import { toCSV } from '../csv.js';
 import { describeLook, MOTIONS } from '../look.js';
 import { INTROS, introMode, setIntroMode } from '../intro.js';
 import { accountBoard } from './acctboard.js';
-import { oandaKeyCard, finnhubKeyCard } from './oandakey.js';
+import { oandaKeyCard, oandaSinceCard, finnhubKeyCard } from './oandakey.js';
 import { playbook } from './playbook.js';
 import { profileFill } from '../shell.js';
 import { probeVideo, probeImage } from '../clip.js';
@@ -361,7 +361,7 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
   if (page === 'profile') return sub('Profile', 'Your name, picture and banner', profileCard);
   if (page === 'accounts') return accountBoard(store, nav, { openNew: newAccount });
   if (page === 'vault') return sub('Vault & data', 'Where your journal lives', vaultCard);
-  if (page === 'charts') return sub('Charts & prices', 'OANDA, and stock prices for Markets', oandaKeyCard(), finnhubKeyCard());
+  if (page === 'charts') return sub('Charts & prices', 'OANDA, and stock prices for Markets', oandaKeyCard(), oandaSinceCard(), finnhubKeyCard());
   if (page === 'playbook') return playbook(store, nav, { back });
 
   return el('div', { class: 'view st-view' }, head,

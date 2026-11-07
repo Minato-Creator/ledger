@@ -80,7 +80,33 @@ await p.evaluate(() => { location.hash = '#/new'; }); await p.waitForTimeout(600
 t('a paste on the trades page does not land on a new trade', await thumbs() === 0, String(await thumbs()));
 await paste(); await paste();
 t('and back on New trade, pasting works again at once', await thumbs() === 2, String(await thumbs()));
+/* ---------- a TradingView snapshot link (7 Nov) ----------
+   camera → Copy link gives tradingview.com/x/<id>/; the picture is kept at
+   s3.tradingview.com/snapshots/<first letter, small>/<id>.png */
+const SNAPS = [];
+await ctx.route(/^https:\/\/s3\.tradingview\.com\/snapshots\/.*/, r => {
+  const u = r.request().url(); SNAPS.push(u.replace('https://s3.tradingview.com', ''));
+  const ok = /\/k\/krNx1I9g\.png$|\/A\/AbC123de\.png$/.test(u);
+  return ok ? r.fulfill({ status: 200, contentType: 'image/png', headers: { 'access-control-allow-origin': '*' }, body: Buffer.from(PNG, 'base64') })
+    : r.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' }, body: 'Not Found' });
+});
+const pasteText = async text => { await p.evaluate(x => navigator.clipboard.writeText(x), text); await p.keyboard.press('Control+V'); await p.waitForTimeout(900); };
+await fresh();
+await pasteText('https://www.tradingview.com/x/krNx1I9g/');
+t('a TradingView snapshot link pasted: its chart is fetched and added, like a pasted picture', await thumbs() === 1 && SNAPS.includes('/snapshots/k/krNx1I9g.png'), JSON.stringify(SNAPS));
+await pasteText('https://www.tradingview.com/x/AbC123de/');
+t('…an id starting with a capital is found too', await thumbs() === 2, JSON.stringify(SNAPS));
+await pasteText('https://www.tradingview.com/chart/PIS3D2DQ/');
+t('a layout link (/chart/) is not a picture: nothing added', await thumbs() === 2);
+SNAPS.length = 0;
+await pasteText('https://www.tradingview.com/x/zzzzzzzz/');
+t('…a snapshot that is not there says so, and how to paste the picture instead', await thumbs() === 2
+  && await p.evaluate(() => /Could not get that chart from TradingView.*Copy image/.test(document.querySelector('#toast')?.innerText || '')), await p.evaluate(() => document.querySelector('#toast')?.innerText));
+await p.click('.view textarea').catch(() => p.click('.view input.field'));
+await pasteText('https://www.tradingview.com/x/krNx1I9g/');
+t('pasted into a text field it stays text there, and no chart is added', await thumbs() === 2
+  && await p.evaluate(() => (document.activeElement?.value || '').includes('tradingview.com/x/krNx1I9g')));
 await p.screenshot({ path: OUT + '/pastemany.png' });
-t('no console or page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+t('no console or page errors', errs.filter(e => !/404|Not Found|Failed to load resource/.test(e)).length === 0, errs.slice(0, 3).join(' | '));
 console.log(`\n${pass} passed, ${fail} failed`);
 await b.close();

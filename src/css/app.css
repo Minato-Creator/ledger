@@ -317,6 +317,12 @@ textarea.field { height:auto; padding:13px 16px; line-height:1.55; resize:none; 
 
 /* ---------- gate (folder not yet connected) ---------- */
 .gate { position:fixed; inset:0; background:var(--ground); display:flex; align-items:center; justify-content:center; padding:40px; z-index:100; }
+/* a journal file that could not be opened and is being left alone (app.js fileNotice) */
+.file-notice { position:fixed; top:72px; left:50%; transform:translateX(-50%); z-index:390; width:min(560px, calc(100vw - 32px));
+  display:flex; flex-direction:column; gap:4px; padding:14px 18px; border-radius:var(--r-btn);
+  background:var(--grey-8); color:var(--ink); border-left:3px solid var(--loss); box-shadow:0 12px 32px rgba(0,0,0,.4); }
+.file-notice strong { font:600 13.5px var(--sans); }
+.file-notice span { font:400 12.5px var(--sans); color:var(--ink-2, var(--ink)); line-height:1.45; }
 .gate-card { width:620px; background:var(--card); border-radius:var(--r-card); padding:44px 46px; }
 .gate-card h1 { font:400 30px var(--mono); letter-spacing:-.03em; color:var(--ink); margin:0 0 14px; }
 .gate-card p { font-size:13.5px; line-height:1.65; color:var(--ink-3); margin:0 0 12px; }
@@ -2887,6 +2893,8 @@ html[data-motion="off"] .conf-knob { transition:none; }
 .ok-note { margin-top:8px; font-size:11.5px; line-height:1.55; color:var(--ink-4); }
 .ok-row > .btn { flex:1; justify-content:center; padding:9px 10px; font-size:11.5px; }
 .ok-note a { color:var(--ink-2); text-decoration:underline; text-underline-offset:2px; }
+/* OANDA trades from (oandakey.js oandaSinceCard) */
+.os-card .os-date { flex:1.3; min-width:0; height:38px; font:400 12px var(--mono); }
 /* TradingView's handling: the scales say how they can be dragged */
 .tc-plot.on-price .tc-canvas { cursor:ns-resize; }
 .tc-plot.on-time .tc-canvas { cursor:ew-resize; }
@@ -3853,7 +3861,7 @@ textarea.qt-prompt { min-height:150px; }
 .mk-empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; text-align:center; padding:24px; z-index:1; }
 .mk-empty[hidden] { display:none; }
 .mk-empty strong { font:600 15px var(--sans); }
-.mk-empty span { font:400 12.5px var(--sans); color:var(--ink-3); max-width:420px; }
+.mk-empty span { font:400 12.5px var(--sans); color:var(--ink-3); max-width:420px; overflow-wrap:anywhere; }
 .mk-credit { margin:0; font:400 10.5px var(--sans); color:var(--ink-5); text-align:right; }
 .mk-credit.is-logos { font-size:12pt; }
 .mk-credit a { color:var(--ink-3); text-decoration:underline; text-underline-offset:2px; text-decoration-color:color-mix(in srgb, currentColor 40%, transparent); }

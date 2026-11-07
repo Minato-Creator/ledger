@@ -2198,3 +2198,209 @@ Everything since 2.38.1 ("Laminar 1.00.0"), zipped for him to push with GitHub D
 - firm logos and the Brokers tab.
 
 The version is bumped in package.json, tauri.conf.json, Cargo.toml and Cargo.lock; the untracked package-lock.json was brought along too. The zip is `git archive` of HEAD (the tracked files only, no node_modules or built HTML) under a `laminar-2.39.0/` folder.
+
+## Stocks from Yahoo Finance; the error box (7 Nov)
+His Stocks tab said "No prices yet", the whole Stooq address and "status code 404", with a stray "null" under it.
+- **Why:**
+  - Stooq's quote address (`/q/l/`) has answered 404 for everyone since early October 2026.
+  - Its history (`/q/d/l/`) now waits behind a JavaScript browser check, which Laminar does not try to get past.
+  - Other projects reported the same (GitHub issues on Jakeschincariol/day-trader-skill and bhoopathyvm-cloud/smaraAccount).
+- **Now (markets.js):**
+  - Quotes come from Yahoo Finance's public chart data, no key: `query1.finance.yahoo.com/v7/finance/spark?symbols=…&range=1d&interval=1d`.
+  - Yahoo takes twenty symbols at most (it answers 400 above that), so the fifty go in three requests, one after another.
+  - Each answer's `meta` carries `regularMarketPrice` and `regularMarketChangePercent` (against yesterday's close). `chartPreviousClose` is the fallback.
+  - Tickers go as Yahoo writes them (`yahoo: 'BRK-B'`).
+  - The card's line is `/v8/finance/chart/<T>?range=1mo|3mo|1y&interval=1d`; days with no close are left out. `RANGES.stocks` now holds Yahoo's range names.
+  - The stock-bases cache, `parseCsv` and Stooq are gone. Finnhub with a key works as before, and is tried first when there is one.
+  - Checked live from his computer (built-in browser, same-origin fetch on query1): all fifty quotes in three 200s; BRK-B's 1mo, 3mo and 1y charts came back with 23, 65 and 251 days.
+- **Desktop (main.rs):**
+  - `query1.finance.yahoo.com` replaces `stooq.com` in the allowlist. Spoof tests cover lookalikes, credentials, query2, the main site and http. Stooq is now in the refused list.
+  - `fetch_text` errors now read `<host> said <code>` or `could not reach <host>`, never the whole address. The old message also put a Finnhub key on screen.
+  - The User-Agent is now `Mozilla/5.0 (compatible; Laminar)`, because Yahoo turns away requests without a browser-style name.
+  - Compiled against ureq 2.12.1 in a scratch crate; `check_url` and `host_of` tests run standalone with rustc (3 tests).
+- **Errors (markets.js, views/markets.js):**
+  - `tidyError` cuts a shell error to its host and code.
+  - A Yahoo 429 says to try Refresh in a minute, or add a Finnhub key (with an Open Settings button).
+  - The empty box's children are filtered: `replaceChildren(null)` wrote the word "null".
+  - The message wraps (`overflow-wrap:anywhere`).
+  - The "(can lag)" note on Stooq is gone, and Settings' Finnhub card now names Yahoo.
+- **Suite markets:** 70 checks:
+  - the mock answers spark and chart and refuses more than twenty;
+  - three requests for fifty, BRK-B, the 1Y line with a missing close;
+  - the 429 box without "null" or an address;
+  - `tidyError` hiding a Finnhub key.
+
+## The desktop app no longer freezes while it waits (7 Nov)
+He reported the desktop app had become very slow, while the web page was fine.
+- **Why:**
+  - Every command in main.rs was a plain `#[tauri::command] fn`.
+  - Tauri v2 runs those **on the main thread** ("Commands without the async keyword are executed on the main thread unless defined with #[tauri::command(async)]", v2.tauri.app/develop/calling-rust).
+  - So every network wait froze the window until the answer came: OANDA candles, the opening OANDA sync, Markets (19 OANDA calls a minute on Forex), news and prices. Disk reads and writes did too.
+  - It got worse with Markets and with his new OANDA key, which made the charts and sync do real requests.
+  - The web page has no shell, so `fetch` never blocked it.
+- **Now (main.rs):**
+  - `read_text`, `write_text`, `read_image`, `write_image`, `open_path`, `delete_path`, `make_dir`, `path_exists`, `rename_dir`, `fetch_oanda` and `fetch_text` are `async fn`s. They do their work in `off_main`, which is `tauri::async_runtime::spawn_blocking`.
+  - The bodies are unchanged (`fetch_oanda_now`, `fetch_text_now`). `path_exists` now answers `Result<bool, String>`; the page sees the same bool.
+  - `path_sep`, `config_dir` and `default_folder` stay synchronous, since they are instant.
+  - One side effect: network calls that used to queue on the main thread now really run side by side (Markets' pool of 4).
+- **The catch, handled in fs.js:**
+  - The main thread used to keep calls in the order they were made; the pool does not.
+  - Two quick saves of trades.json could land the older one last, and their writes could even interleave.
+  - `inLine(key, job)` queues the shell's path commands per path, each starting when the one before has settled (well or not). Different files still run side by side.
+  - `share.js`'s one-off export write goes around it, which is fine.
+- **Compiled for real this time:**
+  - webkit2gtk and gtk dev libraries are now installed in this container.
+  - `cargo check --locked` of src-tauri (a copy in the scratchpad, `CARGO_TARGET_DIR` there) is clean with no warnings.
+  - `cargo test --locked`: all 13 pass (url, base64, OANDA path and rename). The rename tests now call the plain `rename_dir_now`, since the command itself is a future.
+  - CI (`build.yml`) runs `tauri build`, not the tests.
+- **Also:** the Markets refresh timer now stops for good the first time it finds its page gone (before, a page left within 15 s kept a do-nothing timer).
+- **New suite tauriorder (7 checks):** a fake shell whose calls finish out of order.
+  - The journal opens through it.
+  - Three quick saves of one file leave the last on disk, each starting after the one before.
+  - Three files are written side by side (under 300 ms for three 150 ms writes).
+  - A failed read doesn't hold up the next call on that file.
+  - Two quick `store.save('accounts')` keep the newer one.
+  - With the queue switched off, three of the seven fail, so the suite does catch the race.
+
+## A journal file is never written over when it can't be read (7 Nov)
+He lost all his trades around an OANDA sync, after the app had frozen and once crashed.
+- **The cause, reproduced in keepsafe:**
+  - `readJSON` turned *any* failure into the empty fallback: a read error (file held by OneDrive, a virus scan, another process), an empty file, or garbled JSON.
+  - `load()` then writes every file straight back ("scaffolding").
+  - So one trades.json left half-written by the crash (a plain `std::fs::write` cut off) read as an empty journal, and opening saved the empty journal over it, before any sync. The opening OANDA sync then added only the OANDA trades.
+  - Against the old store.js, keepsafe's "left exactly as it was on opening" check fails.
+- **Opening (store.js `readFile`):** each of the ten files now opens as one of:
+  - `ok`;
+  - `missing`: really not there (`fs.exists`), so a new vault starts empty as before;
+  - `recovered`: empty or garbled, so it's kept as `<name>.damaged` and the last good copy opens (`<name>.bak`, then the newest daily copy); load writes the file back from it;
+  - `guarded`: there but unreadable, or damaged with no copy. It's left on disk as it is, and `writeJSON` skips it for the session (`store.isGuarded(name)`, `store.guarded`).
+  - `store.fileStates` records how each opened.
+  - `readJSON` remains for other files (the backups index, replay).
+- **App (app.js `fileNotice`):**
+  - A recovered file gets a warn toast.
+  - A guarded file gets a fixed `.file-notice` that names it, says nothing will be saved to it until the app is reopened, and points to data/backups.
+  - `quietSync` doesn't run when trades or accounts are guarded.
+- **Daily copies (`keepDaily`):**
+  - The first clean opening each day copies accounts, trades, playbook, outlooks, replay, review and lab, as read, to `data/backups/<key>-<Mon..Sun>.json`.
+  - Seven copies roll over by weekday, with no listing needed; `data/backups/index.json` records each slot's date.
+  - They run one after another, since they share the index (`store.dailyDone`).
+- **Desktop save (main.rs `write_text_now`):**
+  - Writes `<name>.tmp`, `sync_all`, copies the old file to `<name>.bak`, then renames the tmp over it in one step.
+  - If the rename is refused (a file held open), it writes in place as before.
+  - Rust test `write_tests` (14 tests now, all pass).
+- **Settings file (fs.js `readConfig`):** the same weakness. An unreadable or damaged ledger.json read as `{}`, and `setSetting` then wrote one key over everything (folder, OANDA key).
+  - Now: missing gives `{}`; otherwise the file, then `.bak`.
+  - With `strict` (setSetting): unreadable throws and leaves the file alone; damaged with no copy is kept as `.damaged` and starts again from `{ folder: root }`.
+- **OANDA sync (oandasync.js):**
+  - `store.addAccount(acc, { select: false })` makes OANDA Demo without switching to it. Before, the switch was saved for a moment and only undone in memory, so a sync that failed later left you on OANDA Demo, looking as if every trade had gone.
+  - `accountId` is no longer in `THEIRS`: a synced trade you move to another account stays there. Only one whose account no longer exists goes to OANDA's.
+- **Suites:**
+  - keepsafe (20): the four ways a file can open, the notice, saves and sync held off, daily copies once a day, an unreadable desktop file never written, and settings not saved over.
+  - oandasync (+3, 49): no accounts.json written mid-sync has OANDA Demo active; a moved trade stays put; nothing missing afterwards.
+- Suite **newsmap** pins its clock (`ctx.clock.setFixedTime`, Wed 4 Nov 09:00 Perth). It seeded "later today" and "well into the week" from the real clock, so it failed on weekends and late at night; it failed on the commit before this one too.
+- Full run (101 suites): green.
+
+## OANDA trades from a day you choose (7 Nov)
+He wanted his past OANDA demo trades out of Laminar. Deleting them couldn't work, because the sync brings back anything OANDA still has, so he asked for a typed date in Settings → Charts & prices.
+- **The card:** `oandaSinceCard` in views/oandakey.js, placed between Charts and Stock prices.
+  - A date field (`.os-date`, `max` today) applies on change, plus **From today** and **Show all**.
+  - The status line counts how many are left out and shown. A toast confirms each change.
+- **Store (store.js):**
+  - `oandaSince` lives in accounts.json (`oandaSince: 'YYYY-MM-DD'`), so it travels with the vault; `setOandaSince(day|null)` changes it.
+  - `shownTrade(t)` is false only for a trade with `t.oanda` whose `date` (its local open day) is before the date.
+  - `inScope` checks it first, so `tradesFor`, `allTradesFor`, `openFor`, every page and the balances follow. `everyTradeFor` (Weekly winrate) checks it too. `oandaHidden` lists them.
+  - Nothing is deleted. The sync keeps all of OANDA's history in the file; it counts `added`, `updated` and `open` only for trades that will show, so a hidden trade is never announced as new. The Import card's count also excludes hidden ones.
+- **Balances:** a hidden trade's P/L leaves the account's balance with it, so OANDA Demo reads as its deposit plus what shows (a fresh start). Not carried into the starting balance.
+- **Suite oandasync (+7, 53 checks):**
+  - the card under Charts, showing all to begin with;
+  - typing 2026-09-17 leaves 2 out and shows 3;
+  - OANDA Demo keeps #48, #50, #52 and his own earlier forward test;
+  - the other account loses the moved #41 but keeps apex-1;
+  - the file keeps all 5 and the date;
+  - a sync after calls nothing new;
+  - Show all brings everything back and drops the date.
+
+## Your journal, found; choosing a folder keeps your settings (7 Nov)
+His trades had never been lost. All 29 (17 Sep–9 Oct; no trades since) sat untouched in `D:\bagus\Documents\Ledger Vault`, whose files last changed on 10 Oct. Since `load()` rewrites every file each time it opens a journal, Laminar hadn't opened that folder since 10 Oct.
+- **What happened:** the settings file that names the folder (and holds the OANDA key) was most likely reset (the readConfig weakness fixed above). Laminar then opened a different, empty journal, probably `C:\Users\bagus\Documents\Ledger`, and he had to grab a new OANDA key.
+- **Recovery so far:**
+  - He connected the folder; I read it and copied `data/` and `screenshots/` here, nothing written.
+  - The backup `Ledger-Vault-backup-2026-11-07.zip` (71 files, all 51 chart references present) was sent to him.
+  - Access to `%APPDATA%\com.minato.ledger` was refused by the permission check, so the fix goes in the app.
+- **main.rs `find_vaults`:**
+  - Looks for folders with a `vault.json` containing "quire-vault", in or one level inside Documents, home and Desktop.
+  - On Windows it also checks, for every drive C–Z, `X:\<user>\Documents|Desktop|` and `X:\Users\<user>\...`.
+  - `vaults_in` is its testable core, with Rust test `find_tests`; 15 tests in all.
+- **fs.js:** `findVaults()` and `peekVault(path)` (own trades without `oanda`, total, latest date), on the desktop only.
+  - `adopt()` now keeps the other settings (`{ ...readConfig(), folder }`). It used to write `{ folder }` alone, dropping the OANDA key every time a folder was chosen.
+- **app.js `findYourJournal()`, after render in boot and before quietSync:**
+  - It runs on the desktop when the open journal has no trades of your own, and only if `vaultFound` isn't set yet.
+  - It peeks every found journal, opens the one with the most of your trades (`store.createVault`), sets `vaultFound`, and toasts the path, noting the empty one is left as it was.
+  - It never runs when the journal has trades of its own.
+- **Suite findjournal (10):**
+  - an empty journal with only a synced trade switches to Ledger Vault (128 fixture trades) and not the smaller one;
+  - the toast; config folder and OANDA key kept, `vaultFound` set;
+  - the empty journal unchanged;
+  - reopening goes straight in without looking;
+  - once only, a journal with trades never looks, and adopt keeps settings.
+
+## A TradingView snapshot link on a trade's Charts box (7 Nov)
+He asked whether pasting a TradingView chart link could show the chart.
+- **The two kinds of link:**
+  - A `/chart/<id>/` link is a saved layout. It only opens inside TradingView while logged in, with no picture behind it, so it is left alone.
+  - A snapshot link (camera, then Copy link: `tradingview.com/x/<id>/`) is a public picture, kept at `s3.tradingview.com/snapshots/<first letter, lower case>/<id>.png`. This was confirmed from the page's og:image for his `krNx1I9g` link.
+- **shots.js:**
+  - `snapshotOf(text)` reads either link form and gives `{ id, link, image, images }`. `images` is the lower-case folder, then the letter as written, should that ever differ.
+  - `fetchSnapshot(snap)` returns a File for `prepare()`.
+  - On the desktop the bytes come through the shell (`fetch_image`), because the app's CSP has no connect-src and keeps the page to itself. In a browser it uses fetch.
+- **main.rs `fetch_image`:**
+  - Only `https://s3.tradingview.com/snapshots/<one letter or digit>/<4–20 alphanumerics>.png` is accepted (`check_image_url`): no query, no `..`, nothing else.
+  - It reads at most 16 MB, accepts only PNG or JPEG bytes, and returns base64.
+  - Errors read `s3.tradingview.com said 404` or `could not reach …`.
+  - Rust test `image_url_tests`; 16 tests in all.
+- **addtrade.js:**
+  - A pasted snapshot link (anywhere but a text field, where it stays text) or one dragged in from the browser is fetched and added like a pasted picture, saved into the vault so it outlives the link.
+  - A toast says it's being fetched. A failure says why and suggests camera, then Copy image, then paste.
+  - The empty box has a title tooltip saying links work too.
+- **Suite pastemany (+5, 14):**
+  - his link fetched from `/k/` and added;
+  - `AbC123de` found at `/A/` after `/a/` 404s;
+  - a `/chart/` link adds nothing;
+  - a missing snapshot warns, suggesting Copy image;
+  - a link pasted into a field stays text.
+
+## Forex & futures from Yahoo Finance, one request (7 Nov)
+Clicking Forex & futures lagged: it made sixteen OANDA candle requests, each freezing the old desktop shell. He asked for a free third-party source.
+- **markets.js:**
+  - Each FOREX entry has a `yahoo` symbol: GC=F (gold; Yahoo has no spot gold), NQ=F, ES=F, DX-Y.NYB (the real index), and `<PAIR>=X` for the pairs.
+  - `loadForex` makes one spark request for all sixteen (under Yahoo's limit of twenty) and reads them through `yahooQuote`; source "Yahoo Finance", no key.
+  - If Yahoo fails or gives nothing, it falls back to `loadForexOanda(cred)` (the old code, DXY from its formula) when there's a key. Otherwise it explains, mentioning the OANDA key, so the view's button appears.
+  - `RANGES.forex` entries are `[label, OANDA gran, count, Yahoo range, Yahoo interval]` (1d/15m, 5d/60m, 1mo/1h).
+  - `forexLine` uses Yahoo's chart, falling back to OANDA's candles. The path keeps `=` unencoded (GC=F).
+- **Checked live from his computer:** all symbols answered except XAUUSD=X; intraday charts returned 96, 120 and 649 points.
+- **Mock (markets-mock):**
+  - `yahooMeta` answers forex symbols from `FX_BASE` and `FX_MOVES`, with DXY added at 99.868 and +0.35.
+  - `yahooChart` takes the interval.
+- **Suite markets (72):**
+  - from Yahoo, one request;
+  - DXY is the index;
+  - 1W charts GC=F;
+  - the DXY card asks for DX-Y.NYB;
+  - no key needed;
+  - Yahoo failing with a key falls back to OANDA, DXY at +0.35;
+  - Yahoo failing with no key gives a message and a button;
+  - the stocks count excludes the forex request.
+- **Demo builder:** `fxQuote` gives the forex symbols their prices from FXM.
+
+## 2.40.0 — zipped for GitHub (7 Nov, afternoon)
+Everything since 2.39.0, zipped for him to push with GitHub Desktop and build with Actions:
+- Stocks from Yahoo Finance;
+- Forex & futures from Yahoo in one request (OANDA as the fallback);
+- the desktop shell's disk and network work off the window's thread (the lag and the "Not Responding" closes), with per-file ordering in fs.js;
+- journal files never written over when unreadable; atomic saves with `.bak`; daily copies; the settings file protected;
+- the OANDA sync never switching account or pulling a moved trade back;
+- Settings → Charts & prices → OANDA trades from;
+- your journal found on the desktop (Ledger Vault on D:), and choosing a folder keeping your settings;
+- TradingView snapshot links on the Charts box.
+
+Version bumped in package.json, tauri.conf.json, Cargo.toml and Cargo.lock (and the untracked package-lock.json). `cargo check --locked` is clean and the full run green (every suite). The zip is `git archive` of HEAD under `laminar-2.40.0/`, like 2.39.0.

@@ -146,7 +146,8 @@ export function toJournal(o, { accountId, acctKey, startingBalance, demo, first,
   };
 }
 /* what OANDA owns on a trade, written over on every sync */
-const THEIRS = ['oanda', 'accountId', 'demo', 'source', 'assetClass', 'pair', 'side', 'date', 'timeOpen', 'timeClose', 'closeDate',
+/* (not which journal account it is in: a trade you moved to another account stays there, 7 Nov) */
+const THEIRS = ['oanda', 'demo', 'source', 'assetClass', 'pair', 'side', 'date', 'timeOpen', 'timeClose', 'closeDate',
   'entryPrice', 'exitPrice', 'size', 'sizeUnit', 'status', 'netResult'];
 /* …and what it only fills in: once a trade is closed and has a stop, a
    target and a risk, a change you made to them stands */
@@ -192,13 +193,12 @@ export async function syncOanda(store, { onStep } = {}) {
     later = from === 1 ? funds.slice(1) : funds;
     const toppedUp = later.reduce((s, x) => s + x.amount, 0);
     const start = Math.round((balance - made - toppedUp) * 100) / 100;
-    /* made beside the others, not switched to: the journal stays on the account you were reading
-       (a sync that jumped to the new account looked like every other trade had gone) */
-    const reading = A.activeAccountId;
+    /* made beside the others, never switched to — not even for a moment: the journal stays on the
+       account you were reading (a sync that jumped to the new account looked like every other trade
+       had gone; 7 Nov, it no longer saves that switch even briefly) */
     jr = await store.addAccount({ name: demo ? 'OANDA Demo' : 'OANDA', currency: sum.currency || 'USD',
       startingBalance: start > 0 ? start : balance, kind: 'live', firm: 'oanda', defaultRiskPercent: 1,
-      ...(Number.isFinite(firstT) ? { openedAt: localDate(firstT) } : {}) });
-    if (reading && A.accounts.some(a => a.id === reading)) A.activeAccountId = reading;
+      ...(Number.isFinite(firstT) ? { openedAt: localDate(firstT) } : {}) }, { select: false });
   }
   /* each top-up, withdrawal or reset once, as funding (never as profit) */
   const seen = new Set((jr.adjustments || []).map(x => x.id));
@@ -215,18 +215,22 @@ export async function syncOanda(store, { onStep } = {}) {
     const known = had ? { sl: had.stopLoss ?? undefined, tp: had.takeProfit ?? undefined } : null;
     const t = toJournal(o, { accountId: jr.id, acctKey: acc, startingBalance: jr.startingBalance, demo,
       first: first.get(String(o.id)) || known, playbook: store.playbook });
-    if (t.status === 'open') open++;
+    /* (kept either way; counted only when it will be seen — Settings → Charts & prices → Start from) */
+    const shows = store.shownTrade(t);
+    if (t.status === 'open' && shows) open++;
     if (!had) {
       store.data.trades.trades.push({ ...t, createdAt: new Date().toISOString(), setupId: null, tagIds: [], grade: null, notes: '' });
-      added++;
+      if (shows) added++;
     } else {
-      const keys = [...THEIRS, ...FILLS], before = JSON.stringify(keys.map(k => had[k]));
-      /* still open, or arriving in another account (its risk is a share of that account's balance): filled again */
-      const wasOpen = had.status === 'open', moved = had.accountId !== t.accountId;
-      for (const k of FILLS) if (t[k] != null && (had[k] == null || wasOpen || moved)) had[k] = t[k];
+      const keys = ['accountId', ...THEIRS, ...FILLS], before = JSON.stringify(keys.map(k => had[k]));
+      /* it stays in whichever account it is in; only one whose account is gone comes home to OANDA's */
+      if (!A.accounts.some(a => a.id === had.accountId)) had.accountId = jr.id;
+      /* still open: filled again */
+      const wasOpen = had.status === 'open';
+      for (const k of FILLS) if (t[k] != null && (had[k] == null || wasOpen)) had[k] = t[k];
       for (const k of THEIRS) { if (k in t) had[k] = t[k]; else delete had[k]; }
       if (had.sessionAuto !== false) had.sessionId = t.sessionId;
-      if (JSON.stringify(keys.map(k => had[k])) !== before) updated++;
+      if (JSON.stringify(keys.map(k => had[k])) !== before && shows) updated++;
     }
   }
   A.oanda = { ...link, accountId: acc, laminarId: jr.id, live: !!cred.live, lastTxn: upTo, syncedAt: new Date().toISOString(),
