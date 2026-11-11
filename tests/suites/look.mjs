@@ -59,7 +59,7 @@ await p.evaluate(() => { location.hash = '#/playbook'; }); await p.waitForTimeou
 ok('the old address still opens it', await p.evaluate(() => /Playbook/.test(document.querySelector('.head h1')?.textContent) && !!document.querySelector('.head .st-back')), true);
 await p.evaluate(() => { location.hash = '#/calendar'; }); await p.waitForTimeout(450);
 t('and the journal carries its count', await p.evaluate(() => document.querySelector('.tb-tab.is-on .count')?.textContent === '1'));
-ok('and the journal shares its tabs', await p.evaluate(() => [...document.querySelectorAll('.head .sn-tab')].map(a => a.textContent).join(' · ')), 'Trades · Calendar · Review');
+ok('and the journal shares its tabs', await p.evaluate(() => [...document.querySelectorAll('.head .sn-tab')].map(a => a.textContent).join(' · ')), 'Trades · Calendar · Review · Notes');
 ok('with Calendar chosen', await p.evaluate(() => document.querySelector('.head .sn-tab.is-on')?.textContent), 'Calendar');
 t('the page title is kept for anything that reads it', await p.evaluate(() => document.querySelector('.head h1.sr-only')?.textContent === 'Calendar'));
 await click('.cal-span [data-span="year"]', 450);

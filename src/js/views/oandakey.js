@@ -132,8 +132,8 @@ export function oandaSinceCard() {
   const card = el('section', { class: 'card ok-card os-card', style: { flex: 'none' } },
     el('h2', {}, 'OANDA trades from'),
     el('div', { class: 'ok-note' },
-      'Synced OANDA trades opened before this date are left out of every page. Nothing is deleted: set an earlier date, or show all, and they come back. '
-      + 'Trades you add yourself, forward tests included, are never affected.'),
+      'Everything from OANDA before this date — its trades, and the money it put in or took out (a demo topped up, reset or emptied) — is left out of every page and every balance. '
+      + 'Nothing is deleted: set an earlier date, or show all, and it all comes back. Trades you add yourself, forward tests included, and your own corrections are never affected.'),
     el('div', { class: 'ok-row' }, date, todayBtn, clearBtn),
     status);
   paint();

@@ -345,7 +345,7 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
         choice(MOTIONS, motion, async v => { await store.setLook({ motion: v }); nav.refresh({ keepFocus: true }); })),
       ctlRow('film', 'Intro', motion === 'off' ? 'Motion is Off, so it does not play'
         : intro === 'short' ? 'The opening, quicker — about two seconds' : intro === 'off' ? 'Laminar opens straight on your journal'
-        : 'The L, the name, a wave through the dots — a click skips it',
+        : 'The logo and the name, as a ripple on water — a click skips it',
         choice(INTROS, intro, v => { setIntroMode(v); nav.refresh({ keepFocus: true }); })),
       row('vault', 'Vault & data',
         store.isPreview ? 'A preview copy — nothing here is saved'

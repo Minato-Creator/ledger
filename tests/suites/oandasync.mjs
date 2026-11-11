@@ -207,6 +207,26 @@ t('…in your other account too: the older OANDA one left out, your own trade st
 F = await files();
 t('…nothing deleted: all five OANDA trades still in the file, and the day kept with the journal',
   F['data/trades.json'].trades.filter(x => x.oanda).length === 5 && F['data/accounts.json'].oandaSince === '2026-09-17');
+/* the money too (9 Nov): OANDA's trades and money moves before the day out of the balance, P&L and peak; your own corrections kept */
+const money = await p.evaluate(async () => {
+  const { store } = await import('/js/store.js'); const jr = store.data.accounts.accounts.find(a => a.id === store.data.accounts.oanda.laminarId);
+  const shown = store.trades.filter(x => x.accountId === jr.id && x.oanda && x.status !== 'open' && store.shownTrade(x)).reduce((v, x) => v + (Number(x.netResult) || 0), 0);
+  const keepAdj = jr.adjustments || [];
+  /* (what was already there and shows: the top-up of 17 Sep, on the day itself) */
+  const already = keepAdj.filter(x => x.kind === 'funding' && store.shownMove(x)).reduce((v, x) => v + x.amount, 0);
+  jr.adjustments = [...keepAdj,
+    { id: 'oanda-tx-900', kind: 'funding', amount: 9989999, date: '2026-09-10', note: 'OANDA' },
+    { id: 'oanda-tx-901', kind: 'funding', amount: -2000, date: '2026-09-20', note: 'OANDA' },
+    { id: 'adj_mine', amount: 100, date: '2026-09-01', note: 'my correction' }];
+  const m = store.moneyOf(jr);
+  const r = { gross: m.gross, shown, already, funded: m.funded, peak: m.peak, start: m.start, balance: m.balance,
+    hiddenMoves: store.oandaHiddenMoves.map(x => x.id), opened: store.openedOf({ ...jr, openedAt: '2024-05-30' }) };
+  jr.adjustments = keepAdj;
+  return r; });
+t('the account’s money follows the day: P&L from the shown OANDA trades only (your own correction kept)', Math.abs(money.gross - (money.shown + 100)) < 0.01, JSON.stringify(money));
+t('…a demo topped up before the day is left out; money moved on or after it still counts', money.funded === money.already - 2000 && JSON.stringify(money.hiddenMoves) === JSON.stringify(['oanda-tx-900']), JSON.stringify(money));
+t('…so the balance and the peak start fresh from the account’s size (no 10-million top-up in them)', Math.abs(money.balance - (money.start + money.shown + 100 + money.already - 2000)) < 0.01 && money.peak < money.start + 10000, JSON.stringify(money));
+t('…and the account is shown as opened on the day, not years before', money.opened === '2026-09-17', money.opened);
 await p.evaluate(async () => { const { syncOanda } = await import('/js/oandasync.js'); const { store } = await import('/js/store.js'); window.__r = await syncOanda(store); });
 const r2 = await p.evaluate(() => ({ added: window.__r.added, updated: window.__r.updated }));
 F = await files();

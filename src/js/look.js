@@ -309,7 +309,8 @@ function panelFlip(l, th, glass, bg, rule) {
   const opp = { ...l, theme: th.paper ? 'midnight' : 'light' };
   const t = tokensFor(opp, { glass, bg });
   const keep = Object.fromEntries(Object.entries(t).filter(([k]) => !/^--(frame|page|ground|mono|sans|font-name)/.test(k)));
-  return rule('html[data-look][data-pic-flip] :is(.card:not(.light), .st-list)', keep);
+  /* (the number tiles are panels too, and turn with the cards) */
+  return rule('html[data-look][data-pic-flip] :is(.card:not(.light), .st-list, .lab-tile, .lab-rtop, .rv-stat)', keep);
 }
 
 /* ---------- writing it onto the page ---------- */

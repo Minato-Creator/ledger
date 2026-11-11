@@ -139,6 +139,48 @@ async fn open_path(path: String) -> Result<(), String> {
     .await
 }
 
+/// A web link from a note, opened in the computer's own browser. Only an
+/// http(s) address, written plainly: no spaces, quotes or shell characters,
+/// so nothing in it can be read as anything but the address. No shell is
+/// involved either way — the address is one argument to one program.
+fn check_web_link(url: &str) -> Result<(), String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .ok_or("only web links (https://…) open from here")?;
+    if url.len() > 2048 {
+        return Err("that link is too long".into());
+    }
+    if !rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '[') {
+        return Err("that link has no address".into());
+    }
+    if let Some(c) = url
+        .chars()
+        .find(|c| !c.is_ascii_graphic() || "\"\\<>^`|{}".contains(*c))
+    {
+        return Err(format!("that link has a character it should not ({c:?})"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_link(url: String) -> Result<(), String> {
+    check_web_link(&url)?;
+    off_main(move || {
+        let mut cmd = if cfg!(target_os = "windows") {
+            let mut c = std::process::Command::new("rundll32");
+            c.arg("url.dll,FileProtocolHandler");
+            c
+        } else if cfg!(target_os = "macos") {
+            std::process::Command::new("open")
+        } else {
+            std::process::Command::new("xdg-open")
+        };
+        cmd.arg(&url).spawn().map(|_| ()).map_err(|e| format!("could not open the link: {e}"))
+    })
+    .await
+}
+
 /// Removing one file. Already gone counts as done.
 #[tauri::command]
 async fn delete_path(path: String) -> Result<(), String> {
@@ -540,6 +582,7 @@ fn main() {
             write_image,
             delete_path,
             open_path,
+            open_link,
             make_dir,
             rename_dir,
             fetch_oanda,
@@ -790,5 +833,24 @@ mod oanda_tests {
         assert!(check_oanda_path("/v3/instruments/XAU_USD/candles?x=1#frag").is_err());
         assert!(check_oanda_path("/v3/instruments/xau_usd/candles?x=1").is_err());
         assert!(check_oanda_path("https://evil.example/v3/instruments/X/candles?x=1").is_err());
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::check_web_link;
+
+    #[test]
+    fn opens_web_links_only() {
+        assert!(check_web_link("https://www.forexfactory.com/calendar?day=nov11.2026").is_ok());
+        assert!(check_web_link("http://example.com/a#b").is_ok());
+        assert!(check_web_link("https://www.tradingview.com/x/krNx1I9g/").is_ok());
+        assert!(check_web_link("file:///C:/Windows/System32/cmd.exe").is_err());
+        assert!(check_web_link("javascript:alert(1)").is_err());
+        assert!(check_web_link("https://").is_err());
+        assert!(check_web_link("https://a.com/ b").is_err());
+        assert!(check_web_link("https://a.com/\"&calc").is_err());
+        assert!(check_web_link("https://a.com/|x").is_err());
+        assert!(check_web_link(&format!("https://a.com/{}", "x".repeat(3000))).is_err());
     }
 }

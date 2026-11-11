@@ -43,8 +43,29 @@ const choose = async (sel, file) => {
 await p.evaluate(() => { location.hash = '#/'; }); await p.waitForTimeout(400);
 t('your initials in the top bar, with no ring', await p.evaluate(() => document.querySelector('.tb-you span')?.textContent) === 'MK'
   && await p.evaluate(() => getComputedStyle(document.querySelector('.tb-you')).boxShadow) === 'none');
-await p.click('.tb-you'); await p.waitForTimeout(600);
-t('pressing them opens Settings, not a menu', await p.evaluate(() => location.hash) === '#/settings' && await p.locator('.sheet').count() === 0);
+await p.click('.tb-you'); await p.waitForTimeout(400);
+/* (11 Nov) pressing them opens your menu: Profile, Appearance, Playbook, Charts & prices, Settings */
+const menuItems = await p.evaluate(() => [...document.querySelectorAll('.pop-you-menu .pop-item .pop-n')].map(x => x.textContent));
+t('pressing them opens your menu', JSON.stringify(menuItems) === JSON.stringify(['Profile', 'Appearance', 'Playbook', 'Charts & prices', 'Settings']), JSON.stringify(menuItems));
+t('…with your name at the top', (await p.textContent('.pop-you-menu .pop-you-n')) === 'Minato Kaze');
+await p.click('.tb-you'); await p.waitForTimeout(300);
+t('pressing again closes it', await p.locator('.pop-you-menu:not(.is-out)').count() === 0);
+await p.click('.tb-you'); await p.waitForTimeout(300);
+await p.click('.pop-you-menu [data-go="Charts & prices"]'); await p.waitForTimeout(500);
+t('Charts & prices goes to its page in Settings', await p.evaluate(() => location.hash) === '#/settings/charts');
+await p.click('.tb-you'); await p.waitForTimeout(300);
+await p.click('.pop-you-menu [data-go="Playbook"]'); await p.waitForTimeout(500);
+t('Playbook goes to the Playbook', await p.evaluate(() => location.hash) === '#/settings/playbook');
+await p.click('.tb-you'); await p.waitForTimeout(300);
+await p.click('.pop-you-menu [data-go="Appearance"]'); await p.waitForTimeout(600);
+t('Appearance opens the Appearance sheet', await p.locator('.sheet.is-look').count() === 1);
+await p.keyboard.press('Escape'); await p.waitForTimeout(400);
+await p.click('.tb-you'); await p.waitForTimeout(300);
+await p.click('.pop-you-menu [data-go="Profile"]'); await p.waitForTimeout(500);
+t('Profile goes to your profile', await p.evaluate(() => location.hash) === '#/settings/profile');
+await p.click('.tb-you'); await p.waitForTimeout(300);
+await p.click('.pop-you-menu [data-go="Settings"]'); await p.waitForTimeout(600);
+t('Settings goes to Settings', await p.evaluate(() => location.hash) === '#/settings' && await p.locator('.sheet').count() === 0);
 
 /* ---------- a picture ---------- */
 await choose('.st-avatar-b', 'share-pic.jpg');

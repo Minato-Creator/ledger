@@ -21,8 +21,8 @@ import { acctMark } from './views/acctlogo.js';
 export const SECTIONS = [
   { id: 'dashboard', label: 'Dashboard', ic: 'dashboard', href: '#/', segs: [''] },
   { id: 'journal', label: 'Journal', ic: 'journal', href: '#/trades',
-    segs: ['trades', 'calendar', 'review', 'trade', 'new', 'edit', 'import'],
-    tabs: [['#/trades', 'Trades', 'trades'], ['#/calendar', 'Calendar', 'calendar'], ['#/review', 'Review', 'review']] },
+    segs: ['trades', 'calendar', 'review', 'notes', 'trade', 'new', 'edit', 'import'],
+    tabs: [['#/trades', 'Trades', 'trades'], ['#/calendar', 'Calendar', 'calendar'], ['#/review', 'Review', 'review'], ['#/notes', 'Notes', 'notes']] },
   /* News first, and Plan opens on it (Minato, 4 Nov); Outlook second; Markets, the bubbles (6 Nov) */
   { id: 'plan', label: 'Plan', ic: 'plan', href: '#/wire', segs: ['wire', 'outlook', 'markets'],
     tabs: [['#/wire', 'News', 'wire'], ['#/outlook', 'Outlook', 'outlook'], ['#/markets', 'Markets', 'markets']] },
@@ -217,13 +217,13 @@ if (typeof window !== 'undefined') {
 }
 
 /** Your picture (or video), else your initials, else a person if you have
-    not said who you are. Pressing it opens Settings. */
+    not said who you are. Pressing it opens your menu (youMenu). */
 export function you(store, onClick, size = 30) {
   const who = store.userName;
   const initials = who.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
   /* No picture and no colour of your own: a frosted disc, like the glass */
   const frost = !store.data.accounts.userColour;
-  const b = el('button', { class: 'tb-you' + (frost ? ' is-frost' : ''), title: who ? `${who} — settings` : 'Settings', 'aria-label': 'Settings',
+  const b = el('button', { class: 'tb-you' + (frost ? ' is-frost' : ''), title: who || 'You', 'aria-label': who ? `${who} — your menu` : 'Your menu', 'aria-haspopup': 'menu',
       style: { width: size + 'px', height: size + 'px', ...(frost ? {} : { background: who ? store.userColour : 'var(--inset)' }) },
       onClick: e => onClick(e.currentTarget) },
     who ? el('span', { style: frost ? {} : { color: store.userInk } }, initials) : icon('user', 15, 'currentColor', 1.8));
@@ -283,13 +283,43 @@ export function bottombar(store, nav, { hash, onMore }) {
   const bar = el('nav', { class: 'bottombar', 'aria-label': 'Sections' }, glider, ...items);
   glide(bar, 'bottom', items.find(i => i.classList.contains('is-on')), glider);
   /* Pages that already carry New trade in their header do not need a second one. */
-  const fab = store.activeAccount && !['', 'trades', 'new', 'edit'].includes(seg)
+  const fab = store.activeAccount && !['', 'trades', 'new', 'edit', 'notes'].includes(seg)
     ? el('button', { class: 'fab', 'aria-label': 'New trade', onClick: () => nav.go('#/new') }, icon('plus', 22, 'currentColor', 2.2))
     : null;
   return [bar, fab];
 }
 
 /* ---------- menus ---------- */
+
+/* Your picture, pressed (11 Nov): who you are and whose journal this is, then
+   the pages about you and how the app works — Profile, Appearance, Playbook,
+   Charts & prices — and Settings for everything else. Pressed again, it
+   closes. */
+let youClose = null;
+export function youMenu(store, nav, anchor, { openLook } = {}) {
+  if (youClose) { youClose(); return; }
+  const go = href => { youClose?.(); nav.go(href); };
+  const who = store.userName;
+  const face = you(store, () => {}, 38);
+  face.tabIndex = -1; face.removeAttribute('title'); face.setAttribute('aria-hidden', 'true');
+  const item = (ic, label, sub, onClick) => el('button', { class: 'pop-item', role: 'menuitem', 'data-go': label, onClick },
+    el('span', { class: 'pop-ic' }, icon(ic, 15, 'currentColor', 1.7)),
+    el('span', { class: 'pop-t' }, el('span', { class: 'pop-n' }, label), sub ? el('span', { class: 'pop-d' }, sub) : null));
+  const body = el('div', { class: 'pop-list' },
+    el('div', { class: 'pop-you' }, face,
+      el('div', { class: 'pop-you-t' },
+        el('div', { class: 'pop-you-n' }, who || 'Your journal'),
+        el('div', { class: 'pop-you-d' }, store.folderName || (store.isLocal ? 'Saved in this browser' : 'Laminar')))),
+    el('div', { class: 'pop-sep' }),
+    item('user', 'Profile', 'Name, picture, colour and banner', () => go('#/settings/profile')),
+    item('palette', 'Appearance', 'Theme, glass, background', () => { youClose?.(); openLook?.(); }),
+    item('playbook', 'Playbook', 'Setups, tags, sessions, risk rules', () => go('#/settings/playbook')),
+    item('chart', 'Charts & prices', 'OANDA, and stock prices', () => go('#/settings/charts')),
+    el('div', { class: 'pop-sep' }),
+    item('gear', 'Settings', null, () => go('#/settings')));
+  youClose = popover(anchor, body, { cls: 'pop-you-menu', onClose: () => { youClose = null; } });
+}
+
 export function accountMenu(store, nav, anchor) {
   const acct = store.activeAccount;
   let close;

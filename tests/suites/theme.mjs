@@ -63,10 +63,11 @@ ok('and it is darker than the cards, so cards still read as raised',
    groundDark < await lum('.main .card'), true);
 
 // the pale cards are the risky ones — dark text on a now-dark panel
-await p.evaluate(() => { location.hash = '#/analytics'; }); await p.waitForTimeout(500);
-/* Overview is all dark chart cards now; Discipline still carries a pale one. */
-await p.evaluate(() => [...document.querySelectorAll('.head :is(.seg, .an-tabs) button')].find(b => b.textContent.trim() === 'Discipline')?.click());
-await p.waitForTimeout(500);
+/* Analytics is all clear cards now (Discipline's After a loss went clear, 9 Nov); a trade's own
+   page still carries a pale one — reached from the dashboard's list of trades. */
+await p.evaluate(() => { location.hash = '#/'; }); await p.waitForTimeout(500);
+await p.evaluate(() => document.querySelector('.db-tr')?.click());
+await p.waitForTimeout(600);
 const lightCardBg = await lum('.main .card.light');
 const lightCardInk = await p.evaluate(() => {
   const c = document.querySelector('.main .card.light');

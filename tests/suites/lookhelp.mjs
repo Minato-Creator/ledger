@@ -18,7 +18,7 @@ export async function openLook(p, tab) {
     const here = await p.evaluate(() => location.hash || '#/');
     if (here !== '#/settings') {
       back = here;
-      await p.evaluate(() => document.querySelector('.tb-you')?.click());
+      await p.evaluate(() => { location.hash = '#/settings'; });
       await wait(p, 450);
     }
     await p.evaluate(() => document.querySelector('.st-row[data-row="Appearance"]')?.click());

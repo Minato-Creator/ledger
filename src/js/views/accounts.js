@@ -57,7 +57,7 @@ export function accounts(store, nav, { formOnly = false } = {}) {
             isActive ? el('span', { class: 'm', style: { fontSize: '9.5px', color: '#fff', background: 'var(--blue)', borderRadius: 'var(--r-pill)', padding: '2px 8px' } }, 'ACTIVE') : null,
             a.archived ? el('span', { class: 'm', style: { fontSize: '9.5px', color: 'var(--grey-3)', background: 'var(--grey-7)', borderRadius: 'var(--r-pill)', padding: '2px 8px' } }, 'ARCHIVED') : null),
           el('div', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)', marginTop: '5px' } },
-            `Started ${c.money(a.startingBalance, { sign: false, currency: a.currency, decimals: 0 })} · opened ${c.longDate(a.openedAt)} · ${ts.length} trade${ts.length === 1 ? '' : 's'}`)),
+            `Started ${c.money(a.startingBalance, { sign: false, currency: a.currency, decimals: 0 })} · opened ${c.longDate(store.openedOf(a))} · ${ts.length} trade${ts.length === 1 ? '' : 's'}`)),
         el('div', { style: { marginLeft: 'auto', textAlign: 'right' } },
           el('div', { class: 'm', style: { fontSize: '16px', color: 'var(--ink)', lineHeight: 1 } },
             c.money(bal, { sign: false, currency: a.currency })),

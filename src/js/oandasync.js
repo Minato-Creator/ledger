@@ -237,7 +237,7 @@ export async function syncOanda(store, { onStep } = {}) {
     auto: link.auto !== false };
   await store.save('trades');
   await store.save('accounts');
-  return { added, updated, open, funded: fresh.length, account: jr };
+  return { added, updated, open, funded: fresh.filter(x => store.shownMove(x)).length, account: jr };
 }
 
 /** Whether a sync should run by itself when the journal opens. */

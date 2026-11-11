@@ -367,18 +367,21 @@ html[data-look][data-pic-ink] :is(.card, .sheet, .popover, .drop-menu, .tag-menu
   --frame-ink:var(--frame-ink-t); --frame-ink-2:var(--frame-ink-2-t);
 }
 /* the ones that take their writing from the page rather than setting their own */
-html[data-look][data-pic-ink] :is(.card:not(.light), .drop-menu, .tag-menu, .st-list) { color:var(--ink-on-light); }
+html[data-look][data-pic-ink] :is(.card:not(.light), .drop-menu, .tag-menu, .st-list, .lab-tile, .lab-rtop, .rv-stat) { color:var(--ink-on-light); }
 
 /* Clear glass: the same panes, barely frosted, so the video reads through.
    No shadow on the writing and no lit lip: one hairline edge, quiet. How
    clear is the --clear-k slider (store.clarity → look.js). */
-html[data-glass-kind="clear"] .card, html[data-glass-kind="clear"] .gate-card, html[data-glass-kind="clear"] .st-list, html[data-glass-kind="clear"] .drop-menu, html[data-glass-kind="clear"] .card.light {
+/* (the number tiles too — Analytics, the Lab, the Review — so they read like the cards, 9 Nov) */
+html[data-glass-kind="clear"] .card, html[data-glass-kind="clear"] .gate-card, html[data-glass-kind="clear"] .st-list, html[data-glass-kind="clear"] .drop-menu, html[data-glass-kind="clear"] .card.light,
+html[data-glass-kind="clear"] .lab-tile, html[data-glass-kind="clear"] .lab-rtop, html[data-glass-kind="clear"] .rv-stat {
   -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(125%); backdrop-filter:blur(var(--glass-blur)) saturate(125%);
   /* a half-pixel ring, not a border: a border cannot be thinner than a
      whole pixel on an ordinary screen; this reads as half as heavy */
   border-color:transparent; box-shadow:inset 0 0 0 .5px var(--glass-rim);
 }
-html[data-glass-kind="clear"] .card .card { box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; }
+html[data-glass-kind="clear"] .card .card,
+html[data-glass-kind="clear"] .card :is(.lab-tile, .lab-rtop, .rv-stat) { box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; }
 html[data-glass-kind="clear"] .seg, html[data-glass-kind="clear"] .stepper { border-color:transparent; box-shadow:inset 0 0 0 .5px var(--glass-rim); }
 html[data-glass-kind="clear"] .topbar .tb-nav { box-shadow:inset 0 0 0 .5px var(--glass-rim); }
 html[data-glass-kind="clear"] .topbar .tb-nav, html[data-glass-kind="clear"] .seg, html[data-glass-kind="clear"] .stepper {
@@ -1694,3 +1697,16 @@ html[data-glass-kind="clear"] .aw-panel { background:color-mix(in srgb, var(--in
 .jr-sync.is-busy .jr-sync-spin { opacity:1; }
 .jr-sync.is-busy .jr-sync-spin svg { animation:shot-spin .9s linear infinite; transform-origin:50% 50%; }
 .jr-sync-when { font:500 11px var(--sans); color:var(--ink-4); font-variant-numeric:tabular-nums; }
+
+/* Your picture, pressed: the menu under it (shell.js youMenu) */
+.pop-you-menu { min-width:270px; max-width:300px; }
+.pop-you { display:flex; align-items:center; gap:12px; padding:10px 10px 8px; }
+.pop-you .tb-you { flex:none; pointer-events:none; }
+.pop-you-t { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.pop-you-n { font:650 14px var(--sans); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pop-you-d { font:500 11.5px var(--sans); color:var(--ink-4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pop-you-menu .pop-item { padding:8px 10px; gap:12px; }
+.pop-ic { flex:none; width:30px; height:30px; border-radius:9px; display:grid; place-items:center; background:var(--hi-2); color:var(--ink-2); }
+.pop-item:hover .pop-ic { color:var(--ink); }
+.pop-t { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.pop-d { font:500 11.5px var(--sans); color:var(--ink-4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

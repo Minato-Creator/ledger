@@ -68,7 +68,7 @@ t('named for the day', /^quire-vault-\d{4}-\d{2}-\d{2}\.zip$/.test(out.name), ou
    sheets are part of the folder, so they are part of the vault. A vault is
    the folder as it stood, not a curated subset of it — and a stale feed
    costs nothing, since both refresh on open. */
-t('with the manifest, ten data files (drawings too) and both charts', out.entries === 13, String(out.entries));
+t('with the manifest, eleven data files (drawings and notes too) and both charts', out.entries === 14, String(out.entries));
 t('and nothing missing', out.missing === 0);
 
 // what a real unzip sees

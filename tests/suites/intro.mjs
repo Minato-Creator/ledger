@@ -1,8 +1,8 @@
-/* The opening (intro.js): it plays over the journal as it loads — the L, the
-   name sliding out, a moment's hold, no dots (Minato, 7 Nov) — and snaps
-   into the app; a
+/* The opening (intro.js): it plays over the journal as it loads — straight
+   to the logo and LAMINAR as water (11 Nov): a ripple from the logo uncovers
+   the name left to right, it sways, goes still — and snaps into the app; a
    click skips it; Short is quicker; Off, Motion Off and the test suites
-   leave it out; Settings → Intro sets it. */
+   leave it out; Settings → Intro sets it. Without WebGL the name fades in. */
 import pw from 'playwright';
 import fs from 'node:fs';
 const HERE = new URL('.', import.meta.url).pathname;
@@ -11,7 +11,8 @@ const FAKE_FS = fs.readFileSync(HERE + 'e2e.mjs', 'utf8').match(/const FAKE_FS =
 let pass = 0, fail = 0;
 const t = (n, c, x = '') => { c ? pass++ : fail++; console.log(`  ${c ? 'ok  ' : 'FAIL'}  ${n}${x !== '' ? ' — ' + x : ''}`); };
 
-const b = await pw.chromium.launch({ executablePath: CHROME });
+const GL = ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
+const b = await pw.chromium.launch({ executablePath: CHROME, args: GL });
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Australia/Perth' });
 const p = await ctx.newPage();
 const errs = []; p.on('pageerror', e => errs.push(e.message));
@@ -32,27 +33,46 @@ await p.addInitScript(() => {
 await p.addInitScript(FAKE_FS);
 const at = x => p.waitForFunction(v => (window.__t || 0) >= v, x, { timeout: 15000 });
 const state = () => p.evaluate(() => {
-  const o = document.querySelector('.intro'), w = o?.querySelector('.intro-word'), m = o?.querySelector('.intro-mark');
-  return { on: !!o, word: w ? +getComputedStyle(w).opacity : null, mark: m ? +getComputedStyle(m).opacity : null, app: document.getElementById('app').style.transform,
-    dots: o ? o.querySelectorAll('canvas').length : 0 };
+  const o = document.querySelector('.intro');
+  return { on: !!o, draws: o?.dataset.draws || null, canvases: o ? o.querySelectorAll('canvas').length : 0, other: o ? o.querySelectorAll(':not(canvas)').length : 0,
+    app: document.getElementById('app').style.transform };
 });
+/* What is lit on the canvas right now, read in the same frame it was drawn: the brightest pixel over the logo, over the M and
+   over the R, how much of the black round the name is lit, and a fingerprint of the name to tell one frame from the next. */
+const lit = () => p.evaluate(() => new Promise(res => requestAnimationFrame(() => {
+  const c = document.querySelector('.intro canvas'); if (!c) return res(null);
+  const o = document.createElement('canvas'); o.width = c.width; o.height = c.height;
+  const x = o.getContext('2d'); x.drawImage(c, 0, 0);
+  const wide = Math.min(Math.max(260, innerWidth * 0.42), 620), left = (innerWidth - wide) / 2, tall = wide * 155 / 925.7, top = (innerHeight - tall) / 2;
+  const max = (x0, x1) => { const d = x.getImageData(Math.round(x0), Math.round(top), Math.round(x1 - x0), Math.round(tall)).data; let m = 0; for (let i = 0; i < d.length; i += 4) m = Math.max(m, d[i + 1]); return m; };
+  const word = x.getImageData(Math.round(left), Math.round(top), Math.round(wide), Math.round(tall)).data; let print = 0; for (let i = 0; i < word.length; i += 4) print += word[i + 1] * ((i / 4) % 251);
+  const above = x.getImageData(0, 0, innerWidth, Math.round(top - tall)).data; let stray = 0; for (let i = 0; i < above.length; i += 4) stray = Math.max(stray, above[i + 1]);
+  res({ logo: max(left, left + wide * 0.13), m: max(left + wide * 0.42, left + wide * 0.56), r: max(left + wide * 0.9, left + wide), stray, print });
+})));
 
 console.log('  -- Full --');
 await p.goto('http://127.0.0.1:8777/index.html', { waitUntil: 'domcontentloaded' });
-t('it covers the app from the very start', (await state()).on);
-await at(0.8);
 let s = await state();
-t('the L has popped up; the name is not out yet', s.mark > 0.9 && s.word < 0.05, JSON.stringify(s));
-await at(2.1);
-s = await state();
-t('the name has slid out, on plain black: no field of dots', s.word > 0.99 && s.dots === 0, JSON.stringify(s));
+t('it covers the app from the very start, as one canvas and nothing else', s.on && s.canvases === 1 && s.other === 0 && s.draws === 'water', JSON.stringify(s));
+await at(0.45);
+let L = await lit();
+t('the ripple starts on the logo: it is lit, the far end of the name is still dark', L.logo > 150 && L.r < 10, JSON.stringify(L));
+await at(1.0);
+const L1 = await lit();
+t('…and travels across: the M is out, the R not yet', L1.m > 150 && L1.r < 10, JSON.stringify(L1));
+await p.waitForTimeout(80);
+const L2 = await lit();
+t('the writing is moving, like water', L1.print !== L2.print);
+t('the black round it stays still: nothing lit but the writing', L1.stray < 4 && L2.stray < 4, `${L1.stray} ${L2.stray}`);
 await at(2.3);
-s = await state();
-t('…and it holds a moment, nothing else drawn', s.on && s.word > 0.99 && s.dots === 0, JSON.stringify(s));
+L = await lit();
+t('the whole name is out', L.logo > 200 && L.m > 200 && L.r > 200, JSON.stringify(L));
 t('the app has drawn underneath', await p.evaluate(() => !!document.querySelector('.topbar')));
-await at(2.68);
+await at(2.9);
+t('…and it holds to the end of the water', (await state()).on);
+await at(3.08);
 s = await state();
-t('the snap: the app settling from a touch smaller', /scale\(0\.9[6-9]/.test(s.app) || s.app === '' , JSON.stringify(s));
+t('the snap: the app settling from a touch smaller', /scale\(0\.9[6-9]/.test(s.app) || s.app === '', JSON.stringify(s));
 await p.waitForTimeout(500);
 s = await state();
 t('…and it is gone, the app as it was', !s.on && s.app === '', JSON.stringify(s));
@@ -69,7 +89,7 @@ await p.evaluate(() => localStorage.setItem('laminar:intro', 'short'));
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForTimeout(150);
 t('it plays', (await state()).on);
-await at(1.9);
+await at(2.1);
 await p.waitForTimeout(150);
 t('…and is gone in about two seconds', !(await state()).on);
 
@@ -97,6 +117,27 @@ await p.evaluate(() => [...document.querySelector('.st-row[data-row="Intro"]').q
 await p.waitForTimeout(350);
 t('…picking Short keeps it on this computer', await p.evaluate(() => localStorage.getItem('laminar:intro')) === 'short'
   && await p.evaluate(() => document.querySelector('.st-row[data-row="Intro"] button.is-on')?.textContent) === 'Short');
+
+console.log('  -- without WebGL --');
+{
+  const b2 = await pw.chromium.launch({ executablePath: CHROME, args: ['--disable-3d-apis'] });
+  const p2 = await (await b2.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  const e2 = []; p2.on('pageerror', e => e2.push(e.message));
+  await p2.addInitScript(() => {
+    localStorage.setItem('fakeroot', 'Vault');
+    const A = { id: 'acc_1', name: 'Apex 50K', currency: 'USD', startingBalance: 50000, defaultRiskPercent: 1, color: '#0988F0', openedAt: '2026-06-01', archived: false };
+    if (!localStorage.getItem('fakefs')) localStorage.setItem('fakefs', JSON.stringify([['data/accounts.json', JSON.stringify({ version: 2, displayUnit: '$', accounts: [A], activeAccountId: 'acc_1', theme: 'dark' })]]));
+    window.__intro = true;
+  });
+  await p2.addInitScript(FAKE_FS);
+  await p2.goto('http://127.0.0.1:8777/index.html', { waitUntil: 'domcontentloaded' });
+  await p2.waitForTimeout(1300);
+  const plain = await p2.evaluate(() => { const o = document.querySelector('.intro'), c = o?.querySelector('canvas'); return { draws: o?.dataset.draws, op: c ? +getComputedStyle(c).opacity : null }; });
+  t('the name fades in instead', plain.draws === 'plain' && plain.op > 0.9, JSON.stringify(plain));
+  await p2.waitForTimeout(2600);
+  t('…and it still snaps into the app', await p2.evaluate(() => !document.querySelector('.intro') && !!document.querySelector('.topbar')) && e2.length === 0, e2.join(' | '));
+  await b2.close();
+}
 
 t('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 console.log(`\n${pass} passed, ${fail} failed`);

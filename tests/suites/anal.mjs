@@ -110,6 +110,8 @@ t('the breaks card is tight to its text', breaks && breaks.h <= breaks.txt + 4, 
 t('and no taller than the card with the reading in it', breaks && loss && breaks.h < loss.h,
   `${breaks?.h} vs ${loss?.h}`);
 t('neither card is padded out with empty space', loss && loss.h <= loss.txt + 4, JSON.stringify(loss));
+const fills = await p.evaluate(() => [...document.querySelectorAll('.view .card')].map(n => [n.querySelector('h2,.eyebrow')?.textContent || '?', getComputedStyle(n).backgroundColor, n.classList.contains('light')]));
+t('After a loss is clear like every other card here, not the one filled-in box (9 Nov)', fills.length > 3 && fills.every(([, bg, light]) => bg === fills[0][1] && !light), JSON.stringify(fills));
 await p.screenshot({path:OUT + '/an-discipline.png'});
 
 // ---- timing

@@ -193,11 +193,16 @@ export function markets(store, nav) {
    Where two come near, a soft cushion (CUSH px deep, nothing at its edge,
    firmer the deeper) eases them off each other before they touch, so a
    meeting is a glide, never a nudge; the edges of the field have the same.
-   Each bubble is its own layer and is only ever moved — to a fraction of a
-   pixel, every frame, so a slow drift is smooth rather than a pixel's step
-   every few frames — and never scaled, so its text and logo stay sharp.
-   Growing in and shrinking away scale what is inside it, which is drawn
-   afresh each time. */
+   Each bubble is its own layer, drawn once at its full size, and after that
+   only ever moved and scaled as a layer (11 Nov) — nothing in it is painted
+   again while it grows in, drifts or changes size, which is what made the
+   page stutter (the orb's gradients and shadows used to be redrawn on every
+   frame of growing). It is moved to a fraction of a pixel, so a slow drift
+   is a glide; at rest it carries no scale at all, so its text is sharp.
+   What is drawn follows where the bubble is a few hundredths of a second
+   behind (sx, sy), which takes the last tremor out of a nudge.
+   Growing in is a small spring: each pops a touch past its size and
+   settles, fading in as it starts, the middle ones first. */
 const GAP = 5, SPEED = 12, CUSH = 12;
 const seeded = key => { let a = [...key].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7) >>> 0;
   return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
@@ -215,24 +220,27 @@ function field(box, { onOpen, tabKey }) {
     const k = Math.min(Math.sqrt(W * H * 0.5 / (Math.PI * raw.reduce((s, v) => s + v * v, 0) || 1)), cap / most);
     return raw.map(v => Math.max(24, v * k));
   }
+  /* only what has changed is written: a write to a bubble's style has it drawn again */
   function paintBubble(n) {
-    const it = n.it, c = tone(it.change), strength = Math.min(1, 0.3 + Math.abs(it.change ?? 0) / Math.max(0.01, n.top) * 0.7);
-    n.d = Math.round(n.tr * 2);
-    n.el.style.width = n.el.style.height = n.d + 'px';
-    n.el.style.setProperty('--d', n.d + 'px');
-    n.el.style.setProperty('--c', c);
-    n.el.style.setProperty('--a', strength.toFixed(2));
-    n.el.classList.toggle('is-s', n.d < 66);
-    n.el.classList.toggle('is-xs', n.d < 50);
-    n.el.setAttribute('aria-label', `${it.label}, ${it.name}: ${pctText(it.change)}`);
-    n.pct.textContent = pctText(it.change);
+    const it = n.it, c = tone(it.change), strength = Math.min(1, 0.3 + Math.abs(it.change ?? 0) / Math.max(0.01, n.top) * 0.7).toFixed(2);
+    const d = Math.round(n.tr * 2), text = pctText(it.change);
+    if (d !== n.d) {
+      n.d = d;
+      n.el.style.width = n.el.style.height = d + 'px';
+      n.el.style.setProperty('--d', d + 'px');
+      n.el.classList.toggle('is-s', d < 66);
+      n.el.classList.toggle('is-xs', d < 50);
+    }
+    if (c !== n.c) { n.c = c; n.el.style.setProperty('--c', c); }
+    if (strength !== n.a) { n.a = strength; n.el.style.setProperty('--a', strength); }
+    if (text !== n.text) { n.text = text; n.pct.textContent = text; n.el.setAttribute('aria-label', `${it.label}, ${it.name}: ${text}`); }
   }
   function make(it) {
     const pct = el('span', { class: 'mk-pct' });
     const inner = el('span', { class: 'mk-b-in' }, logo(tabKey, it, 'calc(var(--d) * .3)'), el('span', { class: 'mk-name' }, it.label), pct);
     const node = el('button', { type: 'button', class: 'mk-b', role: 'listitem', 'data-key': it.key }, inner);
     const r = seeded(it.key);
-    const n = { key: it.key, it, el: node, inner, pct, x: W / 2, y: H / 2, vx: 0, vy: 0, r: 0, tr: 0, d: 0, top: 1, held: false, born: Infinity,
+    const n = { key: it.key, it, el: node, inner, pct, x: W / 2, y: H / 2, sx: null, sy: null, vx: 0, vy: 0, r: 0, rv: 0, tr: 0, d: 0, top: 1, held: false, born: Infinity, arriving: true,
       th: r() * Math.PI * 2, f: 0.18 + r() * 0.22, p: r() * Math.PI * 2, sp: 0.8 + r() * 0.4, sc: null };
     grab(n);
     return n;
@@ -255,13 +263,16 @@ function field(box, { onOpen, tabKey }) {
       if (!n.placed && W) {
         const a = i * 2.39996, d = Math.sqrt((i + 0.5) / N);
         n.x = W / 2 + Math.cos(a) * d * (W / 2 - r); n.y = H / 2 + Math.sin(a) * d * (H / 2 - r); n.placed = true;
-        n.born = T + fresh.length * 0.03;
         fresh.push(n);
       }
-      n.it = it; n.tr = r; n.top = top; n.going = false;
+      /* a size within a pixel and a half of the one it has is left alone: prices tick, the field should not twitch */
+      n.it = it; n.tr = n.tr && !n.arriving && Math.abs(r - n.tr) < 1.5 ? n.tr : r; n.top = top; n.going = false;
       paintBubble(n);
     });
     if (!W) return;
+    /* the middle ones first, the whole field out within half a second however many there are */
+    const gapT = Math.min(0.028, 0.5 / Math.max(1, fresh.length));
+    fresh.forEach((n, i) => { n.born = T + 0.04 + i * gapT; });
     if (fresh.length) apart(fresh, 240);
     if (still()) rest(); else { render(); wake(); }
   }
@@ -287,7 +298,7 @@ function field(box, { onOpen, tabKey }) {
   function rest() {
     for (const [k, n] of nodes) if (n.going) { n.el.remove(); nodes.delete(k); }
     const live = [...nodes.values()];
-    for (const n of live) { n.r = n.tr; n.vx = n.vy = 0; }
+    for (const n of live) { n.r = n.tr; n.rv = 0; n.arriving = false; n.vx = n.vy = 0; n.sx = n.sy = null; }
     apart(live.filter(n => !fixed(n)), 400);
     render();
   }
@@ -296,9 +307,14 @@ function field(box, { onOpen, tabKey }) {
     T += dt;
     const list = [...nodes.values()], live = list.filter(n => !n.going);
     const big = Math.max(1, ...live.map(n => n.tr));
-    const grow = 1 - Math.exp(-dt * 6), relax = 1 - Math.exp(-dt * 0.8), brake = 1 - Math.exp(-dt * 3);
+    const relax = 1 - Math.exp(-dt * 0.8), brake = 1 - Math.exp(-dt * 3), shrink = 1 - Math.exp(-dt * 9);
     for (const n of list) {
-      if (T >= n.born) { n.r += (n.tr - n.r) * grow; if (Math.abs(n.tr - n.r) < 0.25) n.r = n.tr; }
+      if (n.going) { n.r += (0 - n.r) * shrink; n.rv = 0; }
+      else if (T >= n.born && (n.r !== n.tr || n.rv)) {
+        /* a spring to its size: a touch past it, and back (about a twentieth over, settled in half a second) */
+        n.rv += ((n.tr - n.r) * 170 - n.rv * 17) * dt; n.r = Math.max(0, n.r + n.rv * dt);
+        if (Math.abs(n.tr - n.r) < 0.04 && Math.abs(n.rv) < 0.6) { n.r = n.tr; n.rv = 0; n.arriving = false; }
+      }
       if (n.held) continue;
       if (n.key === marked) { n.vx -= n.vx * brake; n.vy -= n.vy * brake; }
       else {
@@ -333,8 +349,9 @@ function field(box, { onOpen, tabKey }) {
       const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
       if (rv < 0) { const f = rv * (1 - Math.exp(-dt * 7 * q)); a.vx += nx * f * wa; a.vy += ny * f * wa; b.vx -= nx * f * wb; b.vy -= ny * f * wb; }
       away(a, nx, ny, q); away(b, -nx, -ny, q);
+      /* truly touching: moved apart quickly, but over a few steps rather than in one jump */
       const touch = a.r + b.r + 1;
-      if (dist < touch) { const corr = touch - dist; a.x -= nx * corr * wa; a.y -= ny * corr * wa; b.x += nx * corr * wb; b.y += ny * corr * wb; }
+      if (dist < touch) { const corr = (touch - dist) * Math.min(1, dt * 34); a.x -= nx * corr * wa; a.y -= ny * corr * wa; b.x += nx * corr * wb; b.y += ny * corr * wb; }
     }
     /* the edges: the same cushion, then a hard stop */
     const edge = (p, lo, hi, v) => {
@@ -351,16 +368,21 @@ function field(box, { onOpen, tabKey }) {
     }
   }
   function sweep() { for (const [k, n] of nodes) if (n.going && n.r < 1) { n.el.remove(); nodes.delete(k); } }
-  function render() {
+  /* dt: how long since the last frame, for what is drawn to follow where each bubble is (none: straight there) */
+  function render(dt = 0) {
+    const follow = dt ? 1 - Math.exp(-dt / 0.04) : 1;
     for (const n of nodes.values()) {
-      const h = n.d / 2, s = h ? n.r / h : 0;
-      /* to a hundredth of a pixel: a slow drift is a glide, not a pixel's hop every few frames */
-      const tf = `translate(${(n.x - h).toFixed(2)}px,${(n.y - h).toFixed(2)}px)`;
+      /* against the size it is going to (or, shrinking away, the size it was drawn at) */
+      const h = n.d / 2, s = n.going ? (h ? n.r / h : 0) : n.tr ? n.r / n.tr : 0;
+      if (n.sx == null || n.held || !dt) { n.sx = n.x; n.sy = n.y; }
+      else { n.sx += (n.x - n.sx) * follow; n.sy += (n.y - n.sy) * follow; }
+      /* to a hundredth of a pixel: a slow drift is a glide, not a pixel's hop every few frames.
+         The scale is the layer's (nothing inside is drawn again), and is not there at all at rest. */
+      const whole = !n.going && n.r === n.tr;
+      const tf = `translate(${(n.sx - h).toFixed(2)}px,${(n.sy - h).toFixed(2)}px)` + (whole ? '' : ` scale(${Math.max(0, s).toFixed(4)})`);
       if (tf !== n.tf) { n.el.style.transform = tf; n.tf = tf; }
-      const sc = !n.going && Math.abs(s - 1) < 0.004 ? '' : Math.max(0, s).toFixed(3);
-      if (sc !== n.sc) { n.inner.style.scale = sc; n.sc = sc; }
-      const op = n.going ? Math.min(1, n.r / 20).toFixed(2) : '';
-      if (op !== n.op) { n.el.style.opacity = op; n.op = op; }
+      const op = n.going ? Math.min(1, n.r / 20).toFixed(2) : n.arriving && n.tr ? Math.min(1, n.r / (n.tr * 0.5)).toFixed(2) : '';
+      if (op !== n.op) { n.el.style.opacity = op === '1.00' ? '' : op; n.op = op; }
     }
   }
   /* by the clock, in steps of at most 1/120 s, so it drifts at the same pace on any screen; it keeps going while the
@@ -373,7 +395,7 @@ function field(box, { onOpen, tabKey }) {
     last = now;
     const k = Math.max(1, Math.ceil(dt * 120));
     for (let i = 0; i < k; i++) step(dt / k);
-    sweep(); render();
+    sweep(); render(dt);
     raf = requestAnimationFrame(frame);
   }
   function wake() { if (!raf && !still() && box.isConnected) raf = requestAnimationFrame(frame); }

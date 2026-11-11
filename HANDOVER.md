@@ -2404,3 +2404,196 @@ Everything since 2.39.0, zipped for him to push with GitHub Desktop and build wi
 - TradingView snapshot links on the Charts box.
 
 Version bumped in package.json, tauri.conf.json, Cargo.toml and Cargo.lock (and the untracked package-lock.json). `cargo check --locked` is clean and the full run green (every suite). The zip is `git archive` of HEAD under `laminar-2.40.0/`, like 2.39.0.
+
+## The start date covers the money too (9 Nov)
+On 2.40.0 with "OANDA trades from" set to 9 Nov, his OANDA Demo card still showed Gross P&L −A$101,180, balance −A$91,180 and peak A$901,084.
+- **What was in his vault (read from Ledger Vault):** 23 OANDA trades, 22 of them from 2024–25 when the demo held about $10M, with huge sizes (+968,743 on XAUUSD, −685,883 on BTCUSD and so on). They summed to −101,179.69. No funding entries had been recorded.
+- **Why it still showed:** `store.liveClosedFor`, the account card's trades behind `moneyOf`, never went through `inScope` or `shownTrade`.
+- **Now (store.js):**
+  - `liveClosedFor` checks `shownTrade`.
+  - `moneyOf` leaves out OANDA's money moves (`oanda-tx-…` funding entries) dated before the date (`shownMove`; `oandaHiddenMoves` lists them).
+  - Your own corrections and withdrawals always count.
+  - `openedOf(a)`: the OANDA account (the linked one, or firm `oanda`) shows as opened no earlier than the date. accounts.js uses it.
+- **acctboard history** ("Paid out and corrected") leaves out the hidden moves. The sync's `funded` count includes only shown ones.
+- **The card's note** in Charts & prices now says it covers trades and money moved.
+- **His own files, loaded here with the new code:** OANDA Demo start 10,000, gross 0, funded 0, balance 10,000, peak 10,000, opened 9 Nov. topstep and 100K are unchanged.
+- **Suite oandasync (+4, 57):**
+  - P&L from the shown trades plus his own correction;
+  - a top-up before the date left out, while moves on or after it count;
+  - balance and peak start fresh;
+  - opened on the date.
+
+## Analytics → Discipline: After a loss is a clear card (9 Nov)
+He asked for the one filled box among Analytics' cards to be clear like Overview, Execution and Outlook. It was Discipline's "After a loss" (`card light`, rgb 24,24,27 in dark, against 14,14,16 everywhere else).
+- **Now (analytics.js `afterLossCard`):**
+  - It's a plain `card`.
+  - Its colours are his own: `--profit`, `--loss` and `--ink` instead of `--pos-light`, `--neg-light` and `--grey-8`, so they follow Appearance → colours like the cards around it.
+  - Its closing divider is `--grey-9` like the other cards' dividers (`--grey-2` drew a bright line on the dark card).
+- **Suites:**
+  - anal (+1, 23): every Discipline card has one background, none `light`.
+  - theme: its pale-card checks moved to the trade page's pale card (reached from the dashboard's list), the one left besides the Calendar's.
+
+## The number tiles go see-through under glass (9 Nov)
+His screenshots, with the Fade background and glass on, showed the tiles across the top of Analytics' Overview (Net, Win rate…), Execution (Clean trades…) and Outlook (Bias right…) solid black, while the cards were see-through. (I had first taken his "clear" to mean Discipline's pale card and made that one clear, above.)
+- **Why:** `.lab-tile` (and the Lab's `.lab-rtop`, the Review's `.rv-stat`) have their own `background:var(--card)`, and glass only ever named `.card`, `.sidebar`, the menus and so on.
+- **Now:**
+  - app.css: `html[data-glass="on"]` gives the tiles `--glass-panel`, the same blur and a rim.
+  - look.css: Clear glass gives them the cards' `saturate(125%)` frost and half-pixel ring.
+  - Inside a card, a tile takes the tint only, as a card in a card does.
+  - The no-backdrop-filter fallback includes them.
+  - look.js `panelFlip` and look.css's pic-ink writing rule include them, so they turn with the cards over a bright picture.
+- **Checked with his trades, Fade and Clear:** tile and card are both `rgba(8,8,10,.22)` with `blur(6.9px) saturate(1.25)` on all three tabs.
+- **Suite glass (+2, 43):** a tile set beside the cards matches their tint and frost under Frosted and under Clear.
+
+## Journal → Notes (11 Nov)
+He asked for a page under Journal for what he learns, what to watch out for and what to pay attention to: the list shows each note's title and the start of what it says, and opening a note shows the whole of it. The note page follows a reference he sent: a narrow column in the middle with room either side, numbered sections in circles in the left margin, a thin rule under the title and outlined pill buttons. He asked for bold, text size, paragraph styles, headings and subheadings, links that are underlined and open when clicked, text colour and highlight, pictures that can be dragged anywhere with the writing wrapping round them, and a TradingView chart link pasted in turning into the chart. Dark theme.
+- **Where it's kept (store.js):**
+  - `data/notes.json` is `{ version, notes: [{ id, title, kind, pinned, html, text, images, createdAt, updatedAt }] }`.
+  - It's in `FILES`, the load fallbacks, the scaffold, `save()`'s map (which it was missing at first), `heal()` (a note without an id is set aside; title/html/text/images are filled out), `KEEP_DAILY` and `shotNames()`, so note pictures go into the backup zip.
+  - Methods: `addNote`, `updateNote`, `deleteNote(id, extra)`, `putNoteImage` (`screenshots/<noteId>-<id>.jpg`) and `dropNoteImages`.
+  - A picture that another note also shows (copied across) is never deleted.
+- **The list (views/notes.js):**
+  - Two layouts, Cards and List, with filters for All, Lesson, Watch out and Focus, and a search over title and text. Pinned notes come first, then the newest.
+  - Each note shows a picture count. A note with no title shows "Untitled" in italics.
+  - New note creates a note and opens it.
+  - `#/notes/<id>` opens a note (`notes()` hands it to `noteEditor`).
+- **A note (views/noteedit.js):**
+  - **Page:**
+    - The page is a `contenteditable` area that edits through `execCommand`.
+    - A Back button, a Saved/Saving… status, Delete (it asks twice) and Pin, which sits far right so a double-click on New note lands on Pin.
+    - A sticky pill toolbar.
+    - The title is an auto-growing textarea; Enter or ↓ moves into the text.
+    - Kind is set with outlined pills.
+    - Then the "Edited …" line, the rule and the text.
+    - h2 is a "Section": a CSS counter draws its number in a circle in the margin, and moves it inline below 860px.
+  - **Toolbar:**
+    - Paragraph menu: Text, Heading, Section, Subheading, Quote.
+    - Size menu: Small, Normal, Large, Huge.
+    - B, I, U and S.
+    - A colour menu with a row each for text colour and highlight, 8 colours plus none.
+    - Bulleted and numbered lists, Divider, Link (Ctrl+K), Picture, and TradingView chart.
+  - **Shortcuts:**
+    - Typing `#`, `##`, `###`, `>`, `-`/`*` or `1.` followed by a space makes a heading, quote or list.
+    - Ctrl+Alt+0–3 sets the paragraph style.
+    - Tab indents a list.
+  - **Colour and size are stored as classes:**
+    - The browser is asked for colours nobody would pick (rgb(1,2,3+i) for text, rgb(2,1,3+i) for highlight) and `<font size=7>`. `normalize()` swaps them for `tc-*`, `hl-*` and `fs-*`.
+    - "Default", "No highlight" and "Normal" cut that stretch out of the surrounding run (`carve`).
+    - The palette is defined in app.css only.
+    - Chrome puts a list inside the paragraph it came from (`<p><ul>`); `liftLists` takes it out.
+  - **What's kept:** `clean()` is an allowlist sanitiser run on load, on paste and on save. It keeps p, h1–h3, blockquote, lists, hr, br, b/i/u/s, `a` (http/https only) and spans carrying a known class. It drops scripts, styles, other people's images and handlers. Google Docs' non-bold `<b>` is unwrapped.
+  - **Links:**
+    - A web address followed by a space becomes a link, and so does one in pasted text.
+    - Clicking a link opens it. A press and release in the same place counts as a click; dragging across it selects the words instead.
+    - Hovering shows the host with Open, Edit and Remove.
+    - On the desktop, links open in his browser via the new `open_link` (main.rs: http(s) only, no spaces, quotes or shell characters, one argument to rundll32/open/xdg-open, no shell; `link_tests`). On the web they open in a new tab.
+  - **Pictures:**
+    - `<span class="ne-img" data-shot data-float data-w>` sits in the text: floated left or right so the writing wraps round it, or `center` on its own line.
+    - Pasting, dropping, the Picture button and the TradingView chart button all add one.
+    - A pasted `tradingview.com/x/…` link fetches the snapshot, keeps `data-link` and offers "Open on TradingView". If the fetch fails, the link stays as text.
+    - **Dragging:** the picture moves live through the text, to the start of the word under the pointer, and the third of the column it's over picks left, centre or right. It reads the text with the picture hidden so it doesn't chase itself, won't land inside a link, and the page scrolls when the pointer is held near the top or bottom.
+    - The corner handle sizes it (15–100% of the column).
+    - Clicking a picture shows its bar: Wrap left, On its own line, Wrap right, Open (charts), Remove. Delete and Backspace remove a chosen picture.
+  - **Saving:**
+    - 600 ms after the last change.
+    - Leaving a note also flushes it, as do pagehide and visibilitychange.
+    - A note left empty is deleted.
+    - Pictures taken out are deleted when the note is left (not straight away, so Ctrl+Z can still bring them back).
+  - **Redraws:** the app rebuilds the page on every redraw, but an open note's page is kept (`live`) and handed back as it was, with the caret put back. Focus is tracked by `relatedTarget` and presses outside the note, because Chrome blurs an element when it's taken off the page.
+- **The new-trade + button** isn't shown on Notes.
+- **Demo:** four sample notes, seeded once into an empty notes file (`laminar:demo-notes`).
+- **Suite notes (new, 61):**
+  - Typing and shortcuts; every tool; carving colour and size; links (Ctrl+K, click opens, hover and Remove).
+  - Pasted html cleaned; autolinked paste.
+  - Pictures: paste, wrap left, dragged into a paragraph to float right with the text beside it to its left, sized from the corner, TradingView paste, a layout link explained.
+  - What's kept; a redraw keeping the page and caret; a removed picture's file deleted on leaving.
+  - The list: card, search, empty search.
+  - Reopening with the picture where it was; an empty note let go; Delete removing the note and its pictures.
+- **look:** the Journal tabs are now Trades · Calendar · Review · Notes.
+- **vault:** the backup zip now holds eleven data files (notes.json too), 14 entries.
+- **Full run:** every suite green.
+
+## Your picture opens a menu (11 Nov)
+He asked for the profile picture to open a menu (from a picture he sent, minus its white Create button) with Profile, Appearance, Playbook, Charts and prices, and Settings, which goes to the existing Settings page.
+- **shell.js `youMenu`:**
+  - Opens below the picture, using the same popover as the account menu.
+  - At the top: his picture, his name and the vault folder.
+  - Items, each with an icon and a line saying what it covers: Profile (`#/settings/profile`), Appearance (the Appearance sheet), Playbook (`#/settings/playbook`), Charts & prices (`#/settings/charts`), then Settings (`#/settings`).
+  - Pressing the picture again closes it.
+- **The picture button** reads "<name> — your menu" (`aria-haspopup`).
+- **look.css:** `.pop-you*`, `.pop-ic`, `.pop-t`, `.pop-d`.
+- **Suites:**
+  - profilepic: replaced "opens Settings, not a menu" with the menu's five items in order, his name, the second press closing it, and every item going where it says.
+  - lookhelp now opens Settings directly.
+
+## A note's toolbar only while writing (11 Nov, evening)
+He asked for the formatting bar to appear only while he's typing or editing.
+- **noteedit.js `paintEditing`:** the bar shows while the caret is in the text (`document.activeElement === body`), or while one of its own menus is open (the link box takes focus but the bar stays). It's re-checked on the text's focus and blur and when a menu closes.
+- **Redraws:** the bar keeps its state while the caret is put back (`restoring`), so it doesn't flicker.
+- **app.css:** hidden, `.ne-tools-in` fades out and up a little and goes `visibility:hidden` and `pointer-events:none`. Its place is kept, so the title and text don't move when it appears.
+- **Suite notes (+7, 68):**
+  - there while writing; not there on a note reopened to read;
+  - a click in the text brings it back without moving the page;
+  - it stays while its colour menu is open;
+  - it goes when the title is clicked and when you click away from the note.
+
+## The intro, as water (11 Nov, evening)
+He asked to see the intro redesigned: straight to the logo and LAMINAR, with the look of water after a drop has landed, the drop itself not shown and the writing being the water. He picked "from the logo" from a preview with three versions (from the middle, from the logo, three drops).
+- **intro.js, rewritten:**
+  - The overlay is one WebGL canvas on black. The wordmark is drawn once to a texture (the mark and letters from `MARK_G` / `LETTERS_G`, as Path2D).
+  - A fragment shader looks the wordmark up through the slope of the water: rings trailing a front that moves out from the drop (the middle of the logo, at 0.15s), dying with distance behind the front and with time.
+  - The front uncovers the writing as it passes. The slope bends it (blue a touch more than red) and lights the near side of each ring. The black is never lit, so the ripple shows only in the writing.
+  - Distances are in units of the wordmark's width (`uUnit`), so the rings are the same size against the letters at any window size.
+  - The wordmark is 42% of the window's width, between 260 and 620px.
+- **Timing:** the water is all but still by 2.8s and the snap is at 3.0s (was 2.6). Short runs it 1.75× faster. The snap, skipping on a click or key (which shows the name whole and still), waiting for the app, Off, Motion Off, reduced motion and automation are as before.
+- **Without WebGL:** the name fades in on a 2D canvas (`data-draws="plain"`), then snaps the same way.
+- **app.css:** the `.intro-*` lockup rules are replaced by the canvas rules.
+- **Settings → Intro:** Full's note reads "The logo and the name, as a ripple on water".
+- **Suite intro (rewritten, 21):**
+  - one canvas and nothing else;
+  - the logo lit while the R is dark, then the M out and the R not yet, then the whole name;
+  - the writing changes from one frame to the next;
+  - nothing lit above the name;
+  - the snap, the skip, Short, Off, automation and the setting;
+  - without WebGL (a second browser with 3D off), the name fades in and still snaps away.
+- **The preview** he chose from is a separate page (scratchpad `intro/laminar-intro.html`).
+
+## Markets: the bubbles pop out and drift without the stutter (11 Nov, evening)
+He said the Markets bubbles were laggy in the app, both when they pop out and afterwards while they move untouched, and asked for a smoother, better animation.
+- **Why it stuttered:** growing in (and every change of size when prices refreshed) scaled what is inside each bubble, so the orb's three gradients and five shadows were painted again on every frame, for every bubble. A trace of Stocks popping in (4× CPU slowdown) had 1,553 ms of rasterising in three seconds and 42 frames drawn.
+- **Now (markets.js `field`):**
+  - **Layers:** a bubble is drawn once at full size, then moved and scaled as a layer (`translate(…) scale(…)` on `.mk-b`). Nothing inside it is touched. At rest there's no scale at all, so the text stays sharp.
+  - **The pop:** a small spring on the radius, about a twentieth past its size and back, settled in half a second. Each fades in as it starts. The middle ones go first, and the whole field is out within half a second of stagger however many there are.
+  - **Refreshes:**
+    - A new size within 1.5px of the current one is left alone.
+    - `paintBubble` writes only what changed (size, colour, strength, text), so a price refresh no longer redraws every bubble.
+  - **Drift:**
+    - What's drawn follows the bubble's position about 40 ms behind (`sx`, `sy`), which takes the tremor out of nudges. A held bubble follows the pointer directly.
+    - Two bubbles that truly touch are moved apart over a few steps, not in one jump.
+- **app.css:** `.mk-b` has `will-change:transform, opacity` and `contain:layout style`.
+- **Measured the same way after:** 279 ms of rasterising (5.6× less) and 133 frames in the three seconds. Average frame, before → after:
+
+  | Tab | Before | After |
+  |---|---|---|
+  | Stocks | 57 ms | 22 ms |
+  | Crypto | 42 ms | 19 ms |
+  | Forex | 48 ms | 19 ms |
+
+  This is headless Chromium with a CPU slowdown, not his WebView2, so the ratio is what carries over.
+- **Suite markets (+4, 76):**
+  - while popping, the layer is scaled and the inside never touched;
+  - some bubble goes past its size, and some are faded;
+  - all fifty are at rest with no scale or fade left within 1.5s;
+  - a refresh with the same moves writes no size again.
+  - The at-rest check now accepts `will-change` including opacity.
+
+## 2.41.0 — zipped for GitHub (11 Nov, evening)
+Everything since 2.40.0, zipped for him to push with GitHub Desktop and build with Actions:
+- the OANDA start date covering the money as well as the trades;
+- Analytics → Discipline's After a loss as a clear card, and the number tiles see-through under glass;
+- Journal → Notes: the list, the note page with its toolbar (shown only while writing), links, pictures that float and drag, TradingView charts; `data/notes.json` in the vault and the backup; links opening in the browser through `open_link`;
+- the menu under his picture;
+- the intro as water, from the logo;
+- the Markets bubbles popping out and drifting as layers.
+
+The version is bumped in package.json, tauri.conf.json, Cargo.toml and Cargo.lock (and the untracked package-lock.json). `cargo check --locked` is clean, the shell's 17 tests pass, and the full run is green (every suite). The zip is `git archive` of HEAD under `laminar-2.41.0/`, like 2.40.0.

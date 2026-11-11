@@ -45,6 +45,7 @@ export const FILES = {
   lab:      'data/lab.json',
   review:   'data/review.json',
   drawings: 'data/drawings.json',
+  notes:    'data/notes.json',       // Journal → Notes (11 Nov)
 };
 const LEGACY = {
   accounts: 'accounts.json',
@@ -54,7 +55,7 @@ const LEGACY = {
 };
 /* the daily copies (store.keepDaily): which files, and where */
 const BACKUPS = 'data/backups', BACKUP_INDEX = 'data/backups/index.json';
-const KEEP_DAILY = ['accounts', 'trades', 'playbook', 'outlooks', 'replay', 'review', 'lab'];
+const KEEP_DAILY = ['accounts', 'trades', 'playbook', 'outlooks', 'replay', 'review', 'lab', 'notes'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const MANIFEST = 'vault.json';
 export const SHOTS = 'screenshots';
@@ -568,14 +569,16 @@ class Store {
       accounts: defaultAccounts(), trades: { version: 1, trades: [] }, playbook: defaultPlaybook(), replay: { version: 1, weeks: {} },
       outlooks: { version: 1, days: {} }, news: { version: 1, fetchedAt: null, events: [] }, wire: { version: 1, fetchedAt: null, seenAt: null, items: [] },
       lab: defaultLab(), review: { version: 1, weeks: {} }, drawings: { version: 1, lines: {} },
+      notes: { version: 1, notes: [] },
     };
     const keys = Object.keys(fallbacks);
     const got = await Promise.all(keys.map(k => this.readFile(FILES[k], fallbacks[k])));
     /* how each file opened: ok, missing (new), recovered (from a copy) or guarded (left alone) */
     this.fileStates = Object.fromEntries(keys.map((k, i) => [k, { state: got[i].state, from: got[i].from || null }]));
     this.guarded = new Set(keys.filter((k, i) => got[i].state === 'guarded').map(k => FILES[k]));
-    const [accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings] = got.map(g => g.value);
-    this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings };
+    const [accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings, notes] = got.map(g => g.value);
+    this.data = { accounts, trades, playbook, replay, outlooks, news, wire, lab, review, drawings, notes };
+    if (!Array.isArray(this.data.notes?.notes)) this.data.notes = { version: 1, notes: [] };
     this.heal();
     this.migrate();
     this.applyLookNow();
@@ -595,6 +598,7 @@ class Store {
       this.writeJSON(FILES.lab, this.data.lab),
       this.writeJSON(FILES.review, this.data.review),
       this.writeJSON(FILES.drawings, this.data.drawings),
+      this.writeJSON(FILES.notes, this.data.notes),
       this.ensureDir(SHOTS),
       this.writeText(MANIFEST, JSON.stringify({
         kind: 'quire-vault', version: 1, app: 'Laminar',
@@ -654,7 +658,8 @@ class Store {
     const fromShare = (this.data.accounts?.share?.clips || []).map(c => c.file);
     const fromBg = (this.data.accounts?.bgVideos || []).map(v => v.file);
     const fromProfile = [this.data.accounts?.avatar?.file, this.data.accounts?.banner?.file, ...Object.values(this.data.accounts?.firmLogos || {})];
-    return [...fromTrades, ...fromOutlooks, ...fromLook, ...fromShare, ...fromBg, ...fromProfile].filter(Boolean);
+    const fromNotes = (this.data.notes?.notes || []).flatMap(n => n.images || []);
+    return [...fromTrades, ...fromOutlooks, ...fromLook, ...fromShare, ...fromBg, ...fromProfile, ...fromNotes].filter(Boolean);
   }
 
   async exportVault() {
@@ -853,6 +858,16 @@ class Store {
       if (!Array.isArray(list) || ok.length !== list.length) { d.drawings.lines[k] = ok; note(); }
     }
     if (!d.review.weeks || typeof d.review.weeks !== 'object' || Array.isArray(d.review.weeks)) { d.review.weeks = {}; note(); }
+    /* Journal → Notes: a note without an id cannot be opened, so it is set aside; the rest are filled out */
+    if (!d.notes || typeof d.notes !== 'object' || !Array.isArray(d.notes.notes)) { d.notes = { version: 1, notes: [] }; note(); }
+    {
+      const ok = d.notes.notes.filter(n => n && typeof n === 'object' && typeof n.id === 'string' && n.id);
+      if (ok.length !== d.notes.notes.length) { d.notes.notes = ok; note(); }
+      for (const n of ok) {
+        for (const k of ['title', 'html', 'text']) if (typeof n[k] !== 'string') { n[k] = ''; note(); }
+        if (!Array.isArray(n.images)) { n.images = []; note(); }
+      }
+    }
     for (const t of d.trades.trades) {
       if (t.review != null && (typeof t.review !== 'object' || Array.isArray(t.review))) { delete t.review; note(); }
       /* "Trailed" was an exit reason for a while and was taken out; a trade
@@ -957,7 +972,8 @@ class Store {
   async save(which) {
     const map = { accounts: FILES.accounts, trades: FILES.trades, playbook: FILES.playbook,
                   replay: FILES.replay, outlooks: FILES.outlooks, news: FILES.news,
-                  wire: FILES.wire, lab: FILES.lab, review: FILES.review, drawings: FILES.drawings };
+                  wire: FILES.wire, lab: FILES.lab, review: FILES.review, drawings: FILES.drawings,
+                  notes: FILES.notes };
     await this.writeJSON(map[which], this.data[which]);
     this.emit();
   }
@@ -1227,6 +1243,19 @@ class Store {
   }
   /** OANDA trades the start date is leaving out, across every account. */
   get oandaHidden() { return this.trades.filter(t => !this.shownTrade(t)); }
+  /* money OANDA moved (oandasync's funding entries, `oanda-tx-…`) before the date is left out too (9 Nov) */
+  shownMove(x) {
+    const since = this.oandaSince;
+    return !(since && typeof x?.id === 'string' && x.id.startsWith('oanda-tx-') && typeof x.date === 'string' && x.date < since);
+  }
+  /** OANDA's money moves the date is leaving out, across every account. */
+  get oandaHiddenMoves() { return this.data.accounts.accounts.flatMap(a => (a.adjustments || []).filter(x => !this.shownMove(x))); }
+  /* the day an account is shown as opened: for the OANDA account, no earlier than the start date */
+  openedOf(a) {
+    const since = this.oandaSince, opened = a?.openedAt || null;
+    const isOanda = a && (a.id === this.data.accounts.oanda?.laminarId || a.firm === 'oanda');
+    return since && isOanda && (!opened || since > opened) ? since : opened;
+  }
 
   /* ============================================================
      Live, or live and the tests as well
@@ -1704,9 +1733,16 @@ class Store {
      trades only — a forward test is not money. (calc.accountMoney)
      ============================================================ */
   liveClosedFor(accountId) {
-    return this.trades.filter(t => t.accountId === accountId && t.status !== 'open' && t.mode !== 'forward');
+    return this.trades.filter(t => t.accountId === accountId && t.status !== 'open' && t.mode !== 'forward' && this.shownTrade(t));
   }
-  moneyOf(a) { return accountMoney(a, a ? this.liveClosedFor(a.id) : []); }
+  /* The account's money, with the start date applied to all of it (9 Nov): the OANDA trades before
+     it (liveClosedFor) and the money OANDA moved before it — a demo topped up, reset or emptied —
+     are left out of the balance, the P&L and the peak, as they are left out of every page. Your own
+     corrections and withdrawals always count. */
+  moneyOf(a) {
+    if (!a) return accountMoney(a, []);
+    return accountMoney({ ...a, adjustments: (a.adjustments || []).filter(x => this.shownMove(x)) }, this.liveClosedFor(a.id));
+  }
   /** What the account holds now: the start, plus the P&L, less what has been paid out. */
   balanceOf(a) { return this.moneyOf(a).balance; }
 
@@ -1859,6 +1895,63 @@ class Store {
      stays browsable. Writing happens after the trade has an id, so the two
      can never disagree about what a file is called.
      ============================================================ */
+  /* ============================================================
+     Notes (Journal → Notes, 11 Nov)
+
+     What you learn, what to watch out for, what to pay attention to — kept in
+     data/notes.json with the rest of the journal. A note is { id, title,
+     kind, pinned, html, text, images, createdAt, updatedAt }: html is the
+     page as written (cleaned, views/noteedit.js), text the same without the
+     markup (for the list and search), images the pictures it holds, which
+     live in screenshots/ like a trade's charts and go into the backup.
+     ============================================================ */
+  get notes() { return this.data.notes.notes; }
+  noteById(id) { return this.notes.find(n => n.id === id) || null; }
+  async addNote(patch = {}) {
+    const now = new Date().toISOString();
+    const n = { id: 'note_' + crypto.randomUUID().slice(0, 8), title: '', kind: null, pinned: false, html: '', text: '', images: [],
+      createdAt: now, updatedAt: now, ...patch };
+    this.notes.push(n);
+    await this.save('notes');
+    return n;
+  }
+  async updateNote(id, patch) {
+    const n = this.noteById(id);
+    if (!n) return null;
+    Object.assign(n, patch, { updatedAt: new Date().toISOString() });
+    await this.save('notes');
+    return n;
+  }
+  /* A note goes with its pictures (the record matters more than the files).
+     extra: pictures it held that were never saved into it (put in, then
+     taken out, in the same sitting). A picture another note also shows —
+     copied from one note to the other — stays for that one. */
+  async deleteNote(id, extra = []) {
+    const n = this.noteById(id);
+    if (!n) return;
+    this.data.notes.notes = this.notes.filter(x => x.id !== id);
+    await this.save('notes');
+    await this.dropNoteImages([...(n.images || []), ...extra]);
+  }
+  /** A picture for a note, written to screenshots/ — its name goes in the note's html and images. */
+  async putNoteImage(noteId, blob) {
+    const ext = /png/.test(blob.type) ? 'png' : /webp/.test(blob.type) ? 'webp' : 'jpg';
+    const name = `${SHOTS}/${noteId}-${newShotId()}.${ext}`;
+    await fs.ensureDir(SHOTS);
+    await fs.writeImage(name, blob);
+    forgetUrl(name);
+    return name;
+  }
+  /* pictures taken out of a note are let go once it is left without them — unless a note still shows them */
+  async dropNoteImages(names) {
+    const used = new Set(this.notes.flatMap(n => n.images || []));
+    for (const name of new Set(names)) {
+      if (used.has(name) || !String(name).startsWith(SHOTS + '/')) continue;
+      try { await fs.deleteImage(name); } catch { /* gone already */ }
+      forgetUrl(name);
+    }
+  }
+
   /* A trade used to hold exactly two charts, in shotLtf and shotHtf. It holds
      a list now, so a setup that needs four timeframes can have four. The old
      names are kept exactly as they are — the file on disk does not move, only

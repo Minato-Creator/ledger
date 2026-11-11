@@ -92,8 +92,25 @@ t('no double blur on a nested card', await p.evaluate(()=>{
   const inner = document.querySelector('.card .card');
   return !inner || !/blur/.test(getComputedStyle(inner).backdropFilter || '');
 }));
+/* the number tiles across the top of Analytics are see-through like the cards (9 Nov) */
+const tileVsCard = () => p.evaluate(async () => {
+  location.hash = '#/analytics'; await new Promise(r => setTimeout(r, 700));
+  /* (this journal has nothing in the window, so a tile is set on the page beside the cards, as Analytics draws them) */
+  const card = document.querySelector('.view .card');
+  const tile = document.createElement('div'); tile.className = 'lab-tile an-tile'; card.parentElement.insertBefore(tile, card);
+  const g = n => n && [getComputedStyle(n).backgroundColor, getComputedStyle(n).backdropFilter];
+  const r = { tile: g(tile), card: g(card) };
+  tile.remove();
+  return r;
+});
+let tv = await tileVsCard();
+t('Frosted: the Analytics number tiles are glass like the cards, not solid', tv.tile && tv.card && tv.tile[0] === tv.card[0] && /blur/.test(tv.tile[1]), JSON.stringify(tv));
 await setGlass(p, 'clear');
 t('back to Clear', (await root()).kind === 'clear');
+tv = await tileVsCard();
+t('Clear: the tiles the same tint and frost as the cards', tv.tile && tv.card && tv.tile[0] === tv.card[0] && tv.tile[1] === tv.card[1], JSON.stringify(tv));
+await p.evaluate(() => { location.hash = '#/'; }); await p.waitForTimeout(500);
+
 
 /* ---------- Dim ---------- */
 await openLook(p, 'custom');

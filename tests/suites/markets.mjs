@@ -5,7 +5,8 @@
    or Binance — each a bubble with its logo, name and move, sized by the
    move, green up and red down, each a lit orb on a see-through field; the
    app's own marks for forex (gold's bars), CoinGecko's coins, Elbstream's
-   companies (with its credit); drifting slowly without overlapping, never
+   companies (with its credit); popping out as layers (a small spring, nothing
+   inside drawn again); drifting slowly without overlapping, never
    scaled at rest; no chips on Forex & futures, the sectors on Stocks; drag one and the rest make
    way; a click opens its card and holds its bubble still (the
    price with its small decimals, the move, a line with a dot and a price
@@ -73,7 +74,7 @@ t('each with a logo, its name and its move', m.b.every(x => x.logo && x.name ===
 t('…the logo shown on every bubble, the smallest too', await p.evaluate(() => [...document.querySelectorAll('.mk-b .mk-logo')].every(e => e.getBoundingClientRect().width >= 12 && getComputedStyle(e).display !== 'none')));
 const worst = (() => { const o = []; for (let i = 0; i < m.b.length; i++) for (let j = i + 1; j < m.b.length; j++) { const a = m.b[i], c3 = m.b[j], d = a.r + c3.r - Math.hypot(a.x - c3.x, a.y - c3.y); if (d > 1.5) o.push(`${a.label}/${c3.label} ${d.toFixed(1)} (${a.r.toFixed(0)},${a.tr.toFixed(0)})`); } return o.join('; '); })();
 t('settled: none overlapping, all inside the field', overlaps(m.b) === 0 && m.b.every(x => x.x - x.r >= 0 && x.y - x.r >= 0 && x.x + x.r <= m.W + 0.5 && x.y + x.r <= m.H + 0.5), `${overlaps(m.b)} overlapping: ${worst}`);
-t('…each only ever moved (to a fraction of a pixel), never scaled, so it stays sharp (no blur until a hover)', await p.evaluate(() => [...document.querySelectorAll('.mk-b')].every(e => /^translate\([-\d.]+px, ?[-\d.]+px\)$/.test(e.style.transform) && !e.querySelector('.mk-b-in').style.scale && getComputedStyle(e).willChange === 'transform')));
+t('…each only ever moved (to a fraction of a pixel), never scaled, so it stays sharp (no blur until a hover)', await p.evaluate(() => [...document.querySelectorAll('.mk-b')].every(e => /^translate\([-\d.]+px, ?[-\d.]+px\)$/.test(e.style.transform) && !e.querySelector('.mk-b-in').style.scale && /transform/.test(getComputedStyle(e).willChange))));
 const look = await p.evaluate(() => { const f = getComputedStyle(document.querySelector('.mk-field')), o = getComputedStyle(document.querySelector('.mk-b[data-key="NAS100_USD"] .mk-b-in'));
   return { bg: f.backgroundColor, img: f.backgroundImage, sh: f.boxShadow, orb: (o.backgroundImage.match(/radial-gradient/g) || []).length, rim: (o.boxShadow.match(/inset/g) || []).length }; });
 t('the field is see-through: no panel, no edge', look.bg === 'rgba(0, 0, 0, 0)' && look.img === 'none' && look.sh === 'none', JSON.stringify(look));
@@ -225,7 +226,30 @@ console.log('stocks');
 S = await open(); p = S.p;
 await p.evaluate(() => { location.hash = '#/markets'; }); await settle(p, 600);
 const sparkBefore = S.seen.filter(u => u === 'query1.finance.yahoo.com/v7/finance/spark').length;   /* the Forex tab's one */
-await p.click('.mk-tabs [data-tab="stocks"]'); await settle(p, 4500);
+await p.click('.mk-tabs [data-tab="stocks"]');
+/* popping out (11 Nov): each bubble is scaled as a layer — nothing inside it is touched, so nothing is drawn again —
+   a touch past its size and back, fading in as it starts; all of them out within about a second */
+await p.waitForSelector('.mk-b', { timeout: 6000 });
+const pop = await p.evaluate(() => new Promise(res => {
+  const seen = { scaled: 0, inner: 0, over: 0, faded: 0, frames: 0 }, t0 = performance.now();
+  const f = () => {
+    const v = document.querySelector('.mk-view')?.__markets, st = v ? v.bubbles() : [];
+    seen.frames++;
+    for (const e of document.querySelectorAll('.mk-b')) {
+      if (/scale\(/.test(e.style.transform)) seen.scaled++;
+      const i = e.querySelector('.mk-b-in'); if (i.style.scale || i.style.transform) seen.inner++;
+      if (e.style.opacity && +e.style.opacity < 1) seen.faded++;
+    }
+    if (st.some(n => n.r > n.tr * 1.01)) seen.over++;
+    if (performance.now() - t0 < 1400) requestAnimationFrame(f);
+    else res({ ...seen, done: st.length && st.every(n => Math.abs(n.r - n.tr) < 0.5), rest: [...document.querySelectorAll('.mk-b')].every(e => !/scale/.test(e.style.transform) && !e.style.opacity) });
+  };
+  requestAnimationFrame(f);
+}));
+t('popping out: the bubble is scaled as a layer, what is inside it never touched', pop.scaled > 0 && pop.inner === 0, JSON.stringify(pop));
+t('…a touch past its size and back, fading in as it starts', pop.over > 0 && pop.faded > 0, JSON.stringify(pop));
+t('…all fifty out and at rest (no scale, no fade left on them) inside a second and a half', pop.done && pop.rest, JSON.stringify(pop));
+await settle(p, 3100);
 m = await M(p);
 t('Stocks: fifty US companies, from Yahoo Finance, no key', m.tab === 'stocks' && m.src === 'Yahoo Finance' && m.b.length === 50, JSON.stringify({ src: m.src, n: m.b.length, err: m.err }));
 const nv = m.b.find(x => x.label === 'NVDA'), aa = m.b.find(x => x.label === 'AAPL'), bk = m.b.find(x => x.label === 'BRK.B');
@@ -233,6 +257,11 @@ t('each against yesterday’s close, as Yahoo gives it', nv && Math.abs(nv.chang
 t('…Berkshire too, asked for as Yahoo writes it (BRK-B)', bk && Math.abs(bk.change - 0.2) < 0.002, JSON.stringify(bk));
 t('three requests for all fifty — Yahoo takes twenty at most', S.seen.filter(u => u === 'query1.finance.yahoo.com/v7/finance/spark').length - sparkBefore === 3,
   JSON.stringify(S.seen.filter(u => /yahoo/.test(u))));
+/* prices tick: a move too small to change a size by a pixel and a half leaves every bubble as it is drawn */
+const sizes0 = await p.evaluate(() => [...document.querySelectorAll('.mk-b')].map(e => e.dataset.key + ':' + e.style.width).join(','));
+await p.evaluate(() => document.querySelector('.mk-view').__markets.pull());
+await settle(p, 900);
+t('a refresh with the same moves writes no size again', await p.evaluate(() => [...document.querySelectorAll('.mk-b')].map(e => e.dataset.key + ':' + e.style.width).join(',')) === sizes0);
 t('the old source is not asked at all', !S.seen.some(u => /stooq/.test(u)));
 t('all fifty wear a logo (a picture or their ticker chip), the smallest too', await p.evaluate(() => { const ls = [...document.querySelectorAll('.mk-b .mk-logo')]; return ls.length === 50 && ls.every(e => e.getBoundingClientRect().width >= 12 && getComputedStyle(e).display !== 'none' && e.querySelector('img, .mk-mono')); }));
 const co = await p.evaluate(() => { const q = k => document.querySelector(`.mk-b[data-key="${k}"] .mk-logo`), cr = document.querySelector('.mk-credit.is-logos');

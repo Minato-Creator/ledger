@@ -421,7 +421,8 @@ export function accountSheet(store, nav, a) {
   function history() {
     const rows = [
       ...(a.payouts || []).map(p => ({ id: p.id, date: p.date, what: kindOf(a) === 'live' ? 'Withdrawal' : 'Payout', v: -Math.abs(p.amount), note: p.note, drop: () => store.removePayout(a.id, p.id) })),
-      ...(a.adjustments || []).map(x => ({ id: x.id, date: x.date, v: x.amount, note: x.note || '', drop: () => store.removeAdjustment(a.id, x.id),
+      /* (OANDA's money moves from before the start date are left out, as they are of the balance) */
+      ...(a.adjustments || []).filter(x => store.shownMove(x)).map(x => ({ id: x.id, date: x.date, v: x.amount, note: x.note || '', drop: () => store.removeAdjustment(a.id, x.id),
         what: x.kind === 'funding' ? (x.amount < 0 ? 'Funds taken out' : 'Funds added') : 'Balance correction' })),
     ].sort((x, y) => String(y.date).localeCompare(String(x.date)));
     if (!rows.length) return null;

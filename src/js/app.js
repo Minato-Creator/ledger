@@ -4,7 +4,7 @@
 import { store, isSupported, isTauri } from './store.js';
 import { fs } from './fs.js';
 import { el, icon, clear, toast, brandWordmark } from './ui.js';
-import { topbar, fitTopbar, bottombar, subnav, sectionOf, tabOf, accountMenu, moreSheet, arrive, settle, segMarks, segGlide } from './shell.js';
+import { topbar, fitTopbar, bottombar, subnav, sectionOf, tabOf, accountMenu, youMenu, moreSheet, arrive, settle, segMarks, segGlide } from './shell.js';
 import { closeSheets } from './sheet.js';
 import { initGlide } from './glide.js';
 import { syncOanda, autoSyncs } from './oandasync.js';
@@ -18,6 +18,7 @@ import { accounts } from './views/accounts.js';
 import { tradeDetail } from './views/tradedetail.js';
 import { settings } from './views/settings.js';
 import { calendar } from './views/calendar.js';
+import { notes } from './views/notes.js';
 import { analytics } from './views/analytics.js';
 import { replay } from './views/replay.js';
 import { wire } from './views/wire.js';
@@ -150,6 +151,7 @@ function route() {
     case 'markets':   return markets(store, nav);
     case 'lab':       return lab(store, nav, arg);
     case 'review':    return review(store, nav, arg);
+    case 'notes':     return notes(store, nav, arg);
     case 'firms':     return firmsPage(store, nav, arg);
     default:          return dashboard(store, nav);
   }
@@ -194,7 +196,7 @@ function render() {
   else {
     const bar = topbar(store, nav, { hash,
       onAccount: anchor => accountMenu(store, nav, anchor),
-      onYou: () => nav.go('#/settings') });
+      onYou: anchor => youMenu(store, nav, anchor, { openLook }) });
     if (arriving) bar.classList.add('is-new');
     root.append(bar, main, ...bottombar(store, nav, { hash, onMore: () => moreSheet(store, nav, { openLook }) }).filter(Boolean));
     fitTopbar(bar);

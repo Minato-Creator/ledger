@@ -523,11 +523,11 @@ function afterLossCard(acct, trades, ctx) {
   const row = (k, v, tone, note) => el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
     el('span', { class: 'm', style: { fontSize: '11.5px', color: 'var(--grey-6)' } }, k),
     note ? el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-5)' } }, note) : null,
-    el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: tone || 'var(--grey-8)' } }, v));
+    el('span', { class: 'm', style: { marginLeft: 'auto', fontSize: '12.5px', color: tone || 'var(--ink)' } }, v));
 
   const per = s => s.count ? f(s.expectancy, s.expectancyR, { rDecimals: 2 }) : '—';
   const tone = s => !s.count ? 'var(--grey-6)'
-    : s.expectancy > 0 ? 'var(--pos-light)' : s.expectancy < 0 ? 'var(--neg-light)' : 'var(--grey-8)';
+    : s.expectancy > 0 ? 'var(--profit)' : s.expectancy < 0 ? 'var(--loss)' : 'var(--ink)';
   const rate = s => (s.wins + s.losses) ? Math.round(s.wins / (s.wins + s.losses) * 100) + '%' : '—';
 
   // Only worth saying when there is enough to say it about.
@@ -539,7 +539,9 @@ function afterLossCard(acct, trades, ctx) {
      rail only pushed its closing line to the floor and left a hand's width of
      nothing in the middle of it — space inside a card reads as a mistake,
      where space under one reads as a page with room on it. */
-  return el('div', { class: 'card light', style: { flex: 'none', minWidth: 0 } },
+  /* a clear card like the rest of Analytics (it was the one filled-in "light" card, 9 Nov) — and its
+     colours his own: profit, loss and ink, as the cards around it */
+  return el('div', { class: 'card', style: { flex: 'none', minWidth: 0 } },
     el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
       el('h2', {}, 'After a loss'),
       el('span', { class: 'm', style: { fontSize: '10.5px', color: 'var(--grey-6)' } },
@@ -559,17 +561,17 @@ function afterLossCard(acct, trades, ctx) {
       row('Longest losing run', a.worstStreak ? `${a.worstStreak} trade${a.worstStreak === 1 ? '' : 's'}` : '—'),
     ),
 
-    el('div', { style: { marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid var(--grey-2)',
+    el('div', { style: { marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid var(--grey-9)',
                          fontSize: '12px', lineHeight: 1.55, color: 'var(--grey-6)' } },
       ...(!enough
         ? [`Needs a few more trades after a loss before the comparison means anything — ${a.next.count} so far.`]
         : gap < 0
           ? ['Your next trade after a loss is worth ',
-             el('span', { class: 'm', style: { color: 'var(--neg-light)' } }, f(Math.abs(gap), null, { sign: false })),
+             el('span', { class: 'm', style: { color: 'var(--loss)' } }, f(Math.abs(gap), null, { sign: false })),
              ' less than your average one.']
           : gap > 0
             ? ['You trade no worse after a loss — the next one is worth ',
-               el('span', { class: 'm', style: { color: 'var(--pos-light)' } }, f(gap, null, { sign: false })),
+               el('span', { class: 'm', style: { color: 'var(--profit)' } }, f(gap, null, { sign: false })),
                ' more than your average.']
             : ['A loss does not change what your next trade is worth.'])),
   );
