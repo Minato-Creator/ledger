@@ -9,8 +9,8 @@
 
    What comes across, per trade: the instrument, buy or sell, the size, the
    time and price in and out, the result in the account's money (financing
-   included), and the stop and target. The stop is the one the trade was
-   opened with, read off the transactions, so a stop later moved to the
+   included), and the stop and target. The stop is the first one the trade
+   had, read off the transactions and then kept, so a stop later moved to the
    entry does not shrink the risk: the R is the R you took.
 
    Each trade is kept as `oanda-<account>-<trade>`, so syncing again adds
@@ -82,11 +82,11 @@ async function allTrades(acc, cred) {
 }
 
 /** The stop and target each trade began with, and the money moved in or out, from the transactions after `from`. */
-async function firstLevels(acc, cred, from, to) {
+async function firstLevels(acc, cred, from, to, maxPages = MAX_TX_PAGES) {
   const first = new Map();     // tradeID -> { sl, tp }
   const funds = [];            // { id, T, amount, why }, oldest first
   let lo = from, pages = 0;
-  while (lo <= to && pages < MAX_TX_PAGES) {
+  while (lo <= to && pages < maxPages) {
     const hi = Math.min(to, lo + TX_PAGE - 1);
     const j = await get(`/v3/accounts/${acc}/transactions/idrange?from=${lo}&to=${hi}`, cred);
     for (const x of j.transactions || []) {
@@ -94,7 +94,10 @@ async function firstLevels(acc, cred, from, to) {
       const id = x.tradeID;
       if (!id) continue;
       const f = first.get(id) || {};
-      if ((x.type === 'STOP_LOSS_ORDER' || x.type === 'GUARANTEED_STOP_LOSS_ORDER') && f.sl == null && num(x.price) != null) f.sl = num(x.price);
+      if ((x.type === 'STOP_LOSS_ORDER' || x.type === 'GUARANTEED_STOP_LOSS_ORDER') && num(x.price) != null) {
+        if (f.sl == null) f.sl = num(x.price);
+        (f.stops ||= []).push(num(x.price));       // every place the stop was put, in order (the first is f.sl)
+      }
       if (x.type === 'TAKE_PROFIT_ORDER' && f.tp == null && num(x.price) != null) f.tp = num(x.price);
       first.set(id, f);
     }
@@ -178,7 +181,19 @@ export async function syncOanda(store, { onStep } = {}) {
 
   step('Reading your stops…');
   const from = link.accountId === acc && Number(link.lastTxn) > 0 ? Number(link.lastTxn) + 1 : 1;
-  const { first, funds, upTo } = last >= from ? await firstLevels(acc, cred, from, last) : { first: new Map(), funds: [], upTo: Number(link.lastTxn) || 0 };
+  /* Once (12 Nov): a stop moved while its trade was open used to be taken for the stop it began with — the
+     sync after the move saw only the move — so a trade taken to break-even came out at hundreds of R. The
+     transactions are read again from the oldest trade in the journal, so each has the first stop it had. */
+  const mine = store.data.trades.trades.filter(t => t.oanda?.account === acc).map(t => Number(t.oanda.trade)).filter(n => n > 0);
+  const mend = from > 1 && link.stops !== 2 && mine.length > 0;
+  const readFrom = mend ? Math.min(from, ...mine) : from;
+  const none = { first: new Map(), funds: [], upTo: Number(link.lastTxn) || 0 };
+  let read = last >= readFrom ? await firstLevels(acc, cred, readFrom, last, mend ? MAX_TX_PAGES * 6 : MAX_TX_PAGES) : none;
+  /* a history too long to read again in one go: left as it is, and only what is new read, as on any other day */
+  let mending = mend;
+  if (mend && read.upTo < last) { mending = false; read = last >= from ? await firstLevels(acc, cred, from, last) : none; }
+  const first = read.first, upTo = Math.max(read.upTo, Number(link.lastTxn) || 0);
+  const funds = read.funds.filter(x => Number(x.id) >= from);
 
   /* the journal account they go into: the one linked before, else a new one,
      opened on the day of its first trade */
@@ -212,9 +227,16 @@ export async function syncOanda(store, { onStep } = {}) {
     if (!o.id || !o.instrument || !o.openTime) continue;
     const id = `oanda-${acc}-${o.id}`;
     const had = byId.get(id);
-    const known = had ? { sl: had.stopLoss ?? undefined, tp: had.takeProfit ?? undefined } : null;
+    /* The stop a trade is measured against is the first one recorded for it: the one already in the journal,
+       else the first in what was just read, else the one on it now. A stop moved later (to break-even, say)
+       never replaces it, so R is always against the risk the trade was taken with. */
+    const seen1 = first.get(String(o.id));
+    const level = { sl: had?.stopLoss ?? seen1?.sl, tp: had?.takeProfit ?? seen1?.tp };
+    /* mending: the journal holds one of the places the stop was moved to, not where it began */
+    const wrong = mending && had && seen1?.sl != null && had.stopLoss !== seen1.sl && (seen1.stops || []).slice(1).includes(had.stopLoss);
+    if (wrong) level.sl = seen1.sl;
     const t = toJournal(o, { accountId: jr.id, acctKey: acc, startingBalance: jr.startingBalance, demo,
-      first: first.get(String(o.id)) || known, playbook: store.playbook });
+      first: level, playbook: store.playbook });
     /* (kept either way; counted only when it will be seen — Settings → Charts & prices → Start from) */
     const shows = store.shownTrade(t);
     if (t.status === 'open' && shows) open++;
@@ -228,13 +250,14 @@ export async function syncOanda(store, { onStep } = {}) {
       /* still open: filled again */
       const wasOpen = had.status === 'open';
       for (const k of FILLS) if (t[k] != null && (had[k] == null || wasOpen)) had[k] = t[k];
+      if (wrong) { had.stopLoss = t.stopLoss; if (t.riskPercent != null) had.riskPercent = t.riskPercent; }
       for (const k of THEIRS) { if (k in t) had[k] = t[k]; else delete had[k]; }
       if (had.sessionAuto !== false) had.sessionId = t.sessionId;
       if (JSON.stringify(keys.map(k => had[k])) !== before && shows) updated++;
     }
   }
   A.oanda = { ...link, accountId: acc, laminarId: jr.id, live: !!cred.live, lastTxn: upTo, syncedAt: new Date().toISOString(),
-    auto: link.auto !== false };
+    auto: link.auto !== false, stops: 2 };
   await store.save('trades');
   await store.save('accounts');
   return { added, updated, open, funded: fresh.filter(x => store.shownMove(x)).length, account: jr };

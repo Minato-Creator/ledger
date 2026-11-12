@@ -2597,3 +2597,26 @@ Everything since 2.40.0, zipped for him to push with GitHub Desktop and build wi
 - the Markets bubbles popping out and drifting as layers.
 
 The version is bumped in package.json, tauri.conf.json, Cargo.toml and Cargo.lock (and the untracked package-lock.json). `cargo check --locked` is clean, the shell's 17 tests pass, and the full run is green (every suite). The zip is `git archive` of HEAD under `laminar-2.41.0/`, like 2.40.0.
+
+## OANDA: R against the first stop, always (12 Nov)
+His short on gold of 11 Nov (entry 4056.62, stop 4067.73, moved to break-even while it ran, closed at 4013.55 for 3.88R) showed as 305.23R. He asked for the stop to be recorded the first time it's placed, and set out the outcomes: stop hit is a loss, closed at about the entry is a break-even, anything further in profit is a win.
+- **The cause (oandasync.js):** the sync reads only the transactions since the last sync, and took "the first stop in what was just read" over the stop already in the journal. While a trade was open, a sync after the stop was moved saw only the move and wrote it over the real first stop. The risk was then worked out from a stop 0.14 away, not 11.11.
+- **Now:**
+  - The stop (and target) a trade is measured against is the one already recorded for it, else the first in what was just read, else the one on it now. A later move never replaces it.
+  - `firstLevels` also keeps every place a trade's stop was put (`stops`).
+- **Putting right what's already in (once, `oanda.stops = 2`):**
+  - The transactions are read again from the oldest OANDA trade in the journal.
+  - A trade whose recorded stop is one of the places its stop was *moved to* gets its first stop back and its risk worked out again.
+  - A stop he set himself (not one of OANDA's) is left alone.
+  - Money moved is only counted from where the sync had got to, so nothing is added twice.
+  - If the history is too long to read again in one go (over 180,000 transactions), the journal is left as it is and the sync reads only what is new.
+- **Outcomes:** nothing changed. `calc.outcome` already calls within ±0.1R a break-even, above it a win and below it a loss, so with the right stop his three cases come out as he described.
+- **Suite oandasync (+10, 67):**
+  - his trade synced open, synced again after the move, then closed: the stop stays 4067.73, 3.88R, a win;
+  - a journal holding the moved stop (hundreds of R) is put right on the next sync, read from the oldest trade and marked done;
+  - a stop he set himself is kept and no funding is counted twice; the sync after reads only what is new;
+  - stopped at break-even a few dollars over is a break-even; stopped at the stop is −1R, a loss.
+- Not in the 2.41.0 zip: this came after it.
+
+## 2.41.1 — pushed to GitHub as "Laminar 1.04.0" (12 Nov)
+He linked his GitHub account and installed the Claude GitHub App on `Minato-Creator/ledger`, so updates can now be pushed straight to `main`; he still runs Actions → Build Laminar himself. This one is 2.41.0 plus the OANDA first-stop fix. The version is bumped in package.json, tauri.conf.json, Cargo.toml and Cargo.lock; `cargo check --locked` is clean. The repo on GitHub also holds leftovers from earlier copy-overs (old backgrounds moon/topo/torii/water, a newsreader font, a stray top-level build.yml); they were left as they are, since he hasn't said to remove them.

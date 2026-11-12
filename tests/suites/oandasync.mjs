@@ -237,6 +237,69 @@ t('Show all: every one back at once, and the day gone from the journal', /Every 
   && await p.evaluate(async () => { const { store } = await import('/js/store.js'); return store.allTradesFor(store.data.accounts.oanda.laminarId).length === 5; }), await osText());
 await p.evaluate(async () => { const { store } = await import('/js/store.js'); store.data.trades.trades = store.data.trades.trades.filter(x => x.id !== 'mine-fwd'); await store.save('trades'); await store.setTradeScope('live'); });
 
+console.log('  -- the stop a trade is measured against is the first one it had --');
+/* his trade of 11 Nov: short gold at 4056.62, stop 4067.73 (11.11 away), moved to break-even while it ran, out at 4013.55 */
+const syncNow = () => p.evaluate(async () => { const { syncOanda } = await import('/js/oandasync.js'); const { store } = await import('/js/store.js'); await syncOanda(store); });
+const judged = id => p.evaluate(async id => {
+  const { store } = await import('/js/store.js'); const { rMultiple, outcome } = await import('/js/calc.js');
+  const x = store.data.trades.trades.find(t => t.id === id); if (!x) return null;
+  const a = store.data.accounts.accounts.find(k => k.id === x.accountId);
+  return { stop: x.stopLoss, r: rMultiple(a, x), outcome: outcome(x, a), status: x.status };
+}, id);
+const gold = (id, more) => ({ id, instrument: 'XAU_USD', price: '4056.62', openTime: S('2026-11-11T09:00:00Z'), initialUnits: '-22', currentUnits: '-22', state: 'OPEN', realizedPL: '0', financing: '0', ...more });
+const shut = (exit, pl) => ({ currentUnits: '0', state: 'CLOSED', realizedPL: pl, averageClosePrice: exit, closeTime: S('2026-11-11T14:40:00Z') });
+const G = `oanda-${ACC}-2000`;
+BOOK = structuredClone(BOOK);
+BOOK.trades.unshift(gold('2000', { stopLossOrder: { price: '4067.73' } }));
+BOOK.transactions.push({ id: '2001', type: 'STOP_LOSS_ORDER', tradeID: '2000', price: '4067.73', reason: 'ON_FILL' });
+BOOK.last = 2001;
+await syncNow();
+let j = await judged(G);
+t('open, it has the stop it was placed with', j?.stop === 4067.73 && j.status === 'open', JSON.stringify(j));
+BOOK = structuredClone(BOOK);
+BOOK.trades[0] = gold('2000', { stopLossOrder: { price: '4056.48' } });
+BOOK.transactions.push({ id: '2002', type: 'STOP_LOSS_ORDER', tradeID: '2000', price: '4056.48', reason: 'REPLACEMENT' });
+BOOK.last = 2002;
+await syncNow();
+j = await judged(G);
+t('moved to break-even while open: the stop recorded is still the first', j?.stop === 4067.73, JSON.stringify(j));
+BOOK = structuredClone(BOOK);
+BOOK.trades[0] = gold('2000', { stopLossOrder: { price: '4056.48', state: 'CANCELLED' }, ...shut('4013.55', '947.5400') });
+BOOK.last = 2003;
+await syncNow();
+j = await judged(G);
+t('closed at the target: 3.88R against the risk it was taken with (not hundreds against the moved stop), a win', j && Math.abs(j.r - 3.877) < 0.01 && j.outcome === 'win', JSON.stringify(j));
+
+/* a journal synced before this (the moved stop taken for the first): put right once, from the transactions */
+const adjBefore = await p.evaluate(async () => { const { store } = await import('/js/store.js'); const a = store.data.accounts.accounts.find(x => x.id === store.data.accounts.oanda.laminarId);
+  const x = store.data.trades.trades.find(t => t.id.endsWith('-2000')); x.stopLoss = 4056.48; x.riskPercent = 0.0031; delete store.data.accounts.oanda.stops;
+  await store.save('trades'); await store.save('accounts'); return (a.adjustments || []).length; });
+j = await judged(G);
+t('(as it was: the moved stop makes it hundreds of R)', j && j.r > 200, JSON.stringify(j));
+SEEN.length = 0;
+await syncNow();
+j = await judged(G);
+F = await files();
+t('a trade already in with its moved stop is put right on the next sync', j?.stop === 4067.73 && Math.abs(j.r - 3.877) < 0.01, JSON.stringify(j));
+t('…read once from the oldest trade, and marked done', SEEN.some(x => /idrange\?from=41&/.test(x.path)) && F['data/accounts.json'].oanda.stops === 2, JSON.stringify(SEEN.filter(x => /idrange/.test(x.path)).map(x => x.path)));
+t('…a stop you set yourself is left alone, and no money is counted twice', T('41')?.stopLoss === 3992
+  && (F['data/accounts.json'].accounts.find(a => a.firm === 'oanda').adjustments || []).length === adjBefore, String(T('41')?.stopLoss));
+SEEN.length = 0;
+await syncNow();
+t('…and the sync after reads only what is new again', SEEN.filter(x => /idrange/.test(x.path)).length === 0 || SEEN.filter(x => /idrange/.test(x.path)).every(x => /from=2004&/.test(x.path)), JSON.stringify(SEEN.filter(x => /idrange/.test(x.path)).map(x => x.path)));
+
+/* the three ways it can end */
+BOOK = structuredClone(BOOK);
+BOOK.trades.unshift(gold('2010', { stopLossOrder: { price: '4056.40', state: 'FILLED' }, ...shut('4056.40', '4.8400') }));     // stopped at break-even, a few dollars over
+BOOK.trades.unshift(gold('2020', { stopLossOrder: { price: '4067.73', state: 'FILLED' }, ...shut('4067.73', '-244.4200') }));  // stopped at the stop
+BOOK.transactions.push({ id: '2011', type: 'STOP_LOSS_ORDER', tradeID: '2010', price: '4067.73', reason: 'ON_FILL' }, { id: '2012', type: 'STOP_LOSS_ORDER', tradeID: '2010', price: '4056.40', reason: 'REPLACEMENT' },
+  { id: '2021', type: 'STOP_LOSS_ORDER', tradeID: '2020', price: '4067.73', reason: 'ON_FILL' });
+BOOK.last = 2022;
+await syncNow();
+const be = await judged(`oanda-${ACC}-2010`), lost = await judged(`oanda-${ACC}-2020`);
+t('stopped at break-even, a few dollars either way: a break-even', be?.stop === 4067.73 && Math.abs(be.r) < 0.1 && be.outcome === 'breakeven', JSON.stringify(be));
+t('stopped at the stop: a loss of 1R', lost && Math.abs(lost.r + 1) < 0.01 && lost.outcome === 'loss', JSON.stringify(lost));
+
 console.log('  -- a key OANDA will not take --');
 await p.unroute?.(/x/);
 await ctx.unroute(/https:\/\/api-fx(practice|trade)\.oanda\.com\/.*/, oanda);
