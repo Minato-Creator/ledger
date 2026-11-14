@@ -3,6 +3,7 @@
 import pw from 'playwright';
 import nfs from 'node:fs';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -32,14 +33,8 @@ t('the picker exists in this browser', await p.evaluate(() => 'showDirectoryPick
 t('no folder gate', await p.evaluate(() => !document.querySelector('.gate')));
 t('straight to the welcome form', /Welcome to Laminar/.test(await p.evaluate(()=>document.body.innerText)));
 
-await p.evaluate(() => {
-  const i=[...document.querySelectorAll('input')];
-  i[0].value='Prop 100k'; i[0].dispatchEvent(new Event('input',{bubbles:true}));
-  i[1].value='100000'; i[1].dispatchEvent(new Event('input',{bubbles:true}));
-});
-await p.waitForTimeout(150);
-await p.evaluate(()=>[...document.querySelectorAll('button')].find(x=>/Create/.test(x.textContent)).click());
-await p.waitForTimeout(900);
+await firstAccount(p, 'Prop 100k', '100000');
+await p.waitForTimeout(600);
 t('account made', /Prop 100k/.test(await p.evaluate(()=>document.querySelector('.topbar').innerText)));
 const keys = await p.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('ledger:file:')));
 t('written to browser storage', keys.includes('ledger:file:data/accounts.json'), keys.join(','));

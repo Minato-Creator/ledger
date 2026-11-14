@@ -1,6 +1,7 @@
 import pw from 'playwright';
 import fsx from 'node:fs';
 import { openLook, closeLook, setTheme } from './lookhelp.mjs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -25,9 +26,7 @@ let pass=0, fail=0;
 const ok=(n,g,w)=>{const good=String(g)===String(w); good?pass++:fail++; console.log(`  ${good?'ok  ':'FAIL'}  ${n}  got=${g}${good?'':`  want=${w}`}`);};
 
 // seed a trade so the analytics light cards have real content to check
-await p.locator('.main input[placeholder="Swing account"]').fill('Main');
-await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x=>/Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Main', '100000');
 await p.waitForTimeout(400);
 await p.evaluate(() => { location.hash = '#/new'; }); await p.waitForTimeout(400);
 await p.locator('.main input').first().fill('XAUUSD');
@@ -49,7 +48,8 @@ const ink = sel => p.evaluate(s => {
 await p.evaluate(() => { location.hash = '#/settings'; }); await p.waitForTimeout(400);
 await openLook(p, 'themes');
 ok('the themes are there', await p.evaluate(() => document.querySelectorAll('.lk-theme').length), 5);
-ok('light is on by default', await p.evaluate(() => document.querySelector('.lk-theme.is-on')?.dataset.themeId), 'light');
+ok('midnight is on for a new journal', await p.evaluate(() => document.querySelector('.lk-theme.is-on')?.dataset.themeId), 'midnight');
+await setTheme(p, 'light');
 await closeLook(p);
 const groundLight = await lum('body');
 console.log('  light ground luminance:', groundLight);

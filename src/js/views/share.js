@@ -5,7 +5,7 @@
    is a live preview of the card with three tabs under it:
 
      Background  your own clips and pictures (kept in the vault, see
-                 store.addShareClip) and five made here
+                 store.addShareClip) and seven made here
      Adjust      trim the clip, where it sits behind the card, how dark,
                  how loud
      Format      $ / % / R, candles or a line or neither, the figure's
@@ -811,7 +811,7 @@ async function playFrames(v, win, total, fps, each) {
 
 
 /** Save a file the way the app can: the desktop app asks where, a browser downloads it. */
-async function saveOut(blob, name, label, ext) {
+export async function saveOut(blob, name, label, ext) {
   if (isTauri() && window.__TAURI__?.dialog?.save) {
     try {
       const path = await window.__TAURI__.dialog.save({ defaultPath: name, filters: [{ name: label, extensions: [ext] }] });

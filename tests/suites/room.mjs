@@ -1,5 +1,6 @@
 import pw from 'playwright';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -20,9 +21,7 @@ const errs = []; p.on('pageerror', e => errs.push(e.message));
 p.on('console', m => { if (m.type()==='error' && !/fonts\.g|ERR_/.test(m.text())) errs.push(m.text()); });
 await p.goto(APP, { waitUntil: 'domcontentloaded' });
 await p.waitForSelector('.welcome-title, .topbar', { timeout: 8000 });
-await p.locator('.main input[placeholder="Swing account"]').fill('Main');
-await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x=>/Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Main', '100000');
 await p.waitForTimeout(500);
 await p.evaluate(() => { location.hash = '#/new'; });
 await p.waitForTimeout(500);

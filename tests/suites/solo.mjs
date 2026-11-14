@@ -30,13 +30,15 @@ const w = await page.evaluate(() => document.querySelector('.main').getBoundingC
 t('form has the whole window', w > 1400, Math.round(w)+'px');
 await page.screenshot({ path: OUT + '/shot-welcome-solo.png' });
 
-await page.evaluate(() => {
-  const ins = [...document.querySelectorAll('input')];
-  ins[0].value = 'Apex 50k'; ins[0].dispatchEvent(new Event('input', { bubbles: true }));
-  ins[1].value = '$50 000';  ins[1].dispatchEvent(new Event('input', { bubbles: true }));
-});
-await page.waitForTimeout(200);
-await page.evaluate(() => [...document.querySelectorAll('button')].find(b => /Create/.test(b.textContent))?.click());
+/* through the welcome's set-up (Personal account → a broker → name and balance → Create account) */
+await page.click('.wl-kind[data-kind="live"]');
+await page.waitForSelector('.aw-btile[data-firm="oanda"]'); await page.click('.aw-btile[data-firm="oanda"]');
+await page.waitForSelector('.ab-sizein'); await page.waitForTimeout(250);
+await page.fill('.ab-namein', 'Apex 50k'); await page.fill('.ab-sizein', '$50 000');
+await page.click('.ab-go');
+await page.waitForFunction(() => /Create account/.test(document.querySelector('.ab-go')?.textContent || ''));
+await page.click('.ab-go');
+await page.waitForSelector('.topbar');
 await page.waitForTimeout(120);
 const mid = await page.evaluate(() => { const s=document.querySelector('.topbar'); return s ? { cls: s.className, anim: getComputedStyle(s).animationName } : null; });
 console.log('    mid-animation:', JSON.stringify(mid));

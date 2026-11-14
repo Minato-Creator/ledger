@@ -73,7 +73,7 @@ t('Laminar opens yours instead — the one with the most of your trades', st.fol
 t('…and says so, naming where it is and that the empty one is left alone', /Your journal is back/.test(st.toast) && st.toast.includes(REAL) && /left as it was/.test(st.toast), st.toast);
 t('…the settings now point at it, your OANDA key kept, and it is remembered', st.cfg.folder === REAL && st.cfg.oandaKey === 'k-keep' && st.cfg.vaultFound === REAL, JSON.stringify(st.cfg));
 t('…the empty journal untouched: its one synced trade still all it holds', await S.p.evaluate(e => JSON.parse(window.__disk.files[e + '\\data\\trades.json']).trades.length === 1, EMPTY));
-t('…the screen shows your trades', await S.p.evaluate(() => document.querySelector('.tb-tab[href="#/trades"] .count')?.textContent) === String(TR.length));
+t('…the screen shows your trades', await S.p.evaluate(() => document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count) === String(TR.length));
 await S.p.reload({ waitUntil: 'domcontentloaded' }); await S.p.waitForSelector('.topbar'); await S.p.waitForTimeout(900);
 st = await S.state();
 t('opening again: straight into yours, no looking around', st.folder === REAL && st.calls === 0, JSON.stringify({ folder: st.folder, calls: st.calls }));

@@ -147,6 +147,12 @@ const clipped = await p.evaluate(() => [...document.querySelectorAll('.db-edge .
 t('at 1280 × 800 the edge card still holds all five figures', clipped === 0, String(clipped));
 t('and nothing spills sideways', await p.evaluate(() => document.querySelector('.main').scrollWidth <= document.querySelector('.main').clientWidth + 1));
 
+/* one trade only: its date sits at the right end of the curve and must stay inside the card */
+await p.evaluate(() => { const all = JSON.parse(localStorage.getItem('fakefs')); const tr = all.find(x => x[0] === 'data/trades.json'); const d = JSON.parse(tr[1]); d.trades = d.trades.filter(x => x.date >= '2026-08-31').slice(-1); tr[1] = JSON.stringify(d); localStorage.setItem('fakefs', JSON.stringify(all)); });
+await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForSelector('.db-hero', { timeout: 8000 }); await p.waitForTimeout(1500);
+const ticks = await p.evaluate(() => { const c = document.querySelector('.db-hero').getBoundingClientRect(); return [...document.querySelectorAll('.db-hero text.lab-tick')].map(x => { const r = x.getBoundingClientRect(); return { s: x.textContent, in: r.left >= c.left && r.right <= c.right }; }); });
+t('with a single trade its date stays inside the card', ticks.length >= 2 && ticks.every(x => x.in), JSON.stringify(ticks));
+
 t('no console or page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 console.log(`\n${pass} passed, ${fail} failed`);
 await b.close();

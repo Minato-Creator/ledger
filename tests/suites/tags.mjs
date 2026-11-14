@@ -252,5 +252,14 @@ await p.setViewportSize({width:1500, height:950});
 
 t('no errors', errs.length===0, errs.join(' | ')||'clean');
 await p.screenshot({path:OUT + '/tags-light.png'});
+// The menu is solid whatever the glass is doing: it opens over the form's own writing.
+await p.evaluate(()=>{location.hash='#/new';}); await p.waitForTimeout(800);
+await p.evaluate(()=>{ document.documentElement.dataset.glass='on'; document.querySelector('.tag-drop > .b').click(); });
+await p.waitForTimeout(300);
+const solid = await p.evaluate(()=>{ const m=[...document.querySelectorAll('.tag-menu')].find(x=>!x.hidden); const c=getComputedStyle(m);
+  return { bg:c.backgroundColor, bf:c.backdropFilter || c.webkitBackdropFilter }; });
+t('the tag menu is solid under glass', /^rgb\(/.test(solid.bg) && solid.bf === 'none', JSON.stringify(solid));
+await p.evaluate(()=>{ delete document.documentElement.dataset.glass; });
 await b.close();
+
 console.log(`\n${pass} passed, ${fail} failed`);

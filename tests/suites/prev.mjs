@@ -1,5 +1,6 @@
 import pw from 'playwright';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -24,21 +25,17 @@ const open = async f => { await p.goto('file://' + ROOT + f, { waitUntil: 'domco
 
 // Fill the REAL build first, so there is saved data sitting in localStorage.
 await open('Laminar.html');
-await p.locator('.main input[placeholder="Swing account"]').fill('Real account');
-await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x=>/Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Real account', '100000');
 await p.waitForTimeout(500);
 ok('the real build saved an account', await p.evaluate(() => !!localStorage.getItem('ledger:file:data/accounts.json')), true);
 
 // The preview shares the same file:// origin, so this is the real test.
 await open('Laminar-preview.html');
-ok('preview opens on the welcome screen anyway', await p.evaluate(() => /Set up your first account/.test(document.querySelector('.main').innerText)), true);
+ok('preview opens on the welcome screen anyway', await p.evaluate(() => /Welcome to Laminar/.test(document.querySelector('.main').innerText)), true);
 ok('it does not see the saved account', await p.evaluate(() => /Real account/.test(document.body.innerText)), false);
 ok('and it says it is a preview', await p.evaluate(() => document.title), 'Laminar — preview');
 
-await p.locator('.main input[placeholder="Swing account"]').fill('Throwaway');
-await p.locator('.main input[inputmode="decimal"]').first().fill('5000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x=>/Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Throwaway', '5000');
 await p.waitForTimeout(500);
 ok('you can still use it', await p.evaluate(() => document.querySelector('.acct-name')?.textContent), 'Throwaway');
 ok('but it writes nothing to storage', await p.evaluate(() =>
@@ -48,7 +45,7 @@ await p.waitForTimeout(350);
 ok('settings says so', await p.evaluate(() => /preview copy/.test(document.querySelector('.main').innerText)), true);
 
 await open('Laminar-preview.html');
-ok('reopening is fresh again', await p.evaluate(() => /Set up your first account/.test(document.querySelector('.main').innerText)), true);
+ok('reopening is fresh again', await p.evaluate(() => /Welcome to Laminar/.test(document.querySelector('.main').innerText)), true);
 
 await open('Laminar.html');
 ok('and the real build still has its account', await p.evaluate(() => document.querySelector('.acct-name')?.textContent), 'Real account');

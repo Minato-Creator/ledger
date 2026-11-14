@@ -143,7 +143,7 @@ t('every choice is kept for next time', (await accounts()).share?.prefs?.size ==
 /* ===================== backgrounds ===================== */
 console.log('backgrounds');
 await p.click('.sh-tabs [data-tab="background"]'); await settle(300);
-t('five made here, to start with', await p.locator('.sh-tile[data-bg^="original:"]').count() === 5);
+t('seven made here, to start with', await p.locator('.sh-tile[data-bg^="original:"]').count() === 7);
 await p.click('.sh-tile[data-bg="original:aurora"]'); await settle(400);
 t('choosing one', (await sh()).bg === 'original:aurora' && await p.locator('.sh-tile.is-on[data-bg="original:aurora"]').count() === 1);
 await p.click('.sh-tile[data-bg="original:paper"]'); await settle(3800);

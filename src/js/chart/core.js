@@ -319,7 +319,8 @@ export function createCore(plot, o) {
       plot.classList.toggle('on-price', zone === 'price');
       plot.classList.toggle('on-time', zone === 'time');
       plot.classList.toggle('on-divider', dividerAt(x, y, G) >= 0);
-      const cur = zone === 'pane' ? hooks.hover?.(x, y, G, e) : null;
+      /* off the pane (on a scale) nothing drawn is under the pointer any more */
+      const cur = zone === 'pane' ? hooks.hover?.(x, y, G, e) : (hooks.leave?.(), null);
       plot.classList.toggle('is-hot', cur === 'pointer');
       plot.dataset.cursor = cur || '';
     }
@@ -460,7 +461,8 @@ export function createCore(plot, o) {
     const font = (px = fs, wt = 400) => `${wt} ${px}px ${FONT}`;
 
     /* the canvas: Quire's own (the card shows through), or a colour */
-    if (S.canvas.bg === 'solid') { g.fillStyle = S.canvas.bgColor; g.fillRect(0, 0, W, H); }
+    if (o.clear) { /* a picture with nothing behind it (chartshot.js) */ }
+    else if (S.canvas.bg === 'solid') { g.fillStyle = S.canvas.bgColor; g.fillRect(0, 0, W, H); }
     else if (S.canvas.bg === 'gradient') {
       const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, S.canvas.bgColor); gr.addColorStop(1, S.canvas.bgColor2);
       g.fillStyle = gr; g.fillRect(0, 0, W, H);

@@ -74,7 +74,7 @@ async function scenario(title, { folderName, extraDirs = [], refuse = false }) {
   const disk = await p.evaluate(() => JSON.parse(localStorage.getItem('fakedisk')));
   const out = { disk, renames: await p.evaluate(() => window.__renames),
     vault: await p.evaluate(async () => { const { store } = await import('/js/store.js'); return store.folderName || ''; }),
-    count: await p.evaluate(() => document.querySelector('.tb-tab[href="#/trades"] .count')?.textContent), errs };
+    count: await p.evaluate(() => document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count), errs };
   await b.close();
   return out;
 }

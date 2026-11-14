@@ -1,6 +1,7 @@
 import pw from 'playwright';
 import fsx from 'node:fs';
 import { setTheme, pickColour, paletteNames } from './lookhelp.mjs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -27,9 +28,7 @@ const lum = async sel => p.evaluate(s => { const n=document.querySelector(s); if
   const [r,g,bl]=getComputedStyle(n).backgroundColor.match(/[\d.]+/g).map(Number); return Math.round(.2126*r+.7152*g+.0722*bl); }, sel);
 const cssVar = v => p.evaluate(x => getComputedStyle(document.documentElement).getPropertyValue(x).trim(), v);
 
-await p.locator('.main input[placeholder="Swing account"]').fill('Main');
-await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x=>/Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Main', '100000');
 await p.waitForTimeout(400);
 await p.evaluate(() => { location.hash = '#/settings'; }); await p.waitForTimeout(450);
 

@@ -180,6 +180,9 @@ export function createDrawings(core, plot, o) {
   };
   const saveTools = () => store.save('drawings').catch(() => {});
   let tool = null, sel = null, hot = null, hidden = false, pending = null, live = null;
+  /* the chart's own drawings (o.extras) cannot be chosen, but the one under the pointer is known */
+  let hotExtra = null;
+  const over = new Map();
   const shapes = new Map();                 // id → what was painted: hit tests and handles
   const memo = new WeakMap();
   const list = () => store.drawingsFor(o.dkey).map(r => { let n = memo.get(r); if (!n) { n = normalize(r); memo.set(r, n); } return n; });
@@ -538,9 +541,10 @@ export function createDrawings(core, plot, o) {
       return 'crosshair';
     }
     const hit = hitTest(x, y);
-    const was = hot;
+    const was = hot, wasExtra = hotExtra;
     hot = hit?.id || null;
-    if (was !== hot) core.draw();
+    hotExtra = hit || hidden ? null : ([...over].find(([, isOver]) => isOver(x, y))?.[0] || null);
+    if (was !== hot || wasExtra !== hotExtra) core.draw();
     if (!hit) return null;
     /* TradingView's cursors, handle by handle: a point (a line's end, the
        entry) the plain arrow; a level that only goes up and down (the target,
@@ -598,7 +602,7 @@ export function createDrawings(core, plot, o) {
 
   /* ---------- painting ---------- */
   function paint(g, G, C) {
-    shapes.clear();
+    shapes.clear(); over.clear();
     if (hidden) return;
     const tf = o.tf(), until = o.replayT?.() ?? Infinity;
     /* o.extras: drawings the chart adds of its own (Review's position), shown but never kept, chosen or moved */
@@ -616,7 +620,8 @@ export function createDrawings(core, plot, o) {
         else if (d.type === 'callout') callout(g, G, C, d, lit);
         else if (d.type === 'long' || d.type === 'short') position(g, G, C, d, lit, until);
       } finally { g.restore(); }
-      if (d.__extra) { shapes.delete(d.id); continue; }
+      /* never chosen or moved — but it knows when the pointer is over it, for its labels */
+      if (d.__extra) { const sh = shapes.get(d.id); if (sh) over.set(d.id, sh.hit); shapes.delete(d.id); continue; }
       /* TradingView shows a drawing's points as soon as the pointer is on it, not only once it is chosen */
       if (d.id === sel || (d.id === hot && !d.locked)) handles(g, C, shapes.get(d.id)?.handles || []);
     }
@@ -783,7 +788,9 @@ export function createDrawings(core, plot, o) {
     g.strokeStyle = s.line; g.lineWidth = s.lineWidth;
     g.beginPath(); g.moveTo(x0, Math.round(ye) + 0.5); g.lineTo(x1, Math.round(ye) + 0.5); g.stroke();
     /* TradingView's small labels: target above, entry in the middle, stop below */
-    if (lit || s.always) {
+    /* (a position drawn for you — the trade's own, on the trade form — counts as lit all the time,
+       so its labels wait for the pointer instead: off until you are over it) */
+    if ((d.__extra ? d.id === hotExtra : lit) || s.always) {
       const pct = dist => (dist / N.entry * 100).toFixed(2);
       const ticks = dist => Math.round(dist / tick);
       const amt = v => `${Math.round(v).toLocaleString('en-US')}${N.cur && N.cur !== 'USD' ? ' ' + N.cur : ''}`;
@@ -827,7 +834,7 @@ export function createDrawings(core, plot, o) {
   return {
     bar, paint, claim, hover, dbl, menu, key, tags, setTool, setHidden, select, list, undo, redo,
     get tool() { return tool; }, get selected() { return sel; }, get hidden() { return hidden; }, get pending() { return !!pending; },
-    leave: () => { if (hot) { hot = null; core.draw(); } },
+    leave: () => { if (hot || hotExtra) { hot = null; hotExtra = null; core.draw(); } },
     shapes: () => [...shapes.entries()].map(([id, s]) => ({ id, handles: s.handles })),
   };
 }

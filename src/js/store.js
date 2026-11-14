@@ -566,7 +566,7 @@ class Store {
     await this.tidyVault();
     await this.ensureDir('data');
     const fallbacks = {
-      accounts: defaultAccounts(), trades: { version: 1, trades: [] }, playbook: defaultPlaybook(), replay: { version: 1, weeks: {} },
+      accounts: freshAccounts(), trades: { version: 1, trades: [] }, playbook: defaultPlaybook(), replay: { version: 1, weeks: {} },
       outlooks: { version: 1, days: {} }, news: { version: 1, fetchedAt: null, events: [] }, wire: { version: 1, fetchedAt: null, seenAt: null, items: [] },
       lab: defaultLab(), review: { version: 1, weeks: {} }, drawings: { version: 1, lines: {} },
       notes: { version: 1, notes: [] },
@@ -2065,6 +2065,11 @@ export const USER_COLOUR = '#F4624A';
 
 function defaultAccounts() {
   return { version: 2, accounts: [], activeAccountId: null, displayUnit: '$' };
+}
+/* A journal nobody has opened before starts dark (Midnight): the welcome and everything after it.
+   One that already exists keeps whatever it had, light included; the look is changed in Settings. */
+function freshAccounts() {
+  return { ...defaultAccounts(), theme: 'dark', look: { theme: 'midnight' } };
 }
 
 /* Sessions are Perth-anchored by default; every one of these is editable

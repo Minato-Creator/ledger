@@ -6,11 +6,13 @@ import { timingTab } from './an-timing.js';
 import { executionTab } from './an-execution.js';
 import { outlookTab } from './an-outlook.js';
 import { glide } from '../shell.js';
+import { openCertificate, canCertify } from './certificate.js';
+import { popover } from '../sheet.js';
 
 let tab = 'overview';       // overview | weekly | tags | timing | execution | discipline | outlook  (the year lives on the Calendar now)
 let year = null;            // resolved on first paint to the latest year traded
 let period = '30D';
-const DAYS = { '7D': 7, '30D': 30, '90D': 90, 'All': null };
+const DAYS = { '7D': 7, '30D': 30, 'All': null };
 
 function withinPeriod(trades) {
   const days = DAYS[period];
@@ -123,8 +125,21 @@ export function yearPanel(store, nav) {
     el('button', { onClick: () => stepYear(-1), 'aria-label': 'Previous year' }, icon('chevleft', 12, 'var(--grey-2)', 2.4)),
     el('span', { class: 'val', style: { minWidth: '52px' } }, year),
     el('button', { onClick: () => stepYear(1), 'aria-label': 'Next year' }, icon('chevright', 12, 'var(--grey-2)', 2.4)));
-  const sub = el('span', { class: 'head-meta' }, `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`);
-  const ctx = { unit: store.displayUnit, account: acct, cur: acct.currency, nav };
+  const meta = el('span', { class: 'head-meta' }, `${all.filter(t => String(t.date).startsWith(year)).length} closed in ${year}`);
+  /* the whole year's certificate: the same page as a month's, from the twelve rows added up */
+  const months = monthRows(acct, all, year).filter(r => r.count);
+  const whole = { whole: true, m: 0,
+    count: months.reduce((n, r) => n + r.count, 0), net: months.reduce((n, r) => n + r.net, 0),
+    wins: months.reduce((n, r) => n + r.wins, 0), losses: months.reduce((n, r) => n + r.losses, 0),
+    r: yearR(months) };
+  const sub = el('span', { class: 'yr-top' },
+    months.length ? el('button', { class: 'yr-cert', title: 'Certificates', 'aria-haspopup': 'menu',
+      onClick: e => certMenu(store, acct, year, whole, months, e.currentTarget) },
+      icon('image', 13, 'currentColor', 2), 'Certificate') : null,
+    meta);
+  /* a month on the chart opens its certificate (views/certificate.js) */
+  const ctx = { unit: store.displayUnit, account: acct, cur: acct.currency, nav,
+    onMonth: row => openCertificate(store, acct, year, row) };
   const body = all.length ? yearly(store, acct, all, ctx)
     : el('div', { class: 'card', style: { flex: '1' } },
         el('div', { class: 'empty' },
@@ -132,6 +147,31 @@ export function yearPanel(store, nav) {
           el('h2', { style: { fontSize: '16px' } }, 'Nothing logged yet'),
           el('p', {}, 'A year fills in as you trade it.')));
   return { stepper, sub, body };
+}
+
+/* The Certificate button's menu: the year as a whole, or one of its months.
+   Choosing Monthly turns the menu into the year's months in profit. */
+let certClose = null;
+function certMenu(store, acct, yr, whole, months, anchor) {
+  if (certClose) { certClose(); return; }
+  const item = (ic, label, sub, onClick, data = {}) => el('button', { class: 'pop-item', role: 'menuitem', 'data-go': label, ...data, onClick },
+    el('span', { class: 'pop-ic' }, icon(ic, 15, 'currentColor', 1.7)),
+    el('span', { class: 'pop-t' }, el('span', { class: 'pop-n' }, label), sub ? el('span', { class: 'pop-d' }, sub) : null));
+  const open = row => { certClose?.(); openCertificate(store, acct, yr, row); };
+  const good = months.filter(canCertify);
+  const body = el('div', { class: 'pop-list' });
+  const pickMonth = () => {
+    body.replaceChildren(
+      el('div', { class: 'pop-d', style: { padding: '6px 12px 8px' } }, `Months in profit, ${yr}`),
+      ...good.map(r => item('calendar', monthName(r.m), '+' + c.money(r.net, { currency: acct.currency, sign: false, decimals: 0 }),
+        () => open(r), { 'data-month': r.m + 1 })));
+    body.querySelector('.pop-item')?.focus();
+  };
+  body.append(
+    item('image', 'Yearly certificate', canCertify(whole) ? `${yr} as a whole` : `${yr} has not ended in profit`, () => open(whole)),
+    item('calendar', 'Monthly certificate', good.length ? 'Pick a month in profit' : 'No month in profit yet',
+      () => { if (good.length) pickMonth(); else open(months[0]); }));
+  certClose = popover(anchor, body, { cls: 'pop-you-menu pop-cert-menu', onClose: () => { certClose = null; } });
 }
 
 export function analytics(store, nav) {
@@ -732,6 +772,15 @@ function yearChart(rows, ctx, width, height) {
                            tight ? row.label.slice(0, 1) : row.label));
     if (traded) g.append(svg('text', { x: cx, y: COUNT_Y, 'text-anchor': 'middle', 'font-family': 'var(--mono)',
                                        'font-size': 10, fill: 'var(--grey-5)' }, String(row.count)));
+    /* The whole column is the button: a month in profit opens its certificate. */
+    if (traded && ctx.onMonth) {
+      const hit = svg('rect', { class: 'yr-hit' + (canCertify(row) ? ' is-cert' : ''), 'data-month': row.m + 1,
+        x: cx - gap / 2 + 1, y: 4, width: Math.max(4, gap - 2), height: COUNT_Y + 6, rx: 8, fill: 'transparent',
+        tabindex: 0, role: 'button', 'aria-label': `${monthName(row.m)} certificate` });
+      hit.addEventListener('click', () => ctx.onMonth(row));
+      hit.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ctx.onMonth(row); } });
+      g.append(hit);
+    }
   });
 
   /* ---- the running total, on the same twelve positions ---- */
@@ -842,7 +891,8 @@ function yearly(store, acct, all, ctx) {
   const chartCard = el('section', { class: 'card', style: { flex: '1', minHeight: '360px', padding: '22px 24px 14px', gap: '12px' } },
     el('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px', flex: 'none' } },
       el('h2', {}, 'Monthly'),
-      el('span', { class: 'note' }, u === '$' ? 'net, in ' + cur : u === '%' ? 'of starting balance' : 'in R')),
+      el('span', { class: 'note' }, u === '$' ? 'net, in ' + cur : u === '%' ? 'of starting balance' : 'in R'),
+      traded.some(canCertify) ? el('span', { class: 'note yr-hint', style: { marginLeft: 'auto' } }, 'Click a month in profit for its certificate') : null),
     fitted((w, h) => yearChart(rows, ctx, w, h), 300));
 
   /* ---------- the twelve, in a column ---------- */

@@ -1011,8 +1011,29 @@ await p.evaluate(async () => { const { store } = await import('/js/store.js'); a
 await go('#/trades', 300); await go('#/edit/g1', 300); await chartReady();
 const pos = () => p.evaluate(() => { const d = document.querySelector('.tc')?.__chart?.position(); return d && { type: d.type, entry: d.pts[0].p, sl: d.sl, tp: d.tp, pnl: d.closed?.pnl, always: d.style.always }; });
 const P0 = await pos();
-t('Edit opens with the trade’s chart, the position drawn: entry, stop, target, its own result, the labels on', P0 && P0.type === 'long' && P0.entry === G_IN && P0.sl === +(G_IN - 4.5).toFixed(2) && P0.tp === +(G_IN + 13.5).toFixed(2) && P0.pnl === 3000 && P0.always, JSON.stringify(P0));
+t('Edit opens with the trade’s chart, the position drawn: entry, stop, target, its own result, the labels waiting for the pointer', P0 && P0.type === 'long' && P0.entry === G_IN && P0.sl === +(G_IN - 4.5).toFixed(2) && P0.tp === +(G_IN + 13.5).toFixed(2) && P0.pnl === 3000 && P0.always === false, JSON.stringify(P0));
 t('…the quiet chart, the Journal lit above', await p.evaluate(() => !!document.querySelector('.tc.is-minimal') && /Edit trade/.test(document.querySelector('.head').innerText) && document.querySelector('.tb-tab.is-on')?.dataset.section === 'journal'));
+/* the chart keeps a normal shape on the left, the form runs down the right */
+const lay = await p.evaluate(() => { const q = x => document.querySelector(x)?.getBoundingClientRect(); const split = q('.tf-split'), c = q('.tf-side .tc'), st = q('.tf-side .trade-strip'), n = q('.tf-side .tf-notes textarea'), f = q('.tf-split > .trade-form');
+  return split && c && st && n && f ? { share: c.width / split.width, shape: c.width / c.height, under: st.top >= c.bottom && n.top >= st.bottom, beside: f.left >= c.right, inForm: !!document.querySelector('.trade-form .is-notes'),
+    cols: getComputedStyle(document.querySelector('.tf-split > .trade-form')).gridTemplateColumns.split(' ').length, scrolls: document.querySelector('.tf-split > .trade-form').scrollHeight > f.height + 20 } : null; });
+t('Edit lays the chart on the left, a little over half the page', lay && lay.share > 0.52 && lay.share < 0.66, JSON.stringify(lay));
+t('…a normal shape, not a stretched one', lay && lay.shape > 1.3 && lay.shape < 2.6, String(lay?.shape));
+t('…the figures and the notes under it, the form beside it in one column', lay && lay.under && lay.beside && !lay.inForm && lay.cols === 1, JSON.stringify(lay));
+t('…and the form is what scrolls', lay && lay.scrolls);
+/* the labels are off until the pointer is over the position, and go again when it leaves */
+const inked = () => p.evaluate(() => { let h = 0; for (const cv of document.querySelectorAll('.tc canvas')) { const u = cv.toDataURL(); for (let i = 0; i < u.length; i += 7) h = (h * 31 + u.charCodeAt(i)) | 0; } return h; });
+const overPos = await p.evaluate(() => { const c = document.querySelector('.tc'), d = c.__chart.position(), q = c.__chart.xy((d.pts[0].t + d.pts[1].t) / 2, (d.pts[0].p + d.tp) / 2);
+  const r = c.querySelector('canvas').getBoundingClientRect(); return { x: r.x + q.x, y: r.y + q.y, off: { x: r.x + 6, y: r.y + r.height - 6 } }; });
+await p.mouse.move(overPos.off.x, overPos.off.y); await settle(200);
+const quiet = await inked();
+await p.screenshot({ path: OUT + '/pos-quiet.png' });
+await p.mouse.move(overPos.x, overPos.y); await settle(200);
+const shown = await inked();
+await p.screenshot({ path: OUT + '/pos-shown.png' });
+t('pointing at the position brings its labels up', shown !== quiet);
+await p.mouse.move(overPos.off.x, overPos.off.y); await settle(200);
+t('…and they go when the pointer leaves it', await inked() === quiet);
 const S2 = +(G_IN - 3).toFixed(2);
 await p.fill('input.is-stop', String(S2)); await settle(150);
 t('a new stop: the box follows at once', (await pos())?.sl === S2, JSON.stringify(await pos()));
@@ -1029,7 +1050,27 @@ const g1r = await p.evaluate(async () => (await import('/js/store.js')).store.tr
 t('saved with the target you set', g1r.takeProfit === T2 && await p.evaluate(() => location.hash === '#/trades'), JSON.stringify({ tp: g1r.takeProfit }));
 await go('#/new', 300);
 t('a new trade has no chart to show yet', await p.evaluate(() => !document.querySelector('.main .tc')));
+t('…so it keeps the page it had: no split, the notes in the form', await p.evaluate(() => !document.querySelector('.tf-split') && !!document.querySelector('.trade-form .tf-wide .is-notes')));
 await p.evaluate(() => { window.__fullTradeChart = true; });
+
+/* ---------- a trade's chart, put into a note ---------- */
+await go('#/notes', 400);
+await p.click('.nt-new'); await p.waitForSelector('.ne-body'); await settle(300);
+await p.evaluate(() => { const b = document.querySelector('.ne-body'); b.focus(); const r = document.createRange(); r.selectNodeContents(b); r.collapse(false); getSelection().removeAllRanges(); getSelection().addRange(r); });
+await settle(200);
+await p.click('.ne-tb[aria-label^="Add a chart from one of your trades"]'); await settle(300);
+const offered = await p.evaluate(() => [...document.querySelectorAll('.ne-trade')].map(x => x.dataset.trade));
+t('the note toolbar offers the trades that have a chart', offered.includes('g1'), offered.join());
+await p.fill('.ne-tradebox input', 'xau'); await settle(200);
+t('and finds one by its pair', await p.evaluate(() => { const rows = [...document.querySelectorAll('.ne-trade b')].map(x => x.textContent); return rows.length > 0 && rows.every(x => /XAU/i.test(x)); }));
+await p.click('.ne-trade[data-trade="g1"]');
+const noteShot = await p.waitForFunction(() => { const i = document.querySelector('.ne-body .ne-img[data-shot] img'); return i && i.complete && i.naturalWidth > 0 ? { w: i.naturalWidth, h: i.naturalHeight } : null; }, null, { timeout: 25000 }).then(h => h.jsonValue(), () => null);
+t('picking one puts its chart in the note as a picture', !!noteShot && noteShot.w >= 800 && noteShot.h >= 300, JSON.stringify(noteShot));
+t('with nothing behind it, so the page shows through', await p.evaluate(async () => { const s = document.querySelector('.ne-body .ne-img[data-shot]'), i = s.querySelector('img'); const c = document.createElement('canvas'); c.width = i.naturalWidth; c.height = i.naturalHeight; const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let clear = 0; for (let k = 3; k < d.length; k += 4) if (d[k] === 0) clear++; return /\.png$/.test(s.dataset.shot) && s.hasAttribute('data-clear') && getComputedStyle(i).backgroundColor === 'rgba(0, 0, 0, 0)' && clear / (d.length / 4) > 0.3; }));
+t('nothing is left behind off the page', await p.evaluate(() => document.querySelectorAll('body > div[aria-hidden="true"] .tc').length === 0));
+await p.screenshot({ path: OUT + '/note-tradechart.png' });
+await settle(900);
+t('and it is kept with the note', await p.evaluate(() => { const n = JSON.parse(window.__files.get('data/notes.json') || '{"notes":[]}').notes.at(-1); return !!n && n.images.length === 1 && /ne-img/.test(n.html) && /data-clear/.test(n.html); }));
 
 t('no errors on the page', errs.length === 0, errs.slice(0, 3).join(' | '));
 await b.close();

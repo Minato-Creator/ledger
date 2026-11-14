@@ -59,7 +59,7 @@ await go('#/analytics');   ok('and again', await entered(), true);
 await page.evaluate(() => [...document.querySelectorAll(':is(.seg, .an-tabs) button')].find(b=>b.textContent.trim()==='Timing').click());
 await page.waitForTimeout(250);
 ok('switching analytics tab does not replay', await entered(), false);
-await page.evaluate(() => [...document.querySelectorAll('.seg button')].find(b=>b.textContent.trim()==='90D').click());
+await page.evaluate(() => [...document.querySelectorAll('.seg button')].find(b=>b.textContent.trim()==='All').click());
 await page.waitForTimeout(250);
 ok('changing the period does not replay', await entered(), false);
 

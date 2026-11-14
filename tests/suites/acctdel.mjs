@@ -138,7 +138,7 @@ await click('Old one', 'Delete +'); await settle(600);
 d = await disk();
 t('the last account can go as well', d.accounts.accounts.length === 0 && d.trades.length === 0);
 t('and the app asks for a new first account rather than breaking', await p.evaluate(() =>
-  /Set up your first account|New account|Your accounts/i.test(document.querySelector('.main')?.innerText || document.body.innerText)));
+  /Welcome to Laminar|Set up your first account|New account|Your accounts/i.test(document.querySelector('.main')?.innerText || document.body.innerText)));
 
 await p.screenshot({ path: OUT + '/acctdel.png' });
 t('no console or page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

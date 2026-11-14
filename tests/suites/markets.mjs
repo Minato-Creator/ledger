@@ -269,6 +269,9 @@ const co = await p.evaluate(() => { const q = k => document.querySelector(`.mk-b
     credit: cr?.textContent, href: cr?.querySelector('a')?.getAttribute('href'), size: cr ? parseFloat(getComputedStyle(cr).fontSize) : 0 }; });
 t('each company’s logo by its ticker, from Elbstream (no key)', co.aapl === 'https://api.elbstream.com/logos/symbol/AAPL' && co.aok, JSON.stringify(co));
 t('…its ticker on a plain chip when there is none', co.msft === 'MSFT' && co.brk === 'BRKB', JSON.stringify(co));
+const chip = await p.evaluate(() => { const c = document.querySelector('.mk-logo.is-chip:not(.is-letters)'), l = document.querySelector('.mk-logo.is-chip.is-letters');
+  const cs = c && getComputedStyle(c); return { bg: c ? cs.backgroundImage.includes(c.querySelector('img').src) && cs.backgroundSize.startsWith('6000%') : null, letters: l ? getComputedStyle(l).backgroundImage : null }; });
+t('a company chip takes its fill from its own logo, so a filled-square logo fills the circle', chip.bg !== false && (chip.bg === true || chip.letters === 'none'), JSON.stringify(chip));
 t('…and Elbstream credited with a link, at 12 pt as its free use asks', co.credit === 'Logos by Elbstream' && co.href === 'https://elbstream.com' && co.size >= 16, JSON.stringify(co));
 t('the sectors as groups', await p.evaluate(() => [...document.querySelectorAll('.mk-chip')].map(x => x.textContent).join(',')) === 'All,Technology,Communication,Consumer,Everyday goods,Financials,Health,Energy,Industrials');
 await p.click('.mk-chip[data-group="Energy"]'); await settle(p, 1600);

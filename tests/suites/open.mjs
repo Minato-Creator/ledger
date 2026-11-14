@@ -112,7 +112,7 @@ for (const [hash,name] of [['#/calendar','calendar'],['#/analytics','analytics']
   t(`${name} unaffected and clean`, errs.length === n);
 }
 t('the journal count is closed trades only',
-  await p.evaluate(()=>document.querySelector('.tb-tab .count')?.textContent) === '2');
+  await p.evaluate(()=>document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count) === '2');
 
 // ---- it shows on the trades page ----
 await p.evaluate(()=>location.hash='#/trades'); await p.waitForTimeout(500);

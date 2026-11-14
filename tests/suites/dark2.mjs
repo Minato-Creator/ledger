@@ -1,6 +1,7 @@
 import pw from 'playwright';
 import fsx from 'node:fs';
 import { openLook, closeLook, setTheme, paletteNames } from './lookhelp.mjs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -29,9 +30,7 @@ let pass=0, fail=0;
 const ok=(n,g,w)=>{const good=String(g)===String(w); good?pass++:fail++; console.log(`  ${good?'ok  ':'FAIL'}  ${n}  got=${g}${good?'':`  want=${w}`}`);};
 const L = (css) => { const [r,g,bl] = css.match(/[\d.]+/g).map(Number); return Math.round(.2126*r+.7152*g+.0722*bl); };
 
-await p.locator('.main input[placeholder="Swing account"]').fill('Main');
-await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x=>/Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Main', '100000');
 await p.waitForTimeout(400);
 await p.evaluate(() => { location.hash = '#/settings'; }); await p.waitForTimeout(450);
 

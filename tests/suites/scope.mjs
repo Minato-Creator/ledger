@@ -57,13 +57,21 @@ const sw = () => p.evaluate(()=>{
 });
 const pick = label => p.evaluate(l=>[...document.querySelector('.scope-switch').children]
   .find(b=>b.textContent.trim()===l).click(), label);
-const state = () => p.evaluate(async()=>{
-  const { store } = await import('/js/store.js');
-  const rows = store.tradesFor(store.activeAccount.id);
-  return { scope: store.tradeScope, n: rows.length, pairs: rows.map(t=>t.pair).sort().join(','),
-           meta: document.querySelector('.acct-meta').textContent.trim(),
-           nav: document.querySelector('.tb-tab .count')?.textContent };
-});
+/* The Dashboard's pill is only the account's logo and name, so its figures are read from the Journal and the page put back. */
+const state = async () => {
+  const hash = await p.evaluate(()=>location.hash);
+  const away = await p.evaluate(()=>!document.querySelector('.acct-meta'));
+  if (away) { await p.evaluate(()=>{location.hash='#/trades';}); await p.waitForTimeout(400); }
+  const out = await p.evaluate(async()=>{
+    const { store } = await import('/js/store.js');
+    const rows = store.tradesFor(store.activeAccount.id);
+    return { scope: store.tradeScope, n: rows.length, pairs: rows.map(t=>t.pair).sort().join(','),
+             meta: document.querySelector('.acct-meta').textContent.trim(),
+             nav: document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count };
+  });
+  if (away) { await p.evaluate(h=>{location.hash=h;}, hash || '#/'); await p.waitForTimeout(500); }
+  return out;
+};
 
 /* ---------- the switch itself ---------- */
 let s = await sw();
@@ -171,5 +179,9 @@ t('now it is out of the way again', (await sw()) === null);
 
 t('no errors', errs.length===0, errs.join(' | ')||'clean');
 await p.screenshot({path:OUT + '/scope-final.png'});
+await p.evaluate(()=>{location.hash='#/';}); await p.waitForTimeout(600);
+t('on the Dashboard the account pill is just its mark and name', await p.evaluate(()=>{ const b=document.querySelector('.tb-acct'); return !!b && !b.querySelector('.acct-meta') && !!b.querySelector('.acct-name')?.textContent.trim() && b.children.length >= 2; }));
+await p.evaluate(()=>{location.hash='#/trades';}); await p.waitForTimeout(500);
+t('everywhere else it still carries the balance', await p.evaluate(()=>/\d/.test(document.querySelector('.tb-acct .acct-meta')?.textContent || '')));
 await b.close();
 console.log(`\n${pass} passed, ${fail} failed`);

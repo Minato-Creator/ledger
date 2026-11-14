@@ -8,6 +8,7 @@
    ============================================================ */
 import pw from 'playwright';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 const ROOT = new URL('../../', import.meta.url).pathname;
 const OUT  = process.env.QUIRE_TEST_OUT || '/tmp/quire-tests';
 const CHROME = process.env.QUIRE_CHROMIUM || undefined;
@@ -33,9 +34,7 @@ const click = (sel, wait = 350) => p.evaluate(s => document.querySelector(s)?.cl
 const disk = () => p.evaluate(() => JSON.parse(localStorage.getItem('ledger:file:data/accounts.json')));
 
 /* an account and a trade, so the pages have something on them */
-await p.locator('.main input[placeholder="Swing account"]').fill('Main');
-await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x => /Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Main', '100000');
 await p.waitForTimeout(450);
 await p.evaluate(() => { location.hash = '#/new'; }); await p.waitForTimeout(400);
 await p.locator('.main input').first().fill('XAUUSD');
@@ -58,7 +57,7 @@ ok('…which opens it inside Settings, with the way back', await p.evaluate(() =
 await p.evaluate(() => { location.hash = '#/playbook'; }); await p.waitForTimeout(450);
 ok('the old address still opens it', await p.evaluate(() => /Playbook/.test(document.querySelector('.head h1')?.textContent) && !!document.querySelector('.head .st-back')), true);
 await p.evaluate(() => { location.hash = '#/calendar'; }); await p.waitForTimeout(450);
-t('and the journal carries its count', await p.evaluate(() => document.querySelector('.tb-tab.is-on .count')?.textContent === '1'));
+t('and the journal knows its count without wearing a badge', await p.evaluate(() => document.querySelector('.tb-tab.is-on')?.dataset.count === '1' && !document.querySelector('.tb-tab .count')));
 ok('and the journal shares its tabs', await p.evaluate(() => [...document.querySelectorAll('.head .sn-tab')].map(a => a.textContent).join(' · ')), 'Trades · Calendar · Review · Notes');
 ok('with Calendar chosen', await p.evaluate(() => document.querySelector('.head .sn-tab.is-on')?.textContent), 'Calendar');
 t('the page title is kept for anything that reads it', await p.evaluate(() => document.querySelector('.head h1.sr-only')?.textContent === 'Calendar'));
@@ -77,7 +76,9 @@ await p.evaluate(() => { location.hash = '#/settings'; }); await p.waitForTimeou
 await click('.st-row[data-row="Appearance"]', 600);
 t('Appearance opens as a sheet', await p.evaluate(() => !!document.querySelector('.sheet.is-look')));
 ok('three tabs — no Colours', await p.evaluate(() => [...document.querySelectorAll('.lk-tabs .sn-tab')].map(x => x.textContent).join(' · ')), 'Themes · Custom · Money');
-ok('a new journal opens on Light', await attr('look'), 'light');
+ok('a new journal opens on Midnight', await attr('look'), 'midnight');
+await click('.lk-theme[data-theme-id="light"]', 1200);
+
 ok('five themes to choose from', await p.evaluate(() => document.querySelectorAll('.lk-theme').length), 5);
 const lightFrame = await lum('body');
 t('Light is light', lightFrame > 200, String(lightFrame));

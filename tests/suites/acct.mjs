@@ -1,5 +1,6 @@
 import pw from 'playwright';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -27,16 +28,14 @@ const ok=(n,g,w)=>{const good=String(g)===String(w); good?pass++:fail++; console
 // first run
 ok('first run shows the welcome', await p.evaluate(() => /Welcome to Laminar/.test(document.querySelector('.main').innerText)), true);
 ok('and no account list', await p.evaluate(() => /Your accounts/.test(document.querySelector('.main').innerText)), false);
-const box = await p.evaluate(() => { const c = document.querySelector('.main .card').getBoundingClientRect();
-  return { w: Math.round(c.width), h: Math.round(c.height), centred: Math.abs((c.left + c.right)/2 - window.innerWidth/2 - 120) < 40 }; });
-console.log('  form card:', JSON.stringify(box));
-ok('the form is a contained box, not the page', box.w, 540);
-ok('and does not run the full height', box.h < 620, true);
+const box = await p.evaluate(() => { const c = document.querySelector('.main .wl-kinds').getBoundingClientRect();
+  return { w: Math.round(c.width), h: Math.round(c.height), mid: Math.round((c.left + c.right) / 2 - window.innerWidth / 2) }; });
+console.log('  the two cards:', JSON.stringify(box));
+ok('the two choices are a contained row, not the page', box.w, 640);
+ok('and they are on the first screen', await p.evaluate(() => document.querySelector('.main .wl-kinds').getBoundingClientRect().bottom < window.innerHeight), true);
 
 // create one
-await p.locator('.main input[placeholder="Swing account"]').fill('Main funded');
-await p.locator('.main input[inputmode="decimal"]').first().fill('$100 000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x=>/Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Main funded', '$100 000');
 await p.waitForTimeout(500);
 await p.evaluate(() => { location.hash = '#/settings/accounts'; });
 await p.waitForTimeout(450);

@@ -1,6 +1,6 @@
 {
   "name": "quire",
-  "version": "2.41.1",
+  "version": "2.42.0",
   "private": true,
   "description": "A trading journal that keeps your data as plain files in a folder you choose.",
   "type": "module",

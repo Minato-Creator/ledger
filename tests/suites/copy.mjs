@@ -28,9 +28,9 @@ ok('the "just a label" line is gone', /just a label/.test(await page()), false);
 // There is no sidebar on first run at all now, which settles it more firmly.
 ok('no sidebar competing with the setup form', await p.evaluate(() => !!document.querySelector('.topbar')), false);
 ok('"This browser" is nowhere', /This browser/.test(await page()), false);
-ok('the heading survives', /Set up your first account/.test(await page()), true);
-ok('the tagline survives', /Your edge, in writing/.test(await page()), true);
-ok('the form still works', await p.evaluate(() => !!document.querySelector('.main input[placeholder="Swing account"]')), true);
+ok('the welcome is the heading', /Welcome to Laminar/.test(await page()), true);
+ok('the tagline survives', /Your edge, in writing/i.test(await page()), true);
+ok('and it offers the two kinds of account', await p.evaluate(() => [...document.querySelectorAll('.main .wl-kind')].map(k => k.dataset.kind).join()), 'live,prop');
 ok('no errors', errs.length, 0);
 console.log(`\n${pass} passed, ${fail} failed`);
 await b.close();

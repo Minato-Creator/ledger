@@ -164,7 +164,10 @@ function route() {
 let lastView = null;
 let wasSolo = false;
 const openLook = () => openAppearance(store, nav);
+const MET = 'laminar:met';
 function render() {
+  /* someone with an account has met the app: the opening plays for them from the next start on */
+  if (store.data && store.accounts.length) { try { localStorage.setItem(MET, '1'); } catch { /* fine */ } }
   const hash = location.hash || '#/';
   const [, seg, arg] = hash.split('/');
   const key = `${seg}/${arg || ''}/${store.data ? store.displayUnit : ''}/${store.data ? store.data.accounts.activeAccountId : ''}`;
@@ -274,8 +277,12 @@ async function boot() {
   /* Under automation (the test suites) nothing rises or writes itself in:
      a measurement taken mid-arrival would measure the animation. */
   if (typeof navigator !== 'undefined' && navigator.webdriver) document.documentElement.dataset.auto = 'on';
-  /* the opening plays over everything while the journal loads underneath (intro.js) */
-  const intro = startIntro();
+  /* The opening plays over everything while the journal loads underneath (intro.js) — but not for
+     someone who has never had an account here: a first visit goes straight to the welcome, which has
+     its own way of arriving. `MET` is set the first time the app is drawn with an account in it. */
+  let met = false;
+  try { met = !!localStorage.getItem(MET); } catch { /* a private window: no opening */ }
+  const intro = met || window.__intro ? startIntro() : { ready() {}, playing: false };
   let state = 'none';
   try { state = await store.tryRestore(); }
   catch (e) { console.warn(e); state = 'none'; }

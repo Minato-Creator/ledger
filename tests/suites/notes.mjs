@@ -52,6 +52,11 @@ const choose = w => p.evaluate(w => {
   for (let n; (n = tw.nextNode());) { const i = n.data.indexOf(w); if (i >= 0) { getSelection().setBaseAndExtent(n, i, n, i + w.length); return true; } }
   return false;
 }, w);
+const choose2 = (box, w) => p.evaluate(([box, w]) => {
+  const tw = document.createTreeWalker(document.querySelector(box), NodeFilter.SHOW_TEXT);
+  for (let n; (n = tw.nextNode());) { const i = n.data.indexOf(w); if (i >= 0) { getSelection().setBaseAndExtent(n, i, n, i + w.length); return true; } }
+  return false;
+}, [box, w]);
 const caretAtEnd = () => p.evaluate(() => {
   const b = document.querySelector('.ne-body'); b.focus();
   const r = document.createRange(); r.selectNodeContents(b.lastElementChild || b); r.collapse(false);
@@ -344,6 +349,51 @@ await p.waitForSelector('.nt-empty');
 await settle(400);
 t('deleted: gone from the list and the file, its pictures with it', (await kept()).notes.length === 0 && await p.evaluate(ns => ns.every(n => !window.__files.has(n)), shots));
 
+// ---- the margins: a box to write in on either side of the note ----
+await p.evaluate(() => { location.hash = '#/notes'; }); await settle(400);
+await p.click('.nt-new'); await p.waitForSelector('.ne-body'); await settle(300);
+await p.fill('.ne-title', 'Margins');
+const lay = await p.evaluate(() => { const q = x => document.querySelector(x).getBoundingClientRect(); const m = q('.ne-col'), l = q('.ne-side.is-left'), r = q('.ne-side.is-right');
+  return { left: l.right <= m.left && l.width > 120, right: r.left >= m.right && r.width > 120, first: document.querySelector('.ne-body') === document.querySelector('.ne-col .ne-body'),
+    hidden: getComputedStyle(document.querySelector('.ne-side.is-right'), '::before').opacity }; });
+t('there is a box to write in on the left of the note and one on the right', lay.left && lay.right && lay.first, JSON.stringify(lay));
+t('and nothing shows in an empty one', lay.hidden === '0', lay.hidden);
+await p.hover('.ne-margin.is-right'); await settle(300);
+t('nor when the pointer is over it', await p.evaluate(() => getComputedStyle(document.querySelector('.ne-side.is-right'), '::before').opacity) === '0');
+await p.click('.ne-margin.is-right'); await settle(150);
+t('a click in the right margin puts the caret there', await p.evaluate(() => document.activeElement === document.querySelector('.ne-side.is-right')));
+t('with only the caret to show for it', await p.evaluate(() => getComputedStyle(document.querySelector('.ne-side.is-right'), '::before').opacity) === '0');
+t('and the margins stand well clear of the note', await p.evaluate(() => { const q = x => document.querySelector(x).getBoundingClientRect(); return q('.ne-col').left - q('.ne-side.is-left').right >= 48 && q('.ne-side.is-right').left - q('.ne-col').right >= 48; }));
+t('and the toolbar comes up for it', await p.evaluate(() => document.querySelector('.ne-tools').classList.contains('is-shown')));
+await p.keyboard.type('Watch the 1H close');
+await p.click('.ne-side.is-left'); await settle(120);
+await p.keyboard.type('London only');
+await choose2('.ne-side.is-left', 'London'); await tool('Bold'); await settle(100);
+await p.click('.ne-col .ne-body'); await p.keyboard.type('The note itself'); await settle(1000);
+let mg = (await kept()).notes.find(n => n.title === 'Margins');
+t('what is written in the margins is kept beside the note', !!mg && /Watch the 1H close/.test(mg.right) && /London.*only/.test(mg.left) && /The note itself/.test(mg.html) && !/Watch/.test(mg.html), JSON.stringify(mg && [mg.left, mg.html, mg.right]));
+t('formatting works there as in the note', !!mg && /<(b|strong)>London<\/(b|strong)>/.test(mg.left), mg && mg.left);
+t('and the list can find the note by its margin words', !!mg && /Watch the 1H close/.test(mg.text) && /London only/.test(mg.text));
+// a picture dropped on a margin goes into that margin
+await p.evaluate(async png => {
+  const bin = atob(png), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const dt = new DataTransfer(); dt.items.add(new File([u], 'chart.png', { type: 'image/png' }));
+  const box = document.querySelector('.ne-side.is-right'), r = box.getBoundingClientRect();
+  box.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 20, clientY: r.top + 10 }));
+}, PNG);
+await p.waitForFunction(() => document.querySelector('.ne-side.is-right .ne-img[data-shot]'), null, { timeout: 8000 }).catch(() => {});
+await settle(1000);
+mg = (await kept()).notes.find(n => n.title === 'Margins');
+t('a picture dropped on a margin goes into that margin', !!mg && /ne-img/.test(mg.right) && !/ne-img/.test(mg.html) && mg.images.length === 1, JSON.stringify(mg && { r: mg.right.slice(0, 80), images: mg.images }));
+// dragging it across into the note moves it
+const mFrom = await p.evaluate(() => { const r = document.querySelector('.ne-side.is-right .ne-img').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+const mTo = await p.evaluate(() => { const r = document.querySelector('.ne-col .ne-body').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 12 }; });
+await p.mouse.move(mFrom.x, mFrom.y); await p.mouse.down(); await p.mouse.move(mFrom.x - 30, mFrom.y + 4, { steps: 3 }); await p.mouse.move(mTo.x, mTo.y, { steps: 8 }); await settle(150); await p.mouse.up(); await settle(1000);
+mg = (await kept()).notes.find(n => n.title === 'Margins');
+t('and it can be dragged from a margin into the note', !!mg && /ne-img/.test(mg.html) && !/ne-img/.test(mg.right) && mg.images.length === 1, JSON.stringify(mg && { h: /ne-img/.test(mg.html), r: /ne-img/.test(mg.right) }));
+await p.evaluate(() => { location.hash = '#/notes'; }); await settle(400);
+await p.evaluate(() => { const id = JSON.parse(window.__files.get('data/notes.json')).notes.find(n => n.title === 'Margins').id; location.hash = '#/notes/' + encodeURIComponent(id); }); await p.waitForSelector('.ne-side'); await settle(400);
+t('opened again, the margins are as they were left', await p.evaluate(() => /London only/.test(document.querySelector('.ne-side.is-left').innerText) && /Watch the 1H close/.test(document.querySelector('.ne-side.is-right').innerText)));
 t('no errors on the page', errs.length === 0, errs.join(' | '));
 console.log(`\n  ${pass} passed, ${fail} failed`);
 await b.close();

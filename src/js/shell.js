@@ -127,12 +127,13 @@ export function topbar(store, nav, { hash, onAccount, onYou }) {
   const acct = store.activeAccount;
 
   const glider = el('span', { class: 'tb-glide', 'aria-hidden': 'true' });
-  /* The journal carries its count — closed trades in the scope you are reading. */
+  /* The tabs are names only: the journal no longer wears a badge with its count. The number is still
+     on the tab as data-count (trades in the scope you are reading), which is what the tests read. */
   const count = acct ? store.tradesFor(acct.id).length : 0;
   const tabs = SECTIONS.map(s => el('a', { href: s.href, class: 'tb-tab' + (s.id === here.id ? ' is-on' : ''),
-      'data-section': s.id, 'aria-current': s.id === here.id ? 'page' : null, title: s.label, 'aria-label': s.label },
-    icon(s.ic, 15, 'currentColor', 1.7), el('span', {}, s.label),
-    s.id === 'journal' && acct ? el('span', { class: 'count', title: `${count} trade${count === 1 ? '' : 's'}` }, String(count)) : null));
+      'data-section': s.id, 'data-count': s.id === 'journal' && acct ? String(count) : null,
+      'aria-current': s.id === here.id ? 'page' : null, title: s.label, 'aria-label': s.label },
+    icon(s.ic, 15, 'currentColor', 1.7), el('span', {}, s.label)));
   const navEl = el('nav', { class: 'tb-nav', 'aria-label': 'Sections' }, glider, ...tabs);
   /* The pill is placed once the bar has been fitted to the window (fitTopbar),
      since folding changes where every tab sits. */
@@ -144,8 +145,10 @@ export function topbar(store, nav, { hash, onAccount, onYou }) {
       onClick: e => onAccount(e.currentTarget) },
     mark,
     el('span', { class: 'acct-name tb-acct-n' }, acct.name),
-    el('span', { class: 'acct-meta tb-acct-b' }, c.money(store.balanceOf(acct), { sign: false, currency: acct.currency, decimals: 0 })
-      + ' · ' + (store.displayUnit === '$' ? c.pctSigned(c.asPercent(acct, stats.net)) : c.fig(store.displayUnit, acct, stats.net, stats.netR, { decimals: 0 }))),
+    /* On the Dashboard the page itself is the account's figures, so the pill is just whose it is: logo and name. */
+    here.id === 'dashboard' ? null
+      : el('span', { class: 'acct-meta tb-acct-b' }, c.money(store.balanceOf(acct), { sign: false, currency: acct.currency, decimals: 0 })
+        + ' · ' + (store.displayUnit === '$' ? c.pctSigned(c.asPercent(acct, stats.net)) : c.fig(store.displayUnit, acct, stats.net, stats.netR, { decimals: 0 }))),
     icon('chevdown', 12, 'currentColor', 2)) : null;
 
   const units = el('div', { class: 'unit-switch tb-units', role: 'group', 'aria-label': 'Show figures as' },

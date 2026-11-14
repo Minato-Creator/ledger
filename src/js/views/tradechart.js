@@ -136,6 +136,7 @@ export function tradeChart(store, nav, t, opts = {}) {
 
     const plot = el('div', { class: 'tc-plot', style: { height: height + 'px' } });
     const core = createCore(plot, {
+      clear: !!opts.clear,
       store, inst, dp, symbol: inst.replace('_', '').replace('NAS100USD', 'NAS100'), source: 'OANDA',
       bars: cd.aggregate(res.rows, tf), tf, compact: minimal,
       hooks: {
@@ -164,7 +165,8 @@ export function tradeChart(store, nav, t, opts = {}) {
     const acct = store.activeAccount;
     /* Review (opts.position): TradingView's position tool drawn from the trade
        itself — in at the entry, out at the exit, its stop and target, the
-       labels always showing and the closed P&L the trade's own — redrawn as
+       labels showing only while the pointer is over it (drawings.js) and the
+       closed P&L the trade's own — redrawn as
        the prices are changed. Only to look at: it is not one of your drawings. */
     const showPos = () => !!opts.position && timed && [entry, sl, tp].every(Number.isFinite) && sl !== entry && tp !== entry;
     function posDrawing() {
@@ -175,7 +177,8 @@ export function tradeChart(store, nav, t, opts = {}) {
       const net = t.netResult == null || t.netResult === '' ? NaN : Number(t.netResult);
       return { id: 'trade-position', type, __extra: true, locked: true, hideOn: [], at: null,
         pts: [{ t: res.entry, p: entry }, { t: end, p: entry }], sl, tp,
-        style: { ...df.style, always: true }, text: df.text,
+        /* a picture of the chart (chartshot.js) has no pointer to bring them up, so it asks for them on */
+        style: { ...df.style, always: !!opts.labels }, text: df.text,
         inputs: { account: own?.startingBalance || 100000, risk: Number(t.riskPercent) || own?.defaultRiskPercent || 1, riskMode: '%' },
         closed: hasExit ? { t: res.exit, p: exitP, pnl: Number.isFinite(net) ? net : null } : null };
     }

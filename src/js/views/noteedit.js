@@ -33,6 +33,8 @@
    ============================================================ */
 import { el, icon, toast, confirmButton } from '../ui.js';
 import { prepare, imageOnClipboard, snapshotOf, fetchSnapshot } from '../shots.js';
+import * as c from '../calc.js';
+import { tradeChartPicture, hasChart } from './chartshot.js';
 
 export const NOTE_KINDS = [['lesson', 'Lesson'], ['watch', 'Watch out'], ['focus', 'Focus']];
 
@@ -121,7 +123,7 @@ function strip(e) {
 function retag(e, tag) { const n = document.createElement(tag); n.append(...e.childNodes); e.replaceWith(n); return n; }
 function unwrap(e) { e.replaceWith(...e.childNodes); }
 function keepPicture(e) {
-  const shot = e.getAttribute('data-shot') || '', side = e.getAttribute('data-float'), w = Math.round(+e.getAttribute('data-w'));
+  const shot = e.getAttribute('data-shot') || '', side = e.getAttribute('data-float'), w = Math.round(+e.getAttribute('data-w')), clear = e.hasAttribute('data-clear');
   const link = snapshotOf(e.getAttribute('data-link') || '')?.link;
   if (!SHOT_RE.test(shot)) { e.remove(); return; }
   for (const a of [...e.attributes]) e.removeAttribute(a.name);
@@ -130,6 +132,7 @@ function keepPicture(e) {
   e.setAttribute('data-float', ['left', 'right', 'center'].includes(side) ? side : 'center');
   if (w >= 15 && w <= 100) e.setAttribute('data-w', String(w));
   if (link) e.setAttribute('data-link', link);
+  if (clear) e.setAttribute('data-clear', '1');
   e.replaceChildren();
 }
 
@@ -223,10 +226,28 @@ function openNote(store, nav, note) {
   const edited = el('span', { class: 'ne-edited' }, editedAt(note.updatedAt));
   const title = el('textarea', { class: 'ne-title', rows: '1', placeholder: 'Untitled', spellcheck: 'true', 'aria-label': 'Title', maxlength: '200' });
   title.value = note.title || '';
-  const body = el('div', { class: 'ne-body', contenteditable: 'true', spellcheck: 'true', role: 'textbox', 'aria-multiline': 'true',
-    'aria-label': 'Note', 'data-placeholder': 'Write what you learned, what to watch out for, what to pay attention to…' });
-  body.innerHTML = clean(note.html) || '<p><br></p>';
-  body.querySelectorAll('.ne-img').forEach(dress);
+  /* Three places to write: the note itself down the middle, and a margin on either side of it. The
+     margins are boxes with no edges — nothing shows until something is in them or the pointer is over
+     them — and they take words and pictures exactly as the note does. `body` is whichever of the
+     three is being written in; everything below works on that one. */
+  const makeBox = (cls, label, hint, html) => {
+    const b = el('div', { class: cls, contenteditable: 'true', spellcheck: 'true', role: 'textbox', 'aria-multiline': 'true',
+      'aria-label': label, 'data-placeholder': hint });
+    b.innerHTML = clean(html || '') || '<p><br></p>';
+    b.querySelectorAll('.ne-img').forEach(dress);
+    return b;
+  };
+  const main = makeBox('ne-body', 'Note', 'Write what you learned, what to watch out for, what to pay attention to…', note.html);
+  const sideL = makeBox('ne-body ne-side is-left', 'Left margin', 'Write here, or drop a picture', note.left);
+  const sideR = makeBox('ne-body ne-side is-right', 'Right margin', 'Write here, or drop a picture', note.right);
+  const boxes = [main, sideL, sideR];
+  let body = main;
+  const boxOf = node => boxes.find(b => b.contains(node)) || null;
+  const turnTo = b => { if (b && b !== body) body = b; };
+  /* every listener the writing has is on all three, and the one it happens in becomes `body` first
+     (not for the pointer merely passing over, or focus leaving) */
+  const QUIET = new Set(['mouseover', 'mouseout', 'dragover', 'blur']);
+  const onBoxes = (type, fn) => boxes.forEach(b => b.addEventListener(type, e => { if (!QUIET.has(type)) turnTo(b); return fn(e); }));
 
   const kindButtons = NOTE_KINDS.map(([v, l]) => el('button', { class: `ne-kind k-${v}`, 'data-kind': v,
     onClick: () => { store.updateNote(id, { kind: note.kind === v ? null : v }); paintKinds(); stamp(); } }, el('i'), l));
@@ -274,6 +295,7 @@ function openNote(store, nav, note) {
   } });
   const imageButton = tb('Add a picture', icon('image', 17), () => { keep(); file.click(); });
   const chartButton = tb('Add a TradingView chart', glyph(G.tv), b => chartMenu(b));
+  const tradeButton = tb('Add a chart from one of your trades', icon('chart', 17), b => tradeMenu(b));
   const sep = () => el('i', { class: 'ne-tb-sep' });
 
   const tools = el('div', { class: 'ne-tools', role: 'toolbar', 'aria-label': 'Formatting' },
@@ -281,7 +303,7 @@ function openNote(store, nav, note) {
       blockButton, sizeButton, sep(),
       state.bold, state.italic, state.underline, state.strikeThrough, colourButton, sep(),
       state.insertUnorderedList, state.insertOrderedList, tb('Divider', glyph(G.hr), () => divider()), sep(),
-      linkButton, imageButton, chartButton, file));
+      linkButton, imageButton, chartButton, tradeButton, file));
   function divider() {
     back();
     exec('insertHorizontalRule');
@@ -299,17 +321,24 @@ function openNote(store, nav, note) {
 
   const paper = el('div', { class: 'ne-paper', onMousedown: e => {
     /* a click in the empty paper round the column puts the caret at the end of the note */
-    if (e.target !== paper && !e.target.classList?.contains('ne-col')) return;
+    /* … and in the empty part of a margin, at the end of that margin */
+    const margin = e.target.classList?.contains('ne-margin') ? e.target.firstElementChild : null;
+    if (e.target !== paper && !e.target.classList?.contains('ne-col') && !margin) return;
     e.preventDefault();
-    body.focus({ preventScroll: true });
-    const r = document.createRange(); r.selectNodeContents(body); r.collapse(false);
+    const box = margin || main;
+    turnTo(box);
+    box.focus({ preventScroll: true });
+    const r = document.createRange(); r.selectNodeContents(box); r.collapse(false);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
   } },
+    /* the note comes first in the page (it is what Tab reaches first); the grid puts a margin either side */
     el('article', { class: 'ne-col' },
       title,
       el('div', { class: 'ne-meta' }, el('div', { class: 'ne-kinds' }, ...kindButtons), el('div', { class: 'spacer' }), edited),
       el('div', { class: 'ne-rule' }),
-      body));
+      main),
+    el('aside', { class: 'ne-margin is-left' }, sideL),
+    el('aside', { class: 'ne-margin is-right' }, sideR));
 
   const view = el('div', { class: 'view ne-view' },
     el('div', { class: 'ne-bar' }, backButton(nav), el('div', { class: 'spacer' }), status, del, pinButton),
@@ -497,7 +526,7 @@ function openNote(store, nav, note) {
   let restoring = false;
   function paintEditing() {
     if (restoring || closed) return;
-    const on = document.activeElement === body || (!!pop && tools.classList.contains('is-shown'));
+    const on = boxes.includes(document.activeElement) || (!!pop && tools.classList.contains('is-shown'));
     tools.classList.toggle('is-shown', on);
   }
   const item = (label, on, onClick, cls = '', look = '') => el('button', { class: 'pop-item ne-item ' + cls + (on ? ' is-on' : ''), onClick: () => { shut(); onClick(); } },
@@ -668,10 +697,11 @@ function openNote(store, nav, note) {
     if (document.activeElement === body) { s.removeAllRanges(); s.addRange(after); }
     saved = after;
   }
-  async function fill(s, getFile) {
+  async function fill(s, getFile, asIs = false) {
     try {
       const file = await getFile();
-      const { blob } = await prepare(file);
+      /* a chart drawn here is kept as it is: a PNG, so the page shows through it */
+      const blob = asIs ? file : (await prepare(file)).blob;
       const name = await store.putNoteImage(id, blob);
       known.add(name);
       s.dataset.shot = name;
@@ -702,6 +732,38 @@ function openNote(store, nav, note) {
       toast('TradingView did not send the chart — the link is there instead', 'warn');
       changed();
     }
+  }
+  /* A trade's own chart — the journal's, drawn from OANDA's prices with the position on it — as a picture
+     in the note (chartshot.js). The menu lists the trades it can be drawn for, newest first. */
+  function tradeMenu(anchor) {
+    keep();
+    const all = store.trades.filter(hasChart).sort((a, b) => String(b.date + (b.timeOpen || '')).localeCompare(String(a.date + (a.timeOpen || ''))));
+    const find = el('input', { class: 'ne-in', type: 'search', placeholder: 'Find a trade: pair or date', spellcheck: 'false', 'aria-label': 'Find a trade' });
+    const list = el('div', { class: 'ne-trades' });
+    const row = t => {
+      const acct = store.allAccounts.find(a => a.id === t.accountId);
+      const net = Number.isFinite(t.netResult) ? c.money(t.netResult, { currency: acct?.currency, decimals: 0 }) : 'open';
+      return el('button', { class: 'ne-trade', 'data-trade': t.id, onClick: () => { shut(); addTradeChart(t, saved && saved.cloneRange()); } },
+        el('b', {}, t.pair), el('span', {}, [t.side === 'sell' ? 'Short' : 'Long', c.shortDate(t.date)].join(' · ')),
+        el('i', { class: t.netResult > 0 ? 'is-up' : t.netResult < 0 ? 'is-down' : '' }, net));
+    };
+    const paint = () => {
+      const q = find.value.trim().toLowerCase();
+      const hits = all.filter(t => !q || `${t.pair} ${t.date} ${c.shortDate(t.date)}`.toLowerCase().includes(q)).slice(0, 40);
+      list.replaceChildren(...(hits.length ? hits.map(row)
+        : [el('div', { class: 'ne-hint' }, all.length ? 'No trade matches that.' : 'No trade here has a chart yet. Charts are drawn for instruments OANDA has prices for, with your OANDA key in Settings.')]));
+    };
+    find.addEventListener('input', paint);
+    paint();
+    menu(anchor, el('div', { class: 'ne-linkbox ne-tradebox' }, all.length ? find : null, list), 'ne-pop-link');
+    if (all.length) find.focus();
+  }
+  async function addTradeChart(t, r) {
+    const s = newPicture({ float: 'center', w: 100, clear: 1 });
+    s.classList.add('is-loading');
+    insertAt(r, s); placeholder();
+    const ok = await fill(s, () => tradeChartPicture(store, nav, t), true);
+    if (ok !== true) { s.remove(); placeholder(); toast(ok?.message || 'That chart could not be added', 'warn'); }
   }
   function removePicture(s) { unpick(); s.remove(); placeholder(); changed(); }
 
@@ -772,9 +834,13 @@ function openNote(store, nav, note) {
     };
     const step = () => {
       frame = 0;
+      /* over another of the three boxes, the picture goes into that one */
+      const under = boxes.find(b => { const q = b.getBoundingClientRect(); return x >= q.left && x <= q.right && y >= q.top && y <= q.bottom; });
+      if (under && under !== body) { body.classList.remove('is-dragging'); turnTo(under); body.classList.add('is-dragging'); }
       const c = body.getBoundingClientRect();
       const rel = (x - c.left) / c.width;
-      const side = rel < 0.34 ? 'left' : rel > 0.66 ? 'right' : 'center';
+      /* a margin is narrow: a picture there sits on its own line */
+      const side = body !== main ? 'center' : rel < 0.34 ? 'left' : rel > 0.66 ? 'right' : 'center';
       /* read the text under the pointer as it would be without the picture, so where it lands does not move what it is aimed at */
       s.style.display = 'none';
       const r = caretAt(x, y);
@@ -793,8 +859,8 @@ function openNote(store, nav, note) {
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', up);
       cancelAnimationFrame(frame); cancelAnimationFrame(roll);
-      s.classList.remove('is-dragging'); body.classList.remove('is-dragging');
-      if (moving) { body.normalize(); changed(); }
+      s.classList.remove('is-dragging'); boxes.forEach(b => b.classList.remove('is-dragging'));
+      if (moving) { boxes.forEach(b => b.normalize()); changed(); }
       pick(s);
     };
     document.addEventListener('pointermove', move);
@@ -840,7 +906,7 @@ function openNote(store, nav, note) {
     return true;
   }
 
-  body.addEventListener('keydown', e => {
+  onBoxes('keydown', e => {
     const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
     if (mod && key === 'k') { e.preventDefault(); linkMenu(); return; }
     if (mod && e.shiftKey && key === 'x') { e.preventDefault(); run('strikeThrough'); return; }
@@ -848,13 +914,13 @@ function openNote(store, nav, note) {
     if (e.key === 'Tab' && blockTag() === 'li') { e.preventDefault(); exec(e.shiftKey ? 'outdent' : 'indent'); changed(); return; }
     if (e.key === ' ' && !mod) shortcut(e);
   });
-  body.addEventListener('input', e => {
+  onBoxes('input', e => {
     tidyMarks();
     if (e.inputType === 'insertText' && /\s/.test(e.data || '')) keepSelection(() => linkify(blockEl(), true));
     else if (e.inputType === 'insertParagraph') { const b = blockEl(); keepSelection(() => linkify(b?.previousElementSibling, false)); }
     changed();
   });
-  body.addEventListener('paste', e => {
+  onBoxes('paste', e => {
     keep();
     const r = saved && saved.cloneRange();
     const img = imageOnClipboard(e);
@@ -876,11 +942,11 @@ function openNote(store, nav, note) {
     keepSelection(() => linkify(body, false));
     changed();
   });
-  body.addEventListener('dragover', e => {
+  onBoxes('dragover', e => {
     const types = [...(e.dataTransfer?.types || [])];
     if (types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }
   });
-  body.addEventListener('drop', e => {
+  onBoxes('drop', e => {
     const files = [...(e.dataTransfer?.files || [])].filter(f => /^image\//.test(f.type));
     const words = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain') || '';
     const snap = !files.length && words && !/\s/.test(words.trim()) ? snapshotOf(words) : null;
@@ -890,7 +956,7 @@ function openNote(store, nav, note) {
     if (snap) addChart(snap, r);
     else files.forEach(f => addPicture(f, r && r.cloneRange()));
   });
-  body.addEventListener('pointerdown', e => {
+  onBoxes('pointerdown', e => {
     const s = e.target.closest?.('.ne-img');
     if (!s || !body.contains(s)) { if (picked) unpick(); return; }
     if (e.button !== 0 || e.target.closest('.ne-imgbar')) return;
@@ -900,28 +966,28 @@ function openNote(store, nav, note) {
   });
   /* a link opens on a click — a press and let go in the same place, not a drag to choose its words */
   let down = null;
-  body.addEventListener('mousedown', e => { down = { x: e.clientX, y: e.clientY }; });
-  body.addEventListener('click', e => {
+  onBoxes('mousedown', e => { down = { x: e.clientX, y: e.clientY }; });
+  onBoxes('click', e => {
     if (e.target.closest('.ne-img')) return;
     const a = e.target.closest('a');
     const still = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 4;
     if (a && body.contains(a) && still && !e.shiftKey && e.detail < 2) { e.preventDefault(); hideBubble(); openLink(a.getAttribute('href')); }
   });
-  body.addEventListener('mouseover', e => {
+  onBoxes('mouseover', e => {
     const a = e.target.closest?.('a');
-    if (!a || !body.contains(a)) return;
+    if (!a || !boxOf(a)) return;
     clearTimeout(hoverTimer); hoverTimer = setTimeout(() => showBubble(a), 380);
   });
-  body.addEventListener('mouseout', e => {
+  onBoxes('mouseout', e => {
     const a = e.target.closest?.('a');
     if (a && !a.contains(e.relatedTarget)) { clearTimeout(hoverTimer); hoverTimer = setTimeout(hideBubble, 300); }
   });
-  body.addEventListener('focus', () => { focused = true; document.execCommand('defaultParagraphSeparator', false, 'p'); paintEditing(); });
+  onBoxes('focus', () => { focused = true; document.execCommand('defaultParagraphSeparator', false, 'p'); paintEditing(); });
   /* Whether the writing has the caret, as of the last thing done. The browser
      blurs it when a redraw takes the page off, too, which is not someone
      leaving it: only focus going somewhere (relatedTarget) or a press
      outside the note counts (onAway). */
-  body.addEventListener('blur', e => { if (e.relatedTarget) focused = false; setTimeout(paintEditing); });
+  onBoxes('blur', e => { if (e.relatedTarget) focused = false; setTimeout(paintEditing); });
   title.addEventListener('focus', () => { inTitle = [title.selectionStart, title.selectionEnd]; });
   title.addEventListener('blur', e => { if (e.relatedTarget) inTitle = null; });
   title.addEventListener('select', () => { inTitle = [title.selectionStart, title.selectionEnd]; });
@@ -930,8 +996,9 @@ function openNote(store, nav, note) {
   title.addEventListener('keydown', e => {
     if (e.key !== 'Enter' && !(e.key === 'ArrowDown' && title.selectionStart === title.value.length)) return;
     e.preventDefault();
-    body.focus();
-    const r = document.createRange(); r.selectNodeContents(body.firstElementChild || body); r.collapse(true);
+    turnTo(main);
+    main.focus();
+    const r = document.createRange(); r.selectNodeContents(main.firstElementChild || main); r.collapse(true);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
   });
   const grow = () => { title.style.height = 'auto'; title.style.height = title.scrollHeight + 'px'; };
@@ -950,7 +1017,9 @@ function openNote(store, nav, note) {
   const onSelection = () => {
     if (closed) return;
     const s = getSelection();
-    if (s.rangeCount && body.contains(s.anchorNode)) {
+    const box = s.rangeCount ? boxOf(s.anchorNode) : null;
+    if (box) {
+      turnTo(box);
       keep();
       caret = [s.anchorNode, s.anchorOffset, s.focusNode, s.focusOffset];
       paintTools();
@@ -981,17 +1050,24 @@ function openNote(store, nav, note) {
   /* ============================================================
      Saving
      ============================================================ */
-  const empty = () => !plainOf(body) && !body.querySelector('.ne-img, hr');
-  function placeholder() { body.classList.toggle('is-empty', empty()); }
-  function snapshot() {
-    const c = body.cloneNode(true);
+  const emptyBox = b => !plainOf(b) && !b.querySelector('.ne-img, hr');
+  function placeholder() { boxes.forEach(b => b.classList.toggle('is-empty', emptyBox(b))); }
+  /* what one box holds: its words as html, as plain text, and its pictures */
+  function partOf(box) {
+    const c = box.cloneNode(true);
     c.querySelectorAll('.ne-img').forEach(s => { if (!s.dataset.shot) s.remove(); });
     let html = clean(c.innerHTML).replace(/​/g, '');
     if (/^(<p>(<br>)?<\/p>)?$/.test(html)) html = '';
-    const images = [...new Set([...c.querySelectorAll('.ne-img[data-shot]')].map(s => s.dataset.shot))];
-    return { title: title.value.trim().slice(0, 200), html, text: plainOf(c).slice(0, 2000), images };
+    return { html, text: plainOf(c), images: [...c.querySelectorAll('.ne-img[data-shot]')].map(s => s.dataset.shot) };
   }
-  const keyOf = s => JSON.stringify([s.title, s.html, s.images]);
+  /* the note is the middle (`html`), with what is in its margins beside it (`left`, `right`) */
+  function snapshot() {
+    const m = partOf(main), l = partOf(sideL), r = partOf(sideR);
+    return { title: title.value.trim().slice(0, 200), html: m.html, left: l.html, right: r.html,
+      text: [m.text, l.text, r.text].filter(Boolean).join('\n').slice(0, 2000),
+      images: [...new Set([...m.images, ...l.images, ...r.images])] };
+  }
+  const keyOf = s => JSON.stringify([s.title, s.html, s.left, s.right, s.images]);
   let lastSaved = keyOf(snapshot());   // as opened: leaving without a change writes nothing
 
   function changed() {

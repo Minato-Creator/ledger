@@ -2620,3 +2620,77 @@ His short on gold of 11 Nov (entry 4056.62, stop 4067.73, moved to break-even wh
 
 ## 2.41.1 — pushed to GitHub as "Laminar 1.04.0" (12 Nov)
 He linked his GitHub account and installed the Claude GitHub App on `Minato-Creator/ledger`, so updates can now be pushed straight to `main`; he still runs Actions → Build Laminar himself. This one is 2.41.0 plus the OANDA first-stop fix. The version is bumped in package.json, tauri.conf.json, Cargo.toml and Cargo.lock; `cargo check --locked` is clean. The repo on GitHub also holds leftovers from earlier copy-overs (old backgrounds moon/topo/torii/water, a newsreader font, a stray top-level build.yml); they were left as they are, since he hasn't said to remove them.
+
+## Monthly certificate and the horses (after 2.41.1, not yet released)
+
+- **Where:** Journal → Calendar → Year. Each traded month's column on the chart is a button (`.yr-hit`, in `yearChart`, analytics.js). A month that ended in profit opens its certificate in a sheet in the middle of the window; any other month says "A certificate is for a month that ended in profit".
+- **The page:** `src/js/share/cert.js` (`drawCert`) draws it on a canvas, laid out at 1200 × 848 and scaled: wordmark, month, "Monthly profit", the amount, "Presented to" and the name from the app (left out when no name is set), then Return (of starting balance), R earned and Win rate, and the hand-drawn "L.J" over LAMINAR JOURNAL. 
+- **The sheet:** `src/js/views/certificate.js` — Save picture (PNG at 3600 × 2544, through share.js `saveOut`) and Copy.
+- **The look** is canvas board R: a page blue on the left fading to warm white on the right, the Laminar mark large, dark blue and blurred (`ctx.filter`) on the blue side, a white wordmark top left, and all the words on the light side from x = 640. The horses, then the ringed emblem (board M), were tried first and swapped out; the horses stay as a share background.
+- **The horses:** `src/js/horses.js` holds Minato's own stippled drawing as about 20,000 dots (four bytes each, base64), drawn in pure black at any size and kept per size. It is also a sixth background made here for the share card (`original:horses`, light like Paper).
+- **The year's own:** a small Certificate button sits top right of the Year page (`.yr-cert`, in `yearPanel`). It opens a small menu (`certMenu`): Yearly certificate, or Monthly certificate, which turns the menu into that year's months in profit. The yearly one is the same page for the whole year: the year as the heading, "Yearly profit", and the months added up (a row marked `whole`). Saved as `Laminar-2026.png`.
+- **Tests:** `tests/suites/cert.mjs` (33); `share.mjs` now counts six made here.
+- **A trap, found the hard way:** `build-single.mjs` only carries the first name of `export const a = 1, b = 2`. The certificate drew fine from source and came out squashed in the built app until `CERT_W` and `CERT_H` were exported on separate lines; `cert.mjs` now checks no export does that.
+- The design was chosen on a Design canvas first (board N); nothing else from that canvas is in the app.
+
+## Tag menu on the trade form is solid
+
+`.tag-menu` (the dropdown under each tag group on New trade / Edit) no longer takes the glass: look.css gives it the menus' solid `--float` and no backdrop blur, because the form's writing showed straight through it. Checked in `tags.mjs`.
+
+## The trade's position on the form: labels on hover
+
+The position drawn on New trade / Edit trade (`posDrawing` in tradechart.js, an `o.extras` drawing) no longer shows its Target / P&L / Stop labels all the time. They come up while the pointer is over the position and go when it leaves. Extras still cannot be chosen or moved; drawings.js keeps their hit areas in `over` and the one under the pointer in `hotExtra`. core.js now also calls `leave` when the pointer moves from the pane onto a scale. Checked in `tradechart.mjs`.
+
+## Edit trade with a chart: chart left, form right (layout C)
+
+When the trade form has the trade's own chart (editing a trade OANDA has prices for), the page is split (`.tf-split`, addtrade.js / look.css): the left column (`.tf-side`, a little over half the width) holds the chart at a normal shape, the figures strip and the Notes; it stays put. The right column is the form in one column and is the part that scrolls. Notes move out of the form's foot into the left column in this case only. Without a chart (New trade, or an instrument with no prices) the page is exactly as before. Under 1100px wide it stacks. Chosen on the design canvas "Laminar Trade Form Layout" (board C). Checked in `tradechart.mjs`.
+
+`e2e.mjs` was out of date, not the app: it waited for a `.kpi-val` the dashboard no longer has and read the big figure while it was still counting up (and again after the reload). It now waits for the figure to settle and prints the `N passed, 0 failed` line run.sh reads. A full run still skips it by name (the other suites only borrow its fake journal); run it with `./tests/run.sh e2e`.
+
+## Markets: company logos fill their circle
+
+A company's chip (`.mk-logo.is-chip`) now uses the logo itself as its CSS background at 6000% size, positioned 8% in from the top-left corner, so the only thing showing is the colour just inside that corner. A logo that is a filled square (NVDA green, NKE black, a rounded square too) fills the whole circle; a logo on white or on transparency leaves the chip white. No pixels are read, so it does not depend on the logo host allowing cross-origin reads. Set in markets.js `logo()`, styled in app.css.
+
+## Top bar on the Dashboard: account name only
+
+On the Dashboard the account pill in the top bar (`topbar` in shell.js) shows only the account's mark or firm logo and its name. Its balance and return stay on every other page. `scope.mjs` reads the pill's figures from the Journal for that reason.
+
+The Dashboard's window is 7D, 30D or All (90D taken out, 13 Nov). Analytics has the same three; its 90D went on 14 Nov.
+
+The certificate's page is also a share background: `original:blue` ("Blue") in card.js paints `paintCertBack` (cert.js) once per size and keeps it, since the blur is slow. It counts as a light background, like Paper and Horses. Seven backgrounds are made here now.
+
+The Journal tab in the top bar no longer shows a count badge (14 Nov). The number stays on the tab as `data-count`, which the tests read.
+
+## The welcome, updated (14 Nov)
+
+- **Dark from the start.** A journal nobody has opened before is created with the Midnight look (`freshAccounts()` in store.js). A journal that already exists keeps what it had; `defaultAccounts()` (used when an existing file is unreadable) is unchanged.
+- **The first-run page** is all `accounts.js` is now, one long page on its own true-black ground that fills the window edge to edge, with no frame round it (`.wl*` in look.css, fixed inks, not the look's):
+  - *First screen:* Minato's landscape picture (`src/media/welcome/land.jpg`) with a shadow rising from the bottom; the white wordmark and the motto on top; "Welcome to Laminar", the question, and two cards, **Personal account** and **Prop firm**; a "Scroll to see how it works" hint. They arrive one after another (picture, welcome at 0.9s, question 1.6s, cards 2.3s, hint 3.3s); none of that under automation, motion off or reduced motion.
+  - *Further down:* How Laminar works (three steps), Your journal stays on your computer, It finds your edge, A journal you will keep using, then LAMINAR in giant letters.
+  - Each card opens the step-by-step set-up on its own path (`newAccount(store, nav, { path: 'live' | 'prop' })`, acctnew.js). There is nothing to fill in on the page itself.
+- **No opening animation at a first visit.** app.js plays the intro only once `localStorage['laminar:met']` is set, which `render()` does the first time the app is drawn with an account in it (tests that set `window.__intro` still get it). Someone updating from an older version misses the opening once, on the first start after the update.
+- **The picture in the single-file build** is only inlined with `--with-media`; the test page inlines it by hand.
+- **The old short form is gone** (name, balance, currency, risk, date, colour on the welcome), and with it the old accounts list page that nothing reached any more. Accounts are added and listed in Settings → Accounts (acctboard.js).
+- **Tests:** `welcome.mjs` (17). `tests/first.mjs` exports `firstAccount(page, name, balance, { risk })`, which makes the first account the way a newcomer does; the suites that only need an account use it. `form.mjs` and `depth.mjs` were deleted: both tested the short form itself. `money.mjs` reads the balance back from the set-up's preview card. `ctl`, `look` and `theme` expect Midnight on a new journal or switch to Light first.
+
+## Notes: margins and a trade's chart
+
+- A note now has three boxes to write in: the note itself (`note.html`) and one in each margin (`note.left`, `note.right`). In `noteedit.js` they are `main`, `sideL`, `sideR`; `body` always points at the one in use (`turnTo`), and every listener goes on all three through `onBoxes`. The note column comes first in the page so `.ne-body` still finds the note; the grid in `app.css` puts the margins either side (under 1180px wide they drop beneath).
+- Pictures can be dropped on a margin or dragged between a margin and the note. `note.text` and `note.images` cover all three boxes.
+- Toolbar: "Add a chart from one of your trades" lists trades whose pair OANDA has, with a search box. `views/chartshot.js` draws the trade chart off the page (position and labels on) and hands back a PNG, which goes into the note like any picture.
+- `tradeChart(..., { labels: true })` keeps the position labels on (used only for that picture).
+- Tests: `notes.mjs` (margins), `tradechart.mjs` (chart into a note).
+- Later the same day: the margins stand further from the note (`column-gap:clamp(48px, 5vw, 104px)`), an empty margin shows no hint (only the caret once clicked; the hint stays on narrow windows where the boxes sit under the note), and a trade's chart is kept as a see-through PNG (`createCore({ clear })`, `tradeChart(..., { clear: true })`, `fill(s, getFile, true)` skips the JPEG step, `data-clear` on the picture drops its backing and ring). Charts added before this keep their solid background; add them again to get the clear one.
+
+## 2.42.0 — zipped and pushed to GitHub as "Laminar 1.05.0" (14 Nov)
+Everything since 2.41.1:
+- monthly and yearly profit certificate (Journal → Calendar → Year, button top right);
+- Horses and Blue share backgrounds;
+- trade form: solid tag menu, position labels on hover, Edit trade with the chart left and the form right;
+- Markets: square logos fill their circle;
+- Dashboard: pill shows logo and name only, 90D removed (Analytics too), single trade's date stays inside the card;
+- Journal tab has no count badge;
+- new welcome: dark, the landscape picture, Personal or Prop firm, more to read below, no opening animation the first time;
+- Notes: a box on each margin, add a chart from one of your trades (see-through).
+
+The version is bumped in package.json, package-lock.json, tauri.conf.json, Cargo.toml and Cargo.lock; `cargo check --locked` is clean. The zip is `git archive` of HEAD under `laminar-2.42.0/`, put in `D:\Claude Work Station\Quire Journal\Laminar 1.05.0\Zip`.

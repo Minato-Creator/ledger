@@ -45,7 +45,7 @@ async function open(files, { key = null } = {}) {
   await p.waitForSelector('.topbar', { timeout: 10000 });
   await p.waitForTimeout(700);
   const disk = () => p.evaluate(() => Object.fromEntries(JSON.parse(localStorage.getItem('fakefs'))));
-  const count = () => p.evaluate(() => document.querySelector('.tb-tab[href="#/trades"] .count')?.textContent);
+  const count = () => p.evaluate(() => document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count);
   return { ctx, p, errs, oanda, disk, count };
 }
 

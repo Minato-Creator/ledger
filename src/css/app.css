@@ -3929,7 +3929,10 @@ textarea.qt-prompt { min-height:150px; }
 .mk-logo { display:inline-block; border-radius:50%; }
 .mk-logo.is-mark .pmark { display:block; }
 .mk-logo.is-coin > img { display:block; width:100%; height:100%; border-radius:50%; object-fit:cover; }
-.mk-logo.is-chip { background:#fff; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.3); }
+/* the chip's background is the logo itself at sixty times the size, held near its top-left corner: all that
+   shows is the colour just inside that corner, so a logo that is a filled square fills the circle (markets.js) */
+.mk-logo.is-chip { background-color:#fff; background-repeat:no-repeat; background-position:8% 8%; background-size:6000% 6000%; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.3); }
+.mk-logo.is-chip.is-letters { background-image:none; }
 .mk-logo.is-chip > img { display:block; width:76%; height:76%; margin:12%; object-fit:contain; }
 .mk-logo.is-letters { display:inline-grid; place-items:center; }
 .mk-mono::before { content:attr(data-l); font:750 calc(var(--d) * .095) var(--sans); letter-spacing:-.03em; color:#16181D; }
@@ -4114,8 +4117,33 @@ u.ne-letter { text-underline-offset:2px; }
 .ne-a-bar { display:block; width:14px; height:3px; margin-top:2px; border-radius:2px; background:currentColor; }
 .ne-g { display:inline-flex; }
 
-.ne-paper { flex:1 0 auto; padding:30px 24px 160px; cursor:text; }
-.ne-col { max-width:680px; margin:0 auto; position:relative; }
+.ne-paper { flex:1 0 auto; padding:30px 40px 160px; cursor:text; }
+/* the list of trades whose chart can go in a note */
+.ne-tradebox { width:320px; display:flex; flex-direction:column; gap:8px; }
+.ne-trades { max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; margin:0 -4px; }
+.ne-trade { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; align-items:baseline; gap:10px; padding:8px 10px; border-radius:9px; text-align:left; color:var(--ink); cursor:pointer; }
+.ne-trade:hover, .ne-trade:focus-visible { background:var(--inset-2); outline:none; }
+.ne-trade b { font:600 13px var(--sans); }
+.ne-trade span { font-size:12px; color:var(--ink-4); }
+.ne-trade i { font:500 12px var(--mono); font-style:normal; color:var(--ink-4); }
+.ne-trade i.is-up { color:var(--profit); }
+.ne-trade i.is-down { color:var(--loss); }
+/* the note down the middle, a margin to write in on either side of it (noteedit.js) */
+.ne-paper { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 680px) minmax(0, 1fr); column-gap:clamp(48px, 5vw, 104px); align-items:stretch; }
+.ne-col { min-width:0; position:relative; grid-column:2; grid-row:1; }
+.ne-margin { min-width:0; display:flex; cursor:text; grid-row:1; }
+.ne-margin.is-left { justify-content:flex-end; grid-column:1; }
+.ne-margin.is-right { grid-column:3; }
+/* a box with no edges: nothing shows in an empty one but the caret, once you click in it */
+.ne-body.ne-side { flex:1; max-width:460px; min-height:100%; font-size:14.5px; line-height:1.65; }
+.ne-body.ne-side.is-empty::before { opacity:0; font-size:13.5px; }
+@media (max-width:1180px) {
+  /* no room beside the note: the margins go under it, one after the other */
+  .ne-paper { grid-template-columns:minmax(0, 680px); justify-content:center; row-gap:28px; }
+  .ne-col, .ne-margin.is-left, .ne-margin.is-right { grid-column:1; grid-row:auto; }
+  .ne-body.ne-side { max-width:none; min-height:90px; }
+  .ne-body.ne-side.is-empty::before { opacity:1; }
+}
 .ne-title { display:block; width:100%; margin:0; padding:0; border:0; outline:0; background:none; resize:none; overflow:hidden;
   font:600 36px/1.18 var(--sans); letter-spacing:-.025em; color:var(--ink); }
 .ne-title::placeholder { color:var(--ink-5); }
@@ -4213,6 +4241,9 @@ u.ne-letter { text-underline-offset:2px; }
 .ne-img[data-float="right"] { float:right; margin:6px 0 12px 26px; }
 .ne-img[data-float="center"] { float:none; clear:both; margin:10px auto 18px; }
 .ne-img img { display:block; width:100%; height:auto; min-height:48px; border-radius:14px; background:var(--inset); box-shadow:0 0 0 1px var(--line); transition:box-shadow .15s; }
+/* a trade's chart: nothing behind it, the page shows through */
+.ne-img[data-clear]:not(.is-loading):not(.is-missing):not(.is-on):not(.is-dragging) img { background:none; box-shadow:none; }
+.ne-img[data-clear].is-on img, .ne-img[data-clear].is-dragging img { background:none; }
 .ne-img.is-loading img, .ne-img.is-missing img { aspect-ratio:16/9; }
 .ne-img.is-loading img { animation:ne-wait 1.2s ease-in-out infinite; }
 @keyframes ne-wait { 50% { opacity:.45; } }

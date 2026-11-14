@@ -2,6 +2,7 @@
    No server, no stubs — real localStorage, real file:// origin. */
 import pw from 'playwright';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -44,15 +45,12 @@ ok('it knows it is on browser storage', await page.evaluate(() =>
 await page.evaluate(() => { location.hash = '#/'; });
 await page.waitForTimeout(300);
 ok('the stylesheet came with it', await page.evaluate(() => {
-  const n = document.querySelector('.topbar') || document.querySelector('.card');
+  const n = document.querySelector('.topbar') || document.querySelector('.card') || document.querySelector('.wl-kind');
   return n ? getComputedStyle(n).borderRadius !== '0px' : 'nothing drawn';
 }), true);
 
 console.log('  -- a real trade, end to end --');
-await page.locator('.main input[placeholder="Swing account"]').fill('Mate’s account');
-await page.locator('.main input[inputmode="decimal"]').first().fill('$50 000');
-await page.locator('.field[inputmode="decimal"]').nth(1).fill('1');
-await page.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(b => /Create account/.test(b.textContent)).click());
+await firstAccount(page, 'Mate’s account', '$50 000', { risk: '1' });
 await page.waitForTimeout(500);
 ok('the account saved', await page.evaluate(() =>
   JSON.parse(localStorage.getItem('ledger:file:data/accounts.json')).accounts[0].startingBalance), 50000);
@@ -74,7 +72,7 @@ console.log('  -- it survives being closed and reopened --');
 await page.reload({ waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.welcome-title, .topbar', { timeout: 8000 });
 ok('the account came back', await page.evaluate(() => document.querySelector('.acct-name')?.textContent), 'Mate’s account');
-ok('and the trade', await page.evaluate(() => document.querySelector('.tb-tab .count')?.textContent), '1');
+ok('and the trade', await page.evaluate(() => document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count), '1');
 
 console.log('  -- every screen --');
 for (const [hash, name] of [['#/', 'dashboard'], ['#/trades', 'trades'], ['#/calendar', 'calendar'],
@@ -96,11 +94,12 @@ console.log('  -- the module scopes really are separate --');
 await page.evaluate(() => { location.hash = '#/analytics'; });
 await page.waitForTimeout(400);
 ok('analytics has its own period filter', await page.evaluate(() =>
-  [...document.querySelectorAll('.seg button')].some(b => b.textContent.trim() === '90D')), true);
+  [...document.querySelectorAll('.seg button')].some(b => b.textContent.trim() === '30D')
+  && ![...document.querySelectorAll('.seg button')].some(b => b.textContent.trim() === '90D')), true);
 await page.evaluate(() => { location.hash = '#/'; });
 await page.waitForTimeout(400);
-ok('so does the dashboard', await page.evaluate(() =>
-  [...document.querySelectorAll('.seg button')].some(b => b.textContent.trim() === '90D')), true);
+ok('so does the dashboard: 7D, 30D and All', await page.evaluate(() =>
+  [...document.querySelectorAll('.seg button')].map(b => b.textContent.trim()).filter(x => /^(\d+D|All)$/.test(x)).join(' ')), '7D 30D All');
 
 console.log('  -- the newest pages came with it --');
 {

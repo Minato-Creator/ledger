@@ -4,6 +4,7 @@
    works against this, the only thing left to be wrong is the Rust itself. */
 import pw from 'playwright';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -105,7 +106,7 @@ await page.evaluate(() => [...document.querySelectorAll('.gate-actions button')]
 await page.waitForSelector('.welcome-title, .topbar', { timeout: 8000 });
 ok('the gate is gone once answered', await page.evaluate(() => !document.querySelector('.gate')), true);
 ok('the app rendered', await page.evaluate(() => !!document.querySelector('.welcome-title') || !!document.querySelector('.topbar')), true);
-ok('first run asks for an account and nothing else', await page.evaluate(() => /Set up your first account/.test(document.querySelector('.main').innerText)), true);
+ok('first run asks for an account and nothing else', await page.evaluate(() => /Welcome to Laminar/.test(document.querySelector('.main').innerText) && document.querySelectorAll('.main .wl-kind').length === 2), true);
 
 const files = await disk();
 const paths = Object.keys(files);
@@ -122,10 +123,7 @@ ok('and the journal folder itself holds no config',
 ok('what it writes is real JSON', (() => { try { JSON.parse(files[paths.find(p=>p.endsWith('trades.json'))]); return true; } catch { return false; } })(), true);
 
 console.log('  -- a full trade, natively --');
-await page.locator('.main input[placeholder="Swing account"]').fill('Prop 100k');
-await page.locator('.main input[inputmode="decimal"]').first().fill('$100 000');
-await page.locator('.field[inputmode="decimal"]').nth(1).fill('0.75');
-await page.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(b=>/Create account/.test(b.textContent)).click());
+await firstAccount(page, 'Prop 100k', '$100 000', { risk: '0.75' });
 await page.waitForTimeout(600);
 ok('the account saved through Rust', await page.evaluate(() =>
   JSON.parse(window.__TAURI_STUB_STATE__.files.get([...window.__TAURI_STUB_STATE__.files.keys()].find(k=>k.endsWith('accounts.json')))).accounts[0].startingBalance), 100000);
@@ -148,7 +146,7 @@ await page.reload({ waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.welcome-title, .topbar', { timeout: 8000 });
 ok('still no gate on the second run', await page.evaluate(() => !document.querySelector('.gate')), true);
 ok('the account came back', await page.evaluate(() => document.querySelector('.acct-name')?.textContent), 'Prop 100k');
-ok('and the trade', await page.evaluate(() => document.querySelector('.tb-tab .count')?.textContent), '1');
+ok('and the trade', await page.evaluate(() => document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count), '1');
 
 console.log('  -- every screen, natively --');
 for (const [hash, name] of [['#/','dashboard'],['#/trades','trades'],['#/calendar','calendar'],

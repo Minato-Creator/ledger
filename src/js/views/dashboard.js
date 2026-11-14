@@ -5,7 +5,7 @@ import { hoverLayer, readRow, unitKit } from './chartkit.js';
 import { sequence, deepest, streaks } from './an-overview.js';
 
 let period = '30D';
-const DAYS = { '7D': 7, '30D': 30, '90D': 90, 'All': null };
+const DAYS = { '7D': 7, '30D': 30, 'All': null };
 
 function withinPeriod(trades) {
   const days = DAYS[period];
@@ -26,7 +26,7 @@ function withinPeriod(trades) {
    from — setup, session, instrument — and the last few trades.
 
    Everything reads in whichever unit is switched on, and follows the
-   7D / 30D / 90D / All window, except the recent trades, which are simply
+   7D / 30D / All window, except the recent trades, which are simply
    the last ones you closed.
    ============================================================ */
 const sign = v => (v > 1e-9 ? 'is-pos' : v < -1e-9 ? 'is-neg' : '');
@@ -196,7 +196,7 @@ function drawHero(rows, K, store, W, H) {
     const lbl = c.shortDate(rows[i].t.date);
     if (lbl === last) return;
     last = lbl;
-    g.append(svg('text', { class: 'lab-tick', x: X(i), y: H - 4, 'text-anchor': k === 0 ? 'start' : k === 3 ? 'end' : 'middle' }, lbl));
+    g.append(svg('text', { class: 'lab-tick', x: X(i), y: H - 4, 'text-anchor': X(i) > r - 40 ? 'end' : X(i) < l + 40 ? 'start' : 'middle' }, lbl));   // by where it sits, so one trade's date (at the right) stays inside
   });
 
   const setupName = sid => store.playbook.setups.find(x => x.id === sid)?.name;

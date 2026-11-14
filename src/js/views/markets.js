@@ -41,6 +41,7 @@ function logo(tabKey, it, size) {
   const box = el('span', { class: 'mk-logo', style: { width: size, height: size } });
   if (tabKey === 'forex') { box.classList.add('is-mark'); box.append(mark(it.label, size)); return box; }
   const fallback = () => {
+    box.style.backgroundImage = '';
     box.className = 'mk-logo ' + (tabKey === 'crypto' ? 'is-mark' : 'is-chip is-letters');
     /* the letters are written by CSS, so the bubble's text stays its name and move */
     box.replaceChildren(tabKey === 'crypto' ? mark(it.label + 'USD', size) : el('span', { class: 'mk-mono', 'data-l': monogram(it.label), 'data-n': monogram(it.label).length }));
@@ -48,6 +49,11 @@ function logo(tabKey, it, size) {
   const src = tabKey === 'crypto' ? it.image : M.stockLogo(it.label);
   if (!src) { fallback(); return box; }
   box.classList.add(tabKey === 'crypto' ? 'is-coin' : 'is-chip');
+  /* A company logo that comes as a filled square (a green one, a black one) fills the whole circle with
+     its colour rather than sitting as a square on white: the chip's own background is the same picture,
+     enlarged until only a speck by its corner shows (app.css). A logo on white or on nothing leaves the
+     chip white, as before. Nothing is read from the picture, so it needs no leave from the logo's host. */
+  if (tabKey !== 'crypto') box.style.backgroundImage = `url("${src}")`;
   const img = el('img', { src, alt: '', referrerpolicy: 'no-referrer', decoding: 'async', draggable: 'false' });
   img.addEventListener('error', fallback, { once: true });
   box.append(img);

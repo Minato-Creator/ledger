@@ -1,5 +1,6 @@
 import pw from 'playwright';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -87,7 +88,8 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 await page.addInitScript(FAKE_FS);
 
-const step = async (name, fn) => { try { await fn(); console.log('  ok    ' + name); } catch (e) { console.log('  FAIL  ' + name + ' — ' + e.message); if (errors.length) console.log('  page errors:\n    ' + errors.join('\n    ')); throw e; } };
+let passed = 0;
+const step = async (name, fn) => { try { await fn(); passed++; console.log('  ok    ' + name); } catch (e) { console.log('  FAIL  ' + name + ' — ' + e.message); if (errors.length) console.log('  page errors:\n    ' + errors.join('\n    ')); throw e; } };
 
 await page.goto('http://127.0.0.1:8777/index.html', { waitUntil: 'networkidle' });
 
@@ -113,14 +115,12 @@ await step('choose folder', async () => {
 });
 
 await step('first run goes straight to setting up an account', async () => {
-  await page.waitForSelector('text=Set up your first account', { timeout: 4000 });
+  await page.waitForSelector('text=Welcome to Laminar', { timeout: 4000 });
+  await page.waitForSelector('.wl-kind[data-kind="prop"]', { timeout: 4000 });
 });
 
 await step('create an account', async () => {
-  await page.getByPlaceholder('Swing account').fill('Main funded');
-  await page.locator('.main input[inputmode="decimal"]').first().fill('100000');
-  await page.locator('.field[inputmode="decimal"]').nth(1).fill('0.75');
-  await page.getByRole('button', { name: 'Create account' }).click();
+  await firstAccount(page, 'Main funded', '100000', { risk: '0.75' });
   await page.waitForSelector('text=No trades on Main funded yet', { timeout: 4000 });
 });
 
@@ -173,9 +173,9 @@ await step('trade log shows it', async () => {
 
 await step('dashboard KPIs are real', async () => {
   await page.evaluate(() => location.hash = '#/');
-  await page.waitForSelector('.kpi-val', { timeout: 4000 });
+  await page.waitForSelector('.view .card', { timeout: 4000 }); await page.waitForTimeout(2200);   // the dashboard's figures count up to their value
   const t = await page.locator('.view').innerText();
-  for (const want of ['+$1,731.60', '100.0%', '+2.31R']) if (!t.includes(want)) throw new Error('dashboard missing ' + want);
+  for (const want of ['+$1,731.60', '100.0%', '+2.31R']) if (!t.includes(want)) throw new Error('dashboard missing ' + want + ' in: ' + t.replace(/\s+/g, ' ').slice(0, 700));
 });
 await page.screenshot({ path: '/tmp/shot-dashboard.png' });
 
@@ -195,8 +195,9 @@ await step('session was derived from the open time', async () => {
 await step('data survives a reload', async () => {
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('.welcome-title, .topbar', { timeout: 5000 });
-  const t = await page.locator('.view').innerText();
-  if (!t.includes('1,731.60')) throw new Error('trade did not come back after reload');
+  /* the figure counts up to its value, so wait for it rather than reading it mid-count */
+  const back = await page.waitForFunction(() => document.querySelector('.view')?.innerText.includes('1,731.60'), null, { timeout: 8000 }).then(() => true, () => false);
+  if (!back) throw new Error('trade did not come back after reload');
 });
 
 await step('export produces a parseable CSV', async () => {
@@ -226,5 +227,6 @@ await step('that CSV can be read back in through the importer', async () => {
 });
 
 console.log('\nconsole errors: ' + (errors.length ? '\n  ' + errors.join('\n  ') : 'none'));
+console.log(`\n${passed} passed, ${errors.length ? 1 : 0} failed`);   // the line run.sh reads
 await browser.close();
 process.exit(errors.length ? 1 : 0);

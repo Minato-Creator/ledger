@@ -404,6 +404,12 @@ html[data-paper="on"][data-glass="on"] .gate-card { color:var(--ink); }
   animation:pop-in .22s var(--ease-out) both; transform-origin:top right;
 }
 .popover.is-out { animation:pop-out .16s ease-in both; }
+/* The tag menu on the trade form is solid, like the menus above, whatever the glass is doing:
+   it opens over the form's own writing, which showed straight through a pane of glass. */
+html:root .tag-menu, html:root[data-glass] .tag-menu {
+  background:var(--float); -webkit-backdrop-filter:none; backdrop-filter:none;
+  border:0; box-shadow:var(--shadow-float), inset 0 0 0 1px var(--edge);
+}
 @keyframes pop-in { from { opacity:0; transform:translateY(-6px) scale(.97); } }
 @keyframes pop-out { to { opacity:0; transform:translateY(-4px) scale(.98); } }
 .pop-k { font:650 10px var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); padding:8px 10px 6px; }
@@ -1160,6 +1166,104 @@ html[data-paper="off"] select { color-scheme:dark; }
    The share sheet (views/share.js): a live card, three tabs, three ways out
    ============================================================ */
 .sheet.is-share { width:min(660px, calc(100vw - 32px)); height:min(940px, calc(100vh - 40px)); max-height:none; padding:0; }
+/* Editing a trade with its chart (addtrade.js): chart, figures and notes on the left and staying put,
+   the form in one column on the right, scrolling on its own */
+.tf-split { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0, 1.42fr) minmax(0, 1fr); gap:var(--s-8); }
+.tf-side { display:flex; flex-direction:column; gap:var(--s-8); min-width:0; min-height:0; }
+.tf-side > .tc, .tf-side > .trade-strip { flex:none; }
+.tf-side .ts-cell { padding:0 14px; }
+.tf-side .ts-val { font-size:18px; }
+.tf-notes { flex:1; min-height:120px; display:flex; flex-direction:column; padding:18px 22px; }
+.tf-notes > .is-notes { flex:1; min-height:0; display:flex; flex-direction:column; }
+.tf-notes > .is-notes > .sec-h > i { display:none; }
+.tf-notes > .is-notes textarea { flex:1; min-height:60px; resize:none; }
+.tf-split > .trade-form { grid-template-columns:minmax(0, 1fr); gap:0; }
+.tf-split > .trade-form > .col + .col, .tf-split > .trade-form > .tf-wide { margin-top:18px; padding-top:18px; border-top:1px solid var(--grey-9); }
+.tf-split > .trade-form > .tf-wide { grid-template-columns:minmax(0, 1fr); }
+@media (max-width:1100px) {
+  .tf-split { display:flex; flex-direction:column; overflow-y:auto; }
+  .tf-split > .trade-form { flex:none; overflow:visible; }
+  .tf-notes { flex:none; min-height:180px; }
+}
+/* The welcome a newcomer sees (accounts.js): a picture with a shadow rising from the bottom, the welcome
+   and the two answers arriving one after another, then more to read on the way down. It has its own
+   black ground (a true black, not a blue one) and its own inks, whatever the look. */
+.wl { --wl-bg:#000; flex:1; min-height:0; overflow-y:auto; position:relative; background:var(--wl-bg); color:#F4F4F6; }
+/* it fills the window edge to edge: no frame, no margin, no rounded page round it */
+.main:has(> .view.is-welcome) { margin:0; padding:0; border-radius:0; box-shadow:none; background:#000; }
+#app:has(.view.is-welcome) { padding:0; background:#000; }
+.wl-first { position:relative; height:100%; min-height:600px; overflow:hidden; }
+.wl-pic { position:absolute; left:0; top:0; width:100%; height:84%; object-fit:cover; object-position:50% 22%; }
+.wl-shade { position:absolute; inset:0; background:linear-gradient(180deg, rgba(0,0,0,.25) 0%, rgba(0,0,0,0) 14%, rgba(0,0,0,0) 36%,
+  rgba(0,0,0,.6) 54%, rgba(0,0,0,.9) 68%, var(--wl-bg) 80%); }
+.wl-top { position:absolute; left:40px; right:40px; top:30px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.wl-mark svg { display:block; width:150px; height:auto; }
+.wl-motto { font:700 14px var(--sans); letter-spacing:.08em; text-transform:uppercase; }
+.wl-row { position:absolute; left:40px; right:40px; bottom:112px; display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:24px 40px; }
+.wl-hello { display:flex; flex-direction:column; gap:10px; padding-bottom:6px; }
+.wl .welcome-title { margin:0; color:inherit; font:600 44px/1.05 var(--sans); letter-spacing:-.03em; }
+.wl-q { margin:0; font-size:15px; color:#C9CBD3; }
+.wl-kinds { width:min(640px, 100%); display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+.wl-kind { display:flex; flex-direction:column; align-items:flex-start; gap:8px; text-align:left; padding:22px 22px 18px; border-radius:20px;
+  background:rgba(12,12,12,.72); color:inherit; box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+  -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); cursor:pointer; transition:box-shadow .15s, transform .15s, background .15s; }
+.wl-kind:hover, .wl-kind:focus-visible { transform:translateY(-2px); background:rgba(24,24,24,.84); box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.7); outline:none; }
+.wl-kind b { font:600 17px var(--sans); letter-spacing:-.01em; margin-top:6px; }
+.wl-ico { color:#C9CBD3; }
+.wl-blurb { font-size:13px; color:#B9BBC4; }
+.wl-go { display:inline-flex; align-items:center; gap:5px; margin-top:12px; font:600 12.5px var(--sans); }
+.wl-hintrow { position:absolute; left:0; right:0; bottom:22px; display:flex; justify-content:center; }
+.wl-hint { display:flex; flex-direction:column; align-items:center; gap:6px; font:600 12px var(--sans); letter-spacing:.08em; text-transform:uppercase; color:#B9BBC4; cursor:pointer; }
+.wl-hint:hover { color:#F4F4F6; }
+
+/* arriving: the picture, then the welcome, the question, the two answers, the hint */
+@keyframes wl-pic { from { opacity:0; transform:scale(1.03); } to { opacity:1; transform:none; } }
+@keyframes wl-in { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+.wl-pic { animation:wl-pic 1.1s var(--ease-out, ease-out) both; }
+.wl-top { animation:wl-in .8s var(--ease-out, ease-out) .35s both; }
+.wl .welcome-title { animation:wl-in .9s var(--ease-out, ease-out) .9s both; }
+.wl-q { animation:wl-in .9s var(--ease-out, ease-out) 1.6s both; }
+.wl-kind { animation:wl-in .9s var(--ease-out, ease-out) 2.3s both; }
+.wl-kind + .wl-kind { animation-delay:2.45s; }
+.wl-hintrow { animation:wl-in .9s var(--ease-out, ease-out) 3.3s both; }
+html[data-auto="on"] .wl *, html[data-motion="off"] .wl * { animation:none !important; }
+@media (prefers-reduced-motion: reduce) { .wl * { animation:none !important; } }
+
+/* further down the page */
+.wl-more { padding:84px 40px 0; display:flex; flex-direction:column; gap:84px; }
+.wl-h { margin:0; font:700 30px/1.15 var(--sans); letter-spacing:-.02em; color:#F4F4F6; }
+.wl-block { display:flex; flex-direction:column; gap:28px; }
+.wl-rule { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px 24px; padding-bottom:14px; border-bottom:1px solid rgba(255,255,255,.22); }
+.wl-rule > span { font-size:14px; color:#B9BBC4; }
+.wl-steps { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:40px; }
+.wl-steps > div { display:flex; flex-direction:column; gap:10px; }
+.wl-steps i { font:700 13px var(--sans); letter-spacing:.08em; color:#B9BBC4; font-style:normal; }
+.wl-steps b { font:600 20px var(--sans); }
+.wl-steps p, .wl-body p { margin:0; font-size:15.5px; line-height:1.6; color:#C9CBD3; }
+.wl-two { display:grid; grid-template-columns:minmax(0, 420px) minmax(0, 1fr); gap:24px 60px; align-items:start; }
+.wl-body { display:flex; flex-direction:column; gap:16px; }
+.wl-body b { color:#F4F4F6; font-weight:600; }
+.wl-chips { display:flex; flex-wrap:wrap; gap:8px; }
+.wl-chips span { padding:8px 14px; border-radius:20px; font:500 13.5px var(--sans); box-shadow:inset 0 0 0 1px rgba(255,255,255,.22); }
+.wl-four { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:22px 40px; }
+.wl-big { margin-top:90px; height:.88em; overflow:hidden; text-align:center; white-space:nowrap; font:800 min(17vw, 250px)/1 var(--sans); letter-spacing:-.02em;
+  background:linear-gradient(180deg, rgba(244,244,246,.02) 8%, rgba(244,244,246,.5) 55%, rgba(244,244,246,.95) 100%);
+  -webkit-background-clip:text; background-clip:text; color:transparent; }
+@media (max-width:900px) {
+  .wl-steps, .wl-two, .wl-four { grid-template-columns:minmax(0, 1fr); }
+  .wl .welcome-title { font-size:34px; }
+  .wl-kinds { grid-template-columns:minmax(0, 1fr); }
+}
+/* The monthly certificate (views/certificate.js): the page itself, and two ways out */
+.sheet.is-cert { width:min(980px, calc(100vw - 32px)); padding:0; }
+.cert-stage { padding:0 20px 16px; }
+.cert-canvas { display:block; width:100%; height:auto; aspect-ratio:1200 / 848; border-radius:12px; box-shadow:0 0 0 1px var(--line), 0 12px 32px rgba(0,0,0,.18); }
+.sh-foot.cert-foot { grid-template-columns:1.25fr 1fr; }
+.yr-top { display:flex; align-items:center; gap:12px; }
+.yr-cert { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 11px; border-radius:8px; border:1px solid var(--line); background:transparent; color:inherit; font:500 11.5px var(--sans); cursor:pointer; opacity:.85; transition:opacity .15s, background .15s; }
+.yr-cert:hover { opacity:1; background:rgba(128,128,128,.12); }
+.yr-hit { cursor:pointer; outline:none; transition:fill .15s; }
+.yr-hit.is-cert:hover, .yr-hit:focus-visible { fill:rgba(128,128,128,.10); }
 .sh { display:flex; flex-direction:column; height:100%; min-height:0; }
 .sh-head { display:flex; align-items:center; gap:10px; padding:18px 20px 12px; flex:none; }
 .sh-head h2 { margin:0; font:700 17px var(--sans); letter-spacing:-.02em; color:var(--ink); }

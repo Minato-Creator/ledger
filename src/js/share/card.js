@@ -17,6 +17,8 @@
 import * as cd from '../candles.js';
 import { markParts } from '../flags.js';
 import { wordmarkSvg } from '../ui.js';
+import { paintHorses } from '../horses.js';
+import { paintCertBack } from './cert.js';
 
 export const SIZES = [
   ['landscape', 'Landscape', 1200, 630],
@@ -124,8 +126,10 @@ export const ORIGINALS = [
   ['money', 'Money'],
   ['grid', 'Grid'],
   ['paper', 'Paper'],
+  ['horses', 'Horses'],
+  ['blue', 'Blue'],
 ];
-export const isLightOriginal = id => id === 'paper';
+export const isLightOriginal = id => id === 'paper' || id === 'horses' || id === 'blue';
 
 let grain = null;
 function grainTile() {
@@ -157,10 +161,33 @@ function paintGrain(g, W, H, t, alpha) {
   g.restore();
 }
 
+const blueKept = new Map();
 function paintOriginal(g, W, H, t, id, m) {
   const P = m.colours.profit, L = m.colours.loss;
   const tone = m.tone === 'loss' ? L : m.tone === 'win' ? P : '#9CA3AF';
   const D = Math.max(W, H);
+  if (id === 'blue') {
+    /* the certificate's page (cert.js): blue fading to warm white, the Laminar mark blurred on the left.
+       Blurring is slow and a video asks thirty times a second, so each size is drawn once and kept. */
+    const key = W + 'x' + H;
+    let cv = blueKept.get(key);
+    if (!cv) {
+      cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      paintCertBack(cv.getContext('2d'), W, H);
+      if (blueKept.size >= 3) blueKept.delete(blueKept.keys().next().value);
+      blueKept.set(key, cv);
+    }
+    g.drawImage(cv, 0, 0);
+    paintGrain(g, W, H, t, 0.04);
+    return;
+  }
+  if (id === 'horses') {
+    /* the certificate's page: his stippled horses in black on light paper, held still */
+    g.fillStyle = '#F3F3F2'; g.fillRect(0, 0, W, H);
+    paintHorses(g, W * 0.04, H * 0.06, W * 0.92, H * 0.88, 0.5);
+    paintGrain(g, W, H, t, 0.05);
+    return;
+  }
   if (id === 'paper') {
     const bg = g.createLinearGradient(0, 0, W, H);
     bg.addColorStop(0, '#F6F4EF'); bg.addColorStop(1, '#E9E6DF');

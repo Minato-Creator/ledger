@@ -3,6 +3,7 @@
 import pw from 'playwright';
 import fs from 'node:fs';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -43,10 +44,8 @@ const look = async (label, setup, opts={}) => {
     .find(b=>/Use this folder/.test(b.textContent))?.click()).catch(()=>{});
   await p.waitForTimeout(700);
   if (await p.evaluate(()=>!!document.querySelector('.welcome-title'))) {
-    await p.locator('.main input').first().fill('Acct');
-    await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-    await p.evaluate(()=>[...document.querySelectorAll('button')].find(x=>/Start|Create|Done/i.test(x.textContent))?.click());
-    await p.waitForTimeout(800);
+    await firstAccount(p, 'Acct', '100000');
+    await p.waitForTimeout(500);
   }
   await p.evaluate(()=>{ location.hash='#/settings/vault'; }); await p.waitForTimeout(800);
   const btn = await p.evaluate(()=>{
@@ -72,10 +71,8 @@ await page2.goto('http://127.0.0.1:8777/__frame.html', { waitUntil:'domcontentlo
 const frame = page2.frameLocator('iframe');
 await page2.waitForTimeout(1400);
 if (await frame.locator('.welcome-title').count()) {
-  await frame.locator('.main input').first().fill('Acct');
-  await frame.locator('.main input[inputmode="decimal"]').first().fill('100000');
-  await frame.locator('button', { hasText: /Start|Create|Done/i }).first().click();
-  await page2.waitForTimeout(900);
+  await firstAccount(page2.frames()[1], 'Acct', '100000');
+  await page2.waitForTimeout(600);
 }
 await page2.frames()[1].evaluate(()=>{ location.hash='#/settings/vault'; });
 await page2.waitForTimeout(900);

@@ -1,6 +1,7 @@
 import pw from 'playwright';
 import fsx from 'node:fs';
 import { pickColour } from './lookhelp.mjs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -30,9 +31,7 @@ const ok=(n,g,w)=>{const good=String(g)===String(w); good?pass++:fail++; console
 const has=(n,g,sub)=>{const good=String(g).includes(sub); good?pass++:fail++; console.log(`  ${good?'ok  ':'FAIL'}  ${n}  got=${g}`);};
 
 // account + a winning and a losing trade so every surface has something to paint
-await p.locator('.main input[placeholder="Swing account"]').fill('Main');
-await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-await p.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(x=>/Create account/.test(x.textContent)).click());
+await firstAccount(p, 'Main', '100000');
 await p.waitForTimeout(400);
 const today = NOW;
 const dayBack = n => new Date(today.getTime() - n * 864e5).toISOString().slice(0, 10);

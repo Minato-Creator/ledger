@@ -66,7 +66,7 @@ await p.waitForSelector('.topbar', { timeout: 10000 });
 await p.waitForTimeout(500);
 
 console.log('a shell that answers slowly and out of order');
-t('the journal opens from it, every trade there', await p.evaluate(() => document.querySelector('.tb-tab[href="#/trades"] .count')?.textContent) === String(TR.length));
+t('the journal opens from it, every trade there', await p.evaluate(() => document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count) === String(TR.length));
 
 console.log('one file, in the order asked');
 const one = await p.evaluate(async root => {

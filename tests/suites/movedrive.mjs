@@ -4,6 +4,7 @@
 import pw from 'playwright';
 import fs from 'node:fs';
 import fsx from 'node:fs';
+import { firstAccount } from '../first.mjs';
 /* ---- where this suite finds things ----------------------------------
    Paths are worked out from this file rather than typed in, so the suite
    runs from wherever the repository happens to sit. The browser is
@@ -37,10 +38,8 @@ await p.waitForTimeout(900);
 // start on C:, the default
 await p.evaluate(()=>[...document.querySelectorAll('button')].find(b=>/Use this folder/.test(b.textContent)).click());
 await p.waitForTimeout(1100);
-await p.locator('.main input').first().fill('Prop 100k');
-await p.locator('.main input[inputmode="decimal"]').first().fill('100000');
-await p.evaluate(()=>[...document.querySelectorAll('button')].find(b=>/Start|Create|Done/i.test(b.textContent))?.click());
-await p.waitForTimeout(900);
+await firstAccount(p, 'Prop 100k', '100000');
+await p.waitForTimeout(600);
 
 // a trade with two charts, so there is something real to carry
 await p.evaluate(async () => {

@@ -720,7 +720,10 @@ export function addTrade(store, nav, existingId = null) {
      as you change the entry, stop, target or side */
   if (editing && editing.timeOpen && cd.oandaInstrument(editing.pair)) {
     out.chartTrade = { ...editing };
-    out.chart = tradeChart(store, nav, out.chartTrade, { minimal: true, position: true, height: 300 });   // shorter, so the form below keeps room
+    /* a chart of a normal shape: it takes the left of the page (see the split below), as tall as the
+       window lets it be once the figures and the notes under it have their room */
+    out.chart = tradeChart(store, nav, out.chartTrade, { minimal: true, position: true,
+      height: Math.max(280, Math.min(480, innerHeight - 440)) });
   }
   const strip = el('section', { class: 'card trade-strip' },
     cell('Result', out.result), ...out.moneyCells, rule(),
@@ -1030,12 +1033,13 @@ export function addTrade(store, nav, existingId = null) {
      the shape a chart is, and the notes get room to run. */
   const chartsSec = sec('Charts', shotWrap, picker);
   chartsSec.querySelector('.sec-h').append(el('span', { class: 'sec-count' }, out.shotCount = el('span', {}, '')));
-  const wide = el('div', { class: 'tf-wide' },
-    chartsSec,
-    el('div', { class: 'band sec is-notes' },
-      el('div', { class: 'sec-h' }, el('i', {}, String(++secN).padStart(2, '0')), el('span', {}, 'Notes')),
-      el('textarea', { class: 'field', placeholder: 'What you saw, what you felt, what you would do again',
-        oninput: e => { f.notes = e.target.value; } }, f.notes || '')));
+  const notesSec = el('div', { class: 'band sec is-notes' },
+    el('div', { class: 'sec-h' }, el('i', {}, String(++secN).padStart(2, '0')), el('span', {}, 'Notes')),
+    el('textarea', { class: 'field', placeholder: 'What you saw, what you felt, what you would do again',
+      oninput: e => { f.notes = e.target.value; } }, f.notes || ''));
+  /* With the trade's chart on the page the notes sit under it, on the left (the split below);
+     without one they keep their place at the foot of the form. */
+  const wide = el('div', { class: 'tf-wide' }, chartsSec, out.chart ? null : notesSec);
 
   const form = el('section', { class: 'card roomy trade-form' }, colLeft, colRight, wide);
   paintShots();                     // again, now the count beside the heading exists
@@ -1053,7 +1057,15 @@ export function addTrade(store, nav, existingId = null) {
      paste from there never reached a listener down here. That was the third
      Ctrl+V that did nothing. The listener retires itself once this view has
      been replaced, so a paste on another page is never taken here. */
-  const view = el('div', { class: 'view' }, head, out.chart, strip, form);
+  /* Editing a trade that has its chart: the chart keeps a normal shape on the left, a little over
+     half the page, with the figures and the notes under it — and stays put — while the whole form
+     runs down the right and scrolls on its own. Without a chart the page is as it was. */
+  const view = out.chart
+    ? el('div', { class: 'view has-chart' }, head,
+        el('div', { class: 'tf-split' },
+          el('div', { class: 'tf-side' }, out.chart, strip, el('section', { class: 'card roomy tf-notes' }, notesSec)),
+          form))
+    : el('div', { class: 'view' }, head, strip, form);
   out.wrapEl = form; renumber();
   const onDocPaste = e => {
     if (!view.isConnected) { document.removeEventListener('paste', onDocPaste); return; }

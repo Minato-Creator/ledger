@@ -32,22 +32,25 @@ await page.waitForSelector('.welcome-title, .topbar', { timeout: 8000 });
 let pass=0, fail=0;
 const ok=(n,g,w)=>{const good=String(g)===String(w); good?pass++:fail++; console.log(`  ${good?'ok  ':'FAIL'}  ${n}  got=${g}${good?'':`  want=${w}`}`);};
 
-const balanceField = '.main input[inputmode="decimal"]';
+/* The starting balance is typed in the set-up's steps now (welcome → Personal account → a broker);
+   the card under the field says back what it read. */
+const balanceField = '.ab-sizein';
+let atDetails = false;
 const typeBalance = async v => {
-  await page.evaluate(() => { location.hash = '#/accounts'; });
-  await page.waitForTimeout(300);
+  if (!atDetails) {
+    await page.click('.wl-kind[data-kind="live"]');
+    await page.waitForSelector('.aw-btile[data-firm="oanda"]'); await page.click('.aw-btile[data-firm="oanda"]');
+    await page.waitForSelector(balanceField); atDetails = true;
+  }
   await page.fill(balanceField, v);
   await page.waitForTimeout(180);
-  return page.evaluate(() => {
-    const f = document.querySelector('.main input[inputmode="decimal"]');
-    return f.parentElement.querySelector('.m')?.textContent.trim() || '';
-  });
+  return page.evaluate(() => document.querySelector('.aw-preview .ab-size')?.textContent.trim() || '');
 };
 
 console.log('  -- the balance field echoes what it read --');
 for (const [typed, want] of [['25000','$25,000'], ['25 000','$25,000'], ['$25000','$25,000'],
                              ['$25 000','$25,000'], ['25,000','$25,000'], ['  25 000  ','$25,000'],
-                             ['50,000.50','$50,001'], ['banana','Not a number yet']]) {
+                             ['50,000.50','$50,000.50'], ['banana','Starting balance to come']]) {
   const echo = await typeBalance(typed);
   const good = echo.startsWith(want);
   good ? pass++ : fail++;
@@ -55,12 +58,12 @@ for (const [typed, want] of [['25000','$25,000'], ['25 000','$25,000'], ['$25000
 }
 
 // and it really creates the account with that number
-await page.evaluate(() => { location.hash = '#/accounts'; });
-await page.waitForTimeout(300);
-await page.fill('.main input[placeholder="Swing account"]', 'Spaced funded');
+await page.fill('.ab-namein', 'Spaced funded');
 await page.fill(balanceField, '$25 000');
-await page.evaluate(() => [...document.querySelectorAll('.main .btn-primary')].find(b=>/Create account/.test(b.textContent)).click());
-await page.waitForTimeout(600);
+await page.click('.ab-go');
+await page.waitForFunction(() => /Create account/.test(document.querySelector('.ab-go')?.textContent || ''));
+await page.click('.ab-go');
+await page.waitForSelector('.topbar'); await page.waitForTimeout(600);
 const acct = await page.evaluate(() => {
   // With no folder chosen the journal lives in this browser, not in the fake
   // filesystem; read whichever one is actually holding it.
