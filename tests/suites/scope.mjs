@@ -60,13 +60,13 @@ const pick = label => p.evaluate(l=>[...document.querySelector('.scope-switch').
 /* The Dashboard's pill is only the account's logo and name, so its figures are read from the Journal and the page put back. */
 const state = async () => {
   const hash = await p.evaluate(()=>location.hash);
-  const away = await p.evaluate(()=>!document.querySelector('.acct-meta'));
+  const away = false;
   if (away) { await p.evaluate(()=>{location.hash='#/trades';}); await p.waitForTimeout(400); }
   const out = await p.evaluate(async()=>{
     const { store } = await import('/js/store.js');
     const rows = store.tradesFor(store.activeAccount.id);
     return { scope: store.tradeScope, n: rows.length, pairs: rows.map(t=>t.pair).sort().join(','),
-             meta: document.querySelector('.acct-meta').textContent.trim(),
+             meta: document.querySelector('.tb-acct').dataset.meta.trim(),
              nav: document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count };
   });
   if (away) { await p.evaluate(h=>{location.hash=h;}, hash || '#/'); await p.waitForTimeout(500); }
@@ -182,6 +182,6 @@ await p.screenshot({path:OUT + '/scope-final.png'});
 await p.evaluate(()=>{location.hash='#/';}); await p.waitForTimeout(600);
 t('on the Dashboard the account pill is just its mark and name', await p.evaluate(()=>{ const b=document.querySelector('.tb-acct'); return !!b && !b.querySelector('.acct-meta') && !!b.querySelector('.acct-name')?.textContent.trim() && b.children.length >= 2; }));
 await p.evaluate(()=>{location.hash='#/trades';}); await p.waitForTimeout(500);
-t('everywhere else it still carries the balance', await p.evaluate(()=>/\d/.test(document.querySelector('.tb-acct .acct-meta')?.textContent || '')));
+t('and on every other page too: no figures in it', await p.evaluate(async()=>{ for (const h of ['#/trades','#/plan','#/analytics','#/lab','#/replay']) { location.hash=h; await new Promise(r=>setTimeout(r,500)); const b=document.querySelector('.tb-acct'); if (!b || b.querySelector('.acct-meta') || /\d{3}/.test(b.innerText)) return false; } return true; }));
 await b.close();
 console.log(`\n${pass} passed, ${fail} failed`);

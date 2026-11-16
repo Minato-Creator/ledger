@@ -14,6 +14,7 @@ import { accountBoard } from './acctboard.js';
 import { oandaKeyCard, oandaSinceCard, finnhubKeyCard } from './oandakey.js';
 import { playbook } from './playbook.js';
 import { profileFill } from '../shell.js';
+import { profileHeader, handleOf } from './profilecard.js';
 import { probeVideo, probeImage } from '../clip.js';
 import { prepare as prepareImage } from '../shots.js';
 
@@ -174,6 +175,14 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
              padding: '6px 9px', fontSize: '11.5px', color: 'var(--ink)', textAlign: 'right' },
     onChange: async e => { await store.setUserName(e.target.value); nav.refresh(); } });
 
+  const fieldStyle = { background: 'var(--grey-7)', borderRadius: '10px', padding: '6px 9px', fontSize: '11.5px', color: 'var(--ink)', textAlign: 'right' };
+  const handleField = el('input', { class: 'm', 'data-field': 'handle', value: store.userHandle, placeholder: handleOf(store), maxLength: 24, 'aria-label': '@name',
+    style: { width: '150px', ...fieldStyle },
+    onChange: async e => { await store.setUserHandle(e.target.value); nav.refresh(); } });
+  const bioField = el('textarea', { class: 'm', 'data-field': 'bio', placeholder: 'What you trade, how you trade it', maxLength: 160, rows: 2, 'aria-label': 'Description',
+    style: { width: '300px', maxWidth: '46vw', resize: 'none', ...fieldStyle, textAlign: 'left', lineHeight: '1.45' },
+    onChange: async e => { await store.setUserBio(e.target.value); nav.refresh(); } }, store.userBio);
+
   /* ---------- the colour behind your initials ----------
      A dropdown rather than a row of swatches, because the thing being chosen
      has a name and the name is worth reading. Each option is the square
@@ -282,6 +291,12 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
       el('span', { class: 'st-k' }, 'Name'),
       el('div', { style: { marginLeft: 'auto' } }, nameField)),
     el('div', { class: 'st-field' },
+      el('span', { class: 'st-k' }, '@name'),
+      el('div', { style: { marginLeft: 'auto' } }, handleField)),
+    el('div', { class: 'st-field st-pf' },
+      el('span', { class: 'st-k' }, 'Description', el('span', { class: 'st-kd' }, 'A line about you, up to 160 characters')),
+      el('div', { style: { marginLeft: 'auto' } }, bioField)),
+    el('div', { class: 'st-field' },
       el('span', { class: 'st-k' }, 'Profile colour'),
       el('div', { style: { marginLeft: 'auto' } }, colourWrap)),
     mediaRow('avatar', 'Picture', 'A picture or a video — in place of your initials'),
@@ -358,7 +373,7 @@ export function settings(store, nav, page = '', { openLook, newAccount = false }
     el('header', { class: 'head st-subhead' }, back, el('h1', {}, title), note ? el('span', { class: 'sub' }, note) : null),
     el('div', { class: 'st-col' }, ...cards));
 
-  if (page === 'profile') return sub('Profile', 'Your name, picture and banner', profileCard);
+  if (page === 'profile') return sub('Profile', 'Your name, picture and banner', profileHeader(store, { picker }), profileCard);
   if (page === 'accounts') return accountBoard(store, nav, { openNew: newAccount });
   if (page === 'vault') return sub('Vault & data', 'Where your journal lives', vaultCard);
   if (page === 'charts') return sub('Charts & prices', 'OANDA, and stock prices for Markets', oandaKeyCard(), oandaSinceCard(), finnhubKeyCard());

@@ -10,7 +10,7 @@
    ============================================================ */
 import { el, icon, toast } from '../ui.js';
 import * as cd from '../candles.js';
-import { syncOanda } from '../oandasync.js';
+import { syncOanda, syncTrouble } from '../oandasync.js';
 import { ago } from '../wire.js';
 import { logoTile } from './acctlogo.js';
 
@@ -37,7 +37,7 @@ export function oandaSyncButton(store, nav) {
       toast(!r.added && !r.updated ? 'Up to date — nothing new on OANDA'
         : `${r.added ? `${r.added} new` : ''}${r.added && r.updated ? ', ' : ''}${r.updated ? `${r.updated} brought up to date` : ''}${here ? '' : ` in ${r.account.name} — open it from the account switcher at the top`}`);
     } catch (e) {
-      toast(/401|403|unauthori|insufficient/i.test(String(e?.message)) ? cd.explain(e) : (e?.message || 'Could not reach OANDA'), 'bad');
+      toast(syncTrouble(e), 'bad');
     } finally {
       busy = false;
       nav.refresh();

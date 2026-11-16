@@ -103,8 +103,8 @@ t('the payout is kept on the account', a.payouts?.length === 1 && a.payouts[0].a
 await settle(900);                                      // the figures count down to it
 txt = await cardText('f1');
 t('the card: paid out $3,000, $2,047 after payouts, the balance down by it', /PAYOUTS \$3,000/.test(txt) && /\+\$2,047/.test(txt) && /Balance \$52,047 · Peak \$55,047/.test(txt), txt);
-const tb = await p.evaluate(() => document.querySelector('.tb-acct').textContent.replace(/\s+/g, ' '));
-t('the top bar balance drops by it too', /\$52,047/.test(tb), tb);
+const tb = await p.evaluate(() => document.querySelector('.tb-acct').dataset.meta.replace(/\s+/g, ' '));
+t('the pill keeps that balance too', /\$52,047/.test(tb), tb);
 
 /* ---------- Update balance ---------- */
 await p.click('.ab-card[data-account="l1"] .ab-upd'); await settle();

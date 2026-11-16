@@ -154,8 +154,8 @@ t('neither moved the balance by a cent', await p.evaluate(async()=>{
   await store.setIncludeTests(true);
   const c = await import('/js/calc.js');
   return c.equityNow ? true : true;
-}) && /100,000/.test(await p.evaluate(()=>document.querySelector('.acct-meta').textContent)),
-  await p.evaluate(()=>document.querySelector('.acct-meta').textContent));
+}) && /100,000/.test(await p.evaluate(()=>document.querySelector('.tb-acct').dataset.meta)),
+  await p.evaluate(()=>document.querySelector('.tb-acct').dataset.meta));
 
 /* ---------- editing one back ---------- */
 const id = saved.id;

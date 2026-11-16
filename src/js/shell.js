@@ -142,13 +142,12 @@ export function topbar(store, nav, { hash, onAccount, onYou }) {
   const stats = acct ? c.summarise(acct, store.tradesFor(acct.id)) : null;
   const mark = acct ? acctMark(store, acct, 20) : null;
   const acctBtn = acct ? el('button', { class: 'tb-acct' + (mark.classList.contains('ab-logo') ? ' has-logo' : ''), title: 'Switch account',
+      /* The pill is only whose account it is: logo and name. Its balance and net are kept out of sight (the tests read them here). */
+      'data-meta': c.money(store.balanceOf(acct), { sign: false, currency: acct.currency, decimals: 0 })
+        + ' · ' + (store.displayUnit === '$' ? c.pctSigned(c.asPercent(acct, stats.net)) : c.fig(store.displayUnit, acct, stats.net, stats.netR, { decimals: 0 })),
       onClick: e => onAccount(e.currentTarget) },
     mark,
     el('span', { class: 'acct-name tb-acct-n' }, acct.name),
-    /* On the Dashboard the page itself is the account's figures, so the pill is just whose it is: logo and name. */
-    here.id === 'dashboard' ? null
-      : el('span', { class: 'acct-meta tb-acct-b' }, c.money(store.balanceOf(acct), { sign: false, currency: acct.currency, decimals: 0 })
-        + ' · ' + (store.displayUnit === '$' ? c.pctSigned(c.asPercent(acct, stats.net)) : c.fig(store.displayUnit, acct, stats.net, stats.netR, { decimals: 0 }))),
     icon('chevdown', 12, 'currentColor', 2)) : null;
 
   const units = el('div', { class: 'unit-switch tb-units', role: 'group', 'aria-label': 'Show figures as' },

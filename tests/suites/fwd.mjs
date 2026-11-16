@@ -99,7 +99,7 @@ const scoped = async () => p.evaluate(async()=>{
   const acct = store.activeAccount;
   return { counted: store.tradesFor(acct.id).length,
            pairs: store.tradesFor(acct.id).map(t=>t.pair).join(','),
-           sidebar: document.querySelector('.acct-meta').textContent,
+           sidebar: document.querySelector('.tb-acct').dataset.meta,
            navCount: document.querySelector('.tb-tab[data-section="journal"]')?.dataset.count };
 });
 let s = await scoped();

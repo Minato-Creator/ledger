@@ -68,13 +68,37 @@ export async function setKey(key, live = false) {
 /* The desktop app asks its own shell, which only ever calls OANDA. In a
    browser the page asks OANDA directly — which works only where OANDA lets
    a web page call it. */
-export async function call(path, cred) {
+async function callOnce(path, cred) {
   if (isTauri()) return window.__TAURI__.core.invoke('fetch_oanda', { path, token: cred.key, live: !!cred.live });
   const host = cred.live ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
   const res = await fetch(host + path, { headers: { Authorization: `Bearer ${cred.key}`, 'Accept-Datetime-Format': 'UNIX' } });
   const text = await res.text();
   if (!res.ok) throw new Error(`OANDA said ${res.status}: ${text.slice(0, 200)}`);
   return text;
+}
+
+/* Now and then a request to OANDA does not get through: a connection that drops, a moment with no answer,
+   or OANDA busy (429) or briefly down (500–504). Everything Laminar asks of OANDA is a read, so asking
+   again is safe: three tries in all, a short wait before each new one. Any other answer from OANDA (a key
+   it will not take, an account it does not know) is final, and so is a request Laminar itself refuses. */
+export const RETRY_WAITS = [800, 2000];
+export function worthAgain(err) {
+  const m = String(err?.message || err || '');
+  if (/^OANDA said (\d+)/.test(m)) return /^OANDA said (429|500|502|503|504)\b/.test(m);
+  return !/does not look like an OANDA key|not an instrument name|not an account number|not something Laminar reads|not a request Laminar makes/.test(m);
+}
+export async function call(path, cred) {
+  for (let i = 0; ; i++) {
+    try { return await callOnce(path, cred); }
+    catch (e) {
+      if (i >= RETRY_WAITS.length || !worthAgain(e)) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        err.tries = i + 1;
+        throw err;
+      }
+      await new Promise(r => setTimeout(r, RETRY_WAITS[i]));
+    }
+  }
 }
 
 /** OANDA's candles, as [unix seconds, open, high, low, close] rows. */
@@ -97,7 +121,10 @@ export function explain(err) {
   const m = String(err?.message || err || '');
   if (/401|403|unauthori|invalid.*token|insufficient/i.test(m)) return 'OANDA did not accept that key. Check it in Settings — and whether it is a demo (practice) or live key.';
   if (/404|instrument/i.test(m)) return 'OANDA has no prices for this instrument.';
-  if (/failed to fetch|network|dns|timed? ?out|connection/i.test(m)) return 'Could not reach OANDA. Check your internet connection.';
+  if (/^OANDA said 429/.test(m)) return 'OANDA is getting too many requests right now. Wait a minute and try again.';
+  if (/^OANDA said 5\d\d/.test(m)) return 'OANDA’s servers are having trouble right now. Try again in a minute.';
+  if (/failed to fetch|network|dns|timed? ?out|connection|tls|io error|reset|refused|eof/i.test(m))
+    return `Could not reach OANDA${err?.tries > 1 ? ` (tried ${err.tries} times)` : ''}. Check your internet connection and try again.`;
   return m || 'Something went wrong getting prices.';
 }
 

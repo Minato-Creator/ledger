@@ -157,7 +157,7 @@ await p.screenshot({ path: OUT+'/glass-light.png' });
 /* ---------- a video of your own ---------- */
 await p.evaluate(()=>location.hash='#/settings'); await p.waitForTimeout(400);
 await openLook(p, 'custom');
-await p.setInputFiles('.lk input[type=file][accept="video/*"]', FIX + '/share-clip.mp4');
+await p.setInputFiles('.lk input[type=file][accept="image/*,video/*"]', FIX + '/share-clip.mp4');
 await p.waitForFunction(() => (JSON.parse(window.__files.get('data/accounts.json')).bgVideos || []).length === 1, null, { timeout: 15000 }).catch(() => {});
 await p.waitForTimeout(800);
 const A = await p.evaluate(()=>JSON.parse(window.__files.get('data/accounts.json')));
@@ -174,6 +174,52 @@ const A2 = await p.evaluate(()=>JSON.parse(window.__files.get('data/accounts.jso
 t('removing it takes it out of the list and the folder', (A2.bgVideos || []).length === 0 && await p.evaluate(f => !window.__files.has(f), mine?.file));
 await p.waitForTimeout(300);   // the picture fades out (650 ms) rather than vanishing
 t('…and nothing plays in its place', !A2.background && !(await layer()).there);
+
+/* ---------- a picture of your own (15 Nov) ---------- */
+t('the tile says a photo or a video', (await p.textContent('.lk-bg.is-add')).trim() === 'Add photo or video');
+await p.setInputFiles('.lk input[type=file][accept="image/*,video/*"]', FIX + '/share-pic.jpg');
+await p.waitForFunction(() => (JSON.parse(window.__files.get('data/accounts.json')).bgVideos || []).length === 1, null, { timeout: 15000 }).catch(() => {});
+await p.waitForTimeout(1200);
+const A3 = await p.evaluate(()=>JSON.parse(window.__files.get('data/accounts.json')));
+const pic = A3.bgVideos?.[0];
+t('a picture of your own is kept in the vault too', !!pic && pic.kind === 'image' && /^screenshots\/bgvideo-[a-z0-9]+\.jpg$/.test(pic.file) && await p.evaluate(f => window.__files.get(f) instanceof Blob, pic.file), JSON.stringify(pic && { ...pic, thumb: !!pic.thumb }));
+t('…named from its file, with a still', pic?.name === 'Share Pic' && /^data:image\/jpeg/.test(pic?.thumb || ''));
+const shown = await p.evaluate(() => { const s = [...document.querySelectorAll('.bg-layer > .bg-slot, #bg-layer > .bg-slot, .bg-slot')].filter(x => !x.closest('.lk')).pop(); return s ? { img: getComputedStyle(s).backgroundImage, video: !!s.querySelector('video'), in: s.classList.contains('is-in') } : null; });
+t('…and it is what shows now: the picture itself, whole, with nothing playing', A3.background === 'yours:' + pic?.id && !!shown && /url\("blob:/.test(shown.img) && !shown.video, JSON.stringify(shown));
+t('a backup carries it', await p.evaluate(async f => (await import('/js/store.js')).store.shotNames().includes(f), pic?.file));
+t('its tile is in the list, with its still', await p.evaluate(id => { const n = document.querySelector(`.lk-bg[data-bgid="yours:${id}"]`); return !!n && /url\(/.test(getComputedStyle(n).backgroundImage); }, pic?.id));
+/* read back from the folder (as at start-up), it is still a picture and not something to play */
+const again = await p.evaluate(async id => { const m = await import('/js/store.js'); const url = await m.store.bgVideoUrl(id); const bg = m.backgroundOf('yours:' + id); return { url: /^blob:/.test(url || ''), image: bg?.image === true, whole: bg?.poster === bg?.src }; }, pic?.id);
+t('read back from the folder it is still a picture, shown whole', again.url && again.image && again.whole, JSON.stringify(again));
+await p.screenshot({ path: OUT+'/glass-picture.png' });
+await p.hover(`.lk-bg[data-bgid="yours:${pic?.id}"]`);
+await p.click(`.lk-bg[data-bgid="yours:${pic?.id}"] .lk-bg-x`); await p.waitForTimeout(150);
+await p.click(`.lk-bg[data-bgid="yours:${pic?.id}"] .lk-bg-x`); await p.waitForTimeout(900);
+const A4 = await p.evaluate(()=>JSON.parse(window.__files.get('data/accounts.json')));
+t('removing it takes it out of the list and the folder', (A4.bgVideos || []).length === 0 && await p.evaluate(f => !window.__files.has(f), pic?.file) && !A4.background);
+
+/* ---------- the fade's two colours: the same picker as the chart's, never the system's box (15 Nov) ---------- */
+await p.click('.lk-bg[data-bgid="fade"]'); await p.waitForTimeout(1200);
+t('Fade shows its two colours as buttons', await p.locator('.lk-fade-c[data-fade]').count() === 2 && await p.locator('.lk input[type=color]').count() === 0);
+await p.click('.lk-fade-c[data-fade="a"]'); await p.waitForTimeout(250);
+const palTop = await p.evaluate(() => { const c = document.querySelector('.tv-colour'); if (!c) return null; const r = c.getBoundingClientRect(); const hit = document.elementFromPoint(r.x + 20, r.y + 20); return { rows: c.querySelectorAll('.tv-pal-row').length, opacity: !!c.querySelector('.tv-op-range'), onTop: c.contains(hit) }; });
+t('pressing one opens the palette over the sheet, without an opacity', !!palTop && palTop.rows === 8 && !palTop.opacity && palTop.onTop, JSON.stringify(palTop));
+await p.click('.tv-colour .tv-pal-plus'); await p.waitForTimeout(150);
+await p.fill('.tv-cc-hex', '#204060'); await p.waitForTimeout(1300);
+await p.screenshot({ path: OUT+'/fade-picker.png' });
+let fd = await p.evaluate(()=>JSON.parse(window.__files.get('data/accounts.json')).fade);
+t('a code typed in changes the fade', fd?.a === '#204060', JSON.stringify(fd));
+t('…and the sheet is still open, the button showing it', await p.evaluate(() => document.querySelector('.lk-fade-c[data-fade="a"] b')?.textContent === '#204060' && !!document.querySelector('.tv-colour .tv-cc')));
+const svR = await p.evaluate(() => { const r = document.querySelector('.tv-cc-sv').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+await p.mouse.move(svR.x + 20, svR.y + 20); await p.mouse.down(); await p.mouse.move(svR.x + svR.w / 2, svR.y + svR.h / 2, { steps: 5 }); await p.waitForTimeout(300);
+const mid = await p.evaluate(()=>JSON.parse(window.__files.get('data/accounts.json')).fade.a);
+await p.mouse.up(); await p.waitForTimeout(1300);
+fd = await p.evaluate(()=>JSON.parse(window.__files.get('data/accounts.json')).fade);
+t('dragging in the square changes it once, when let go', mid === '#204060' && fd.a !== '#204060' && /^#[0-9A-F]{6}$/.test(fd.a), JSON.stringify([mid, fd.a]));
+await p.keyboard.press('Escape'); await p.waitForTimeout(500);
+await openLook(p, 'custom').catch(() => {});
+await p.click('.lk-bg.is-none'); await p.waitForTimeout(900);
+t('the picker is gone with it', await p.locator('.tv-colour').count() === 0);
 await closeLook(p);
 
 // turning the video off leaves glass alone

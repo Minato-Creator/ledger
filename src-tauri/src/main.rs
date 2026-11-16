@@ -500,6 +500,21 @@ async fn fetch_oanda(path: String, token: String, live: bool) -> Result<String, 
     off_main(move || fetch_oanda_now(&path, &token, live)).await
 }
 
+/// One connection to OANDA, kept open and used again, rather than a new one
+/// for every request. A sync asks a dozen things in a row and the charts ask
+/// for candles beside it; OANDA asks for no more than two new connections a
+/// second, and a burst of them is what made it sometimes refuse ("could not
+/// reach OANDA"). Kept-alive connections are what OANDA recommends.
+fn oanda_agent() -> &'static ureq::Agent {
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(10))
+            .max_idle_connections_per_host(4)
+            .build()
+    })
+}
+
 fn fetch_oanda_now(path: &str, token: &str, live: bool) -> Result<String, String> {
     check_oanda_path(path)?;
     let token = token.trim();
@@ -507,8 +522,8 @@ fn fetch_oanda_now(path: &str, token: &str, live: bool) -> Result<String, String
         return Err("that key does not look like an OANDA key".into());
     }
     let host = if live { "https://api-fxtrade.oanda.com" } else { "https://api-fxpractice.oanda.com" };
-    let res = ureq::get(&format!("{host}{path}"))
-        .timeout(std::time::Duration::from_secs(20))
+    let res = oanda_agent().get(&format!("{host}{path}"))
+        .timeout(std::time::Duration::from_secs(30))
         .set("User-Agent", "Laminar")
         .set("Authorization", &format!("Bearer {token}"))
         .set("Accept-Datetime-Format", "UNIX")

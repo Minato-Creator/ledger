@@ -653,9 +653,26 @@ await p.click('.tv-dtab[data-tab="canvas"]'); await settle(60);
 await p.click('.tv-cross-c'); await settle(80);
 t('a colour opens TradingView’s palette: greys, ten hues and their shades, +, opacity', await p.evaluate(() => {
   const c = document.querySelector('.tv-colour'); if (!c) return false;
-  return c.querySelectorAll('.tv-pal-row').length === 8 && c.querySelectorAll('.tv-pal-c').length === 80 && !!c.querySelector('.tv-pal-plus input[type=color]') && !!c.querySelector('.tv-op-range');
+  return c.querySelectorAll('.tv-pal-row').length === 8 && c.querySelectorAll('.tv-pal-c').length === 80 && !!c.querySelector('button.tv-pal-plus') && !!c.querySelector('.tv-op-range') && !document.querySelector('input[type=color]');
 }));
 await shot('palette');
+/* + : any colour, the way TradingView does it — its code and Add, a square, the hues down the side */
+await p.click('.tv-pal-plus'); await settle(120);
+t('+ opens any colour: its code, Add, a square and the hues, and not the system’s box', await p.evaluate(() => { const c = document.querySelector('.tv-colour .tv-cc'); return !!c && !!c.querySelector('.tv-cc-hex') && c.querySelector('.tv-cc-add').textContent === 'Add' && !!c.querySelector('.tv-cc-sv') && !!c.querySelector('.tv-cc-hue') && !document.querySelector('input[type=color]'); }));
+const ccBox = async s => p.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }, s);
+const hueB = await ccBox('.tv-cc-hue'), svB = await ccBox('.tv-cc-sv');
+await p.mouse.click(hueB.x + hueB.w / 2, hueB.y + hueB.h * (240 / 360)); await settle(60);   // blue
+await p.mouse.move(svB.x + 10, svB.y + 10); await p.mouse.down(); await p.mouse.move(svB.x + svB.w + 6, svB.y - 6, { steps: 4 }); await p.mouse.up(); await settle(60);   // full strength, full brightness
+t('the hues and the square pick it: pure blue', (await p.inputValue('.tv-cc-hex')) === '#0000FF', await p.inputValue('.tv-cc-hex'));
+await p.mouse.click(svB.x + svB.w / 2, svB.y + svB.h / 2); await settle(60);
+const mid = await p.inputValue('.tv-cc-hex');
+t('…halfway in and down is a muted, darker blue', /^#[0-9A-F]{6}$/.test(mid) && (() => { const n = parseInt(mid.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, bl = n & 255; return Math.abs(r - 64) < 6 && Math.abs(g - 64) < 6 && Math.abs(bl - 128) < 6; })(), mid);
+await p.fill('.tv-cc-hex', '#12ab56'); await settle(60);
+t('a code typed in is taken, and the dot goes to it', await p.evaluate(() => { const d = document.querySelector('.tv-cc-dot'); return getComputedStyle(d).backgroundColor === 'rgb(18, 171, 86)' && getComputedStyle(document.querySelector('.tv-cc-chip')).backgroundColor === 'rgb(18, 171, 86)'; }));
+await p.click('.tv-cc-add'); await settle(120);
+t('Add keeps it among your colours and goes back to the palette, with it picked', await p.evaluate(() => { const y = document.querySelector('.tv-colour .tv-pal-foot .tv-pal-c.is-yours'); return !!y && y.dataset.c === '#12AB56' && y.classList.contains('is-on') && !document.querySelector('.tv-cc') && JSON.parse(localStorage.getItem('laminar:colours')).includes('#12AB56'); }));
+await p.click('.tv-pal-c.is-yours', { button: 'right' }); await settle(80);
+t('a right-click takes one of yours away again', await p.evaluate(() => !document.querySelector('.tv-pal-c.is-yours') && !JSON.parse(localStorage.getItem('laminar:colours')).length));
 await p.click('.tv-pal-c[data-c="#9C27B0"]'); await settle(60);
 await p.click('.tv-dhead'); await settle(60);
 await p.selectOption('.tv-cross-s', 'solid'); await p.selectOption('.tv-cross-w', '2'); await settle(60);
@@ -1021,6 +1038,15 @@ t('Edit lays the chart on the left, a little over half the page', lay && lay.sha
 t('…a normal shape, not a stretched one', lay && lay.shape > 1.3 && lay.shape < 2.6, String(lay?.shape));
 t('…the figures and the notes under it, the form beside it in one column', lay && lay.under && lay.beside && !lay.inForm && lay.cols === 1, JSON.stringify(lay));
 t('…and the form is what scrolls', lay && lay.scrolls);
+/* a narrower window: one column, each part below the last, nothing over anything */
+const wide = p.viewportSize();
+await p.setViewportSize({ width: 1000, height: 820 }); await settle(500);
+const narrow = await p.evaluate(() => { const q = x => document.querySelector(x).getBoundingClientRect(); const c = q('.tf-side .tc'), st = q('.tf-side .trade-strip'), n = q('.tf-side .tf-notes'), side = q('.tf-side'), f = q('.tf-split > .trade-form'), sp = document.querySelector('.tf-split');
+  return { chart: Math.round(c.height), inSide: n.bottom <= side.bottom + 1, order: st.top >= c.bottom && n.top >= st.bottom && f.top >= n.bottom, formBelowSide: f.top >= side.bottom, scrolls: sp.scrollHeight > sp.clientHeight + 20 }; });
+t('on a narrower window the chart, figures and notes stand above the form, nothing behind anything', narrow.chart >= 280 && narrow.inSide && narrow.order && narrow.formBelowSide, JSON.stringify(narrow));
+t('…and the page scrolls down through them', narrow.scrolls);
+await p.screenshot({ path: OUT + '/edit-narrow.png' });
+await p.setViewportSize(wide); await settle(500);
 /* the labels are off until the pointer is over the position, and go again when it leaves */
 const inked = () => p.evaluate(() => { let h = 0; for (const cv of document.querySelectorAll('.tc canvas')) { const u = cv.toDataURL(); for (let i = 0; i < u.length; i += 7) h = (h * 31 + u.charCodeAt(i)) | 0; } return h; });
 const overPos = await p.evaluate(() => { const c = document.querySelector('.tc'), d = c.__chart.position(), q = c.__chart.xy((d.pts[0].t + d.pts[1].t) / 2, (d.pts[0].p + d.tp) / 2);

@@ -300,6 +300,47 @@ const be = await judged(`oanda-${ACC}-2010`), lost = await judged(`oanda-${ACC}-
 t('stopped at break-even, a few dollars either way: a break-even', be?.stop === 4067.73 && Math.abs(be.r) < 0.1 && be.outcome === 'breakeven', JSON.stringify(be));
 t('stopped at the stop: a loss of 1R', lost && Math.abs(lost.r + 1) < 0.01 && lost.outcome === 'loss', JSON.stringify(lost));
 
+console.log('  -- when OANDA does not answer every time --');
+/* a request that does not get through is asked again; OANDA busy or briefly down, the same */
+let drop = 0, dropWith = 'abort';
+const flaky = async route => {
+  const url = new URL(route.request().url());
+  if (url.pathname === '/v3/accounts' && drop > 0) { drop--; SEEN.push({ method: 'GET', host: url.host, path: '/v3/accounts', auth: route.request().headers().authorization, dropped: true });
+    return dropWith === 'abort' ? route.abort('connectionreset') : route.fulfill({ status: dropWith, headers: { 'access-control-allow-origin': '*' }, body: '{"errorMessage":"busy"}' }); }
+  return oanda(route);
+};
+await ctx.unroute(/https:\/\/api-fx(practice|trade)\.oanda\.com\/.*/, oanda);
+await ctx.route(/https:\/\/api-fx(practice|trade)\.oanda\.com\/.*/, flaky);
+const asked = () => SEEN.filter(x => x.path === '/v3/accounts').length;
+const trySync = () => p.evaluate(async () => { const { syncOanda, syncTrouble } = await import('/js/oandasync.js'); const { store } = await import('/js/store.js');
+  try { await syncOanda(store); return { ok: true }; } catch (e) { return { ok: false, says: syncTrouble(e) }; } });
+let n0 = asked(); drop = 2; dropWith = 'abort';
+let res = await trySync();
+t('a connection dropped twice is asked again, and the sync goes through', res.ok && asked() - n0 === 3, JSON.stringify(res) + ' asked ' + (asked() - n0));
+n0 = asked(); drop = 1; dropWith = 503;
+res = await trySync();
+t('OANDA briefly down (503) is asked again too', res.ok && asked() - n0 === 2, JSON.stringify(res));
+n0 = asked(); drop = 1; dropWith = 429;
+res = await trySync();
+t('…and OANDA busy (429)', res.ok && asked() - n0 === 2, JSON.stringify(res));
+n0 = asked(); drop = 99; dropWith = 'abort';
+res = await trySync();
+t('never getting through: three tries, then it says so in plain words', !res.ok && asked() - n0 === 3 && /Could not reach OANDA \(tried 3 times\)/.test(res.says), JSON.stringify(res) + ' asked ' + (asked() - n0));
+n0 = asked(); drop = 99; dropWith = 503;
+res = await trySync();
+t('OANDA down the whole time: three tries, and it says OANDA is having trouble', !res.ok && asked() - n0 === 3 && /having trouble/.test(res.says), JSON.stringify(res));
+n0 = asked(); drop = 99; dropWith = 401;
+res = await trySync();
+t('a key it will not take is not asked again', !res.ok && asked() - n0 === 1 && /did not accept that key/.test(res.says), JSON.stringify(res));
+drop = 0;
+/* two at once (the quiet sync on opening the journal, and the button) are one sync */
+n0 = asked();
+const both = await p.evaluate(async () => { const { syncOanda } = await import('/js/oandasync.js'); const { store } = await import('/js/store.js');
+  const a = syncOanda(store), b = syncOanda(store); const same = a === b; await Promise.all([a, b]); return same; });
+t('a second sync asked for while one runs waits for that one: OANDA is asked once', both && asked() - n0 === 1, String(asked() - n0));
+await ctx.unroute(/https:\/\/api-fx(practice|trade)\.oanda\.com\/.*/, flaky);
+await ctx.route(/https:\/\/api-fx(practice|trade)\.oanda\.com\/.*/, oanda);
+
 console.log('  -- a key OANDA will not take --');
 await p.unroute?.(/x/);
 await ctx.unroute(/https:\/\/api-fx(practice|trade)\.oanda\.com\/.*/, oanda);

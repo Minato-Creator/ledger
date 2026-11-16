@@ -14,7 +14,9 @@ import { el, svg, icon, toast, confirmButton, MARK_G } from '../ui.js';
 import * as c from '../calc.js';
 import { sheet } from '../sheet.js';
 import { BACKGROUNDS, findBackground, FADES, fadeCss } from '../backgrounds.js';
-import { probeVideo, nameFrom } from '../clip.js';
+import { probeVideo, probeImage, nameFrom } from '../clip.js';
+import { openPicker, closeColour, parseColour, toHex } from '../chart/colour.js';
+import { prepare as prepareImage } from '../shots.js';
 import { playable, backgroundOf, bgSlot, bgSwap, bgClear } from '../store.js';
 import { glide } from '../shell.js';
 import {
@@ -267,21 +269,25 @@ export function openAppearance(store, nav, { tab } = {}) {
   function customTab() {
     const bg = store.hasBackground ? store.background : '';
     const mine = store.bgVideos;
-    const upload = el('input', { type: 'file', accept: 'video/*', multiple: true, hidden: true,
+    const upload = el('input', { type: 'file', accept: 'image/*,video/*', multiple: true, hidden: true,
       onChange: async e => {
         const files = [...e.target.files]; e.target.value = '';
         for (const f of files) {
-          if (!/^video\//.test(f.type)) { toast(`${f.name} is not a video`, 'warn'); continue; }
-          if (f.size > 100 * 1024 * 1024) { toast(`${f.name} is over 100 MB — trim it first`, 'warn'); continue; }
+          const kind = /^video\//.test(f.type) ? 'video' : /^image\//.test(f.type) ? 'image' : null;
+          if (!kind) { toast(`${f.name} is not a picture or a video`, 'warn'); continue; }
+          if (kind === 'video' && f.size > 100 * 1024 * 1024) { toast(`${f.name} is over 100 MB — trim it first`, 'warn'); continue; }
           toast(`Adding ${f.name}…`);
           try {
-            const info = await probeVideo(f);
-            if (!info) { toast(`${f.name} could not be played here`, 'bad'); continue; }
-            const ext = (f.name.match(/\.([a-z0-9]+)$/i)?.[1] || 'mp4').toLowerCase();
+            let blob = f, type = f.type, ext = (f.name.match(/\.([a-z0-9]+)$/i)?.[1] || (kind === 'video' ? 'mp4' : 'jpg')).toLowerCase();
+            /* a picture is brought down to a size a screen can show; a GIF is kept as it is, so it still moves */
+            if (kind === 'image' && type !== 'image/gif') { const p = await prepareImage(f); blob = p.blob; type = 'image/jpeg'; ext = 'jpg'; }
+            const info = kind === 'video' ? await probeVideo(blob) : await probeImage(blob);
+            if (!info) { toast(`${f.name} could not be ${kind === 'video' ? 'played' : 'read'} here`, 'bad'); continue; }
             let introduced = false;
-            await change(async () => { ({ introduced } = await store.addBgVideo(f, { name: nameFrom(f.name), type: f.type, ext, dur: info.dur, thumb: info.thumb })); });
-            toast(introduced ? 'Playing behind Laminar — Clear glass is on so you can see it' : 'Playing behind Laminar now');
-          } catch (err) { toast(err.message || 'That video could not be added', 'bad'); }
+            await change(async () => { ({ introduced } = await store.addBgVideo(blob, { name: nameFrom(f.name), kind, type, ext, dur: info.dur, thumb: info.thumb })); });
+            const what = kind === 'video' ? 'Playing behind Laminar' : 'Behind Laminar';
+            toast(introduced ? `${what} — Clear glass is on so you can see it` : `${what} now`);
+          } catch (err) { toast(err.message || `That ${kind === 'video' ? 'video' : 'picture'} could not be added`, 'bad'); }
         }
       } });
 
@@ -292,7 +298,7 @@ export function openAppearance(store, nav, { tab } = {}) {
           style: extra.image ? { backgroundImage: extra.image } : poster ? { backgroundImage: `url("${poster}")` } : {},
           onClick: e => { if (e.target.closest('.lk-bg-x')) return; if (bg !== id) change(async () => {
             const introduced = await store.setBackground(id);
-            if (introduced) toast('Clear glass turned on so the video shows through — change it under Glass');
+            if (introduced) toast('Clear glass turned on so the background shows through — change it under Glass');
           }, null, { settle: BG_SETTLE }); } },
         el('span', { class: 'lk-bg-n' }, label), extra.remove || null);
       if (src) {
@@ -309,7 +315,7 @@ export function openAppearance(store, nav, { tab } = {}) {
       }
       return node;
     };
-    const removeBtn = v => confirmButton({ label: icon('close', 11, 'currentColor', 2.2), armedLabel: 'Remove', title: 'Remove this video',
+    const removeBtn = v => confirmButton({ label: icon('close', 11, 'currentColor', 2.2), armedLabel: 'Remove', title: v.kind === 'image' ? 'Remove this picture' : 'Remove this video',
       className: 'lk-bg-x', armedClassName: 'lk-bg-x is-armed',
       onConfirm: () => change(async () => { await store.removeBgVideo(v.id); toast('Removed'); }) });
 
@@ -324,11 +330,15 @@ export function openAppearance(store, nav, { tab } = {}) {
     /* Fade: a few to start from, and the two colours themselves */
     function fadeRow() {
       const f = store.fade;
-      const pick = (which, label) => el('label', { class: 'lk-fade-c', title: label },
-        el('span', { class: 'lk-fade-sw', style: { background: f[which] } }),
-        el('span', { class: 'lk-fade-k' }, label, el('b', {}, f[which])),
-        el('input', { type: 'color', value: f[which].toLowerCase(), 'aria-label': label,
-          onChange: e => change(() => store.setFade({ [which]: e.target.value.toUpperCase() }), null, { settle: BG_SETTLE }) }));
+      /* the same picker as the chart's colours; a dragged colour is applied when it is let go */
+      const pick = (which, label) => {
+        const sw = el('span', { class: 'lk-fade-sw', style: { background: f[which] } }), code = el('b', {}, f[which]);
+        const b = el('button', { type: 'button', class: 'lk-fade-c', title: label, 'data-fade': which,
+          onClick: () => openPicker(b, store.fade[which], v => { const hex = toHex(parseColour(v)); if (hex === store.fade[which]) return;
+            change(() => store.setFade({ [which]: hex }), null, { settle: BG_SETTLE }); }, { opacity: false, live: false }) },
+          sw, el('span', { class: 'lk-fade-k' }, label, code));
+        return b;
+      };
       return el('div', { class: 'lk-fade' },
         el('div', { class: 'lk-fade-presets' }, ...FADES.map(([name, a, b]) => {
           const on = f.a === a && f.b === b;
@@ -360,15 +370,15 @@ export function openAppearance(store, nav, { tab } = {}) {
     }
 
     return el('div', {},
-      section('Background', 'A video on a loop behind the whole journal, muted.',
+      section('Background', 'A picture, or a video on a loop and muted, behind the whole journal.',
         preview(),
         el('div', { class: 'lk-bgs' },
           tile('', 'None', null, null, { cls: ' is-none' }),
           tile('fade', 'Fade', null, null, { image: fadeCss(store.fade) }),
           ...BACKGROUNDS.map(b => tile(b.id, b.name, b.poster, () => playable(b.src))),
-          ...mine.map(v => tile('yours:' + v.id, v.name, v.thumb, () => store.bgVideoUrl(v.id), { remove: removeBtn(v) })),
-          el('button', { class: 'lk-bg is-add', onClick: () => upload.click(), title: 'Add a video of your own' },
-            icon('plus', 18, 'currentColor', 1.8), el('span', { class: 'lk-bg-n' }, 'Add video')),
+          ...mine.map(v => tile('yours:' + v.id, v.name, v.thumb, v.kind === 'image' ? null : () => store.bgVideoUrl(v.id), { remove: removeBtn(v) })),
+          el('button', { class: 'lk-bg is-add', onClick: () => upload.click(), title: 'Add a picture or a video of your own' },
+            icon('plus', 18, 'currentColor', 1.8), el('span', { class: 'lk-bg-n' }, 'Add photo or video')),
           upload),
         mine.length ? el('div', { class: 'lk-note' }, 'Yours are kept in your journal folder, so they go wherever it goes.') : null,
         bg === 'fade' ? fadeRow() : null,
@@ -447,7 +457,7 @@ export function openAppearance(store, nav, { tab } = {}) {
 
   let api = null;
   paint({ fresh: true });
-  api = sheet({ cls: 'is-look', body, label: 'Appearance', onClose: () => nav.refresh() });
+  api = sheet({ cls: 'is-look', body, label: 'Appearance', onClose: () => { closeColour(); nav.refresh(); } });
 }
 
 /* The dashboard in outline, for the background's preview: the shapes of the

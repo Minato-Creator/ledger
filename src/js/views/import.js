@@ -11,7 +11,7 @@ import { el, icon, toast } from '../ui.js';
 import { pairMark } from '../flags.js';
 import * as c from '../calc.js';
 import { acctMark, logoTile } from './acctlogo.js';
-import { syncOanda } from '../oandasync.js';
+import { syncOanda, syncTrouble } from '../oandasync.js';
 import * as cd from '../candles.js';
 import { ago } from '../wire.js';
 import { parseBrokerCSV, instrumentsIn, moneyFor, suggestedPointValue, guessAssetClass } from '../broker.js';
@@ -334,7 +334,7 @@ function oandaCard(store, nav) {
       if (r.added && here) nav.go('#/trades'); else paint();
     } catch (e) {
       busy = false; paint();
-      toast(/401|403|unauthori|insufficient/i.test(String(e?.message)) ? cd.explain(e) : (e?.message || 'Could not reach OANDA'), 'bad');
+      toast(syncTrouble(e), 'bad');
     }
   }
   paint();

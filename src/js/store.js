@@ -134,7 +134,8 @@ export function bgSlot(bg, { still = false } = {}) {
   s.dataset.key = bg.fade ? 'fade:' + fadeCss(bg.fade) : bg.src;
   if (bg.fade) { s.style.backgroundImage = fadeCss(bg.fade); return s; }
   if (bg.poster) { s.style.backgroundImage = `url("${bg.poster}")`; s.dataset.poster = bg.poster; }
-  if (still) return s;
+  /* a picture of your own is its own still: nothing to play */
+  if (still || bg.image) return s;
   const v = document.createElement('video');
   v.muted = true; v.loop = true; v.playsInline = true; v.autoplay = true; v.preload = 'auto';
   v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.disablePictureInPicture = true;
@@ -358,7 +359,7 @@ const yourUrls = new Map();
 const profileUrls = new Map();
 /* the share sheet's own clips, read once: src -> Promise<Blob|null> */
 const builtinBlobs = new Map();
-export function rememberYourBackground(id, url, poster) { yourUrls.set(id, { url, poster }); }
+export function rememberYourBackground(id, url, poster, image = false) { yourUrls.set(id, { url, poster, image }); }
 /* The two-colour fade (Appearance → Background → Fade): no clip, nothing
    held down behind the writing unless you Dim it — the colours are yours. */
 function fadeBackground(fade) {
@@ -372,7 +373,8 @@ export function backgroundOf(value, fade = FADE) {
 function yourBackground(value) {
   const id = String(value || '').startsWith('yours:') ? String(value).slice(6) : null;
   const got = id && yourUrls.get(id);
-  return got ? { id: 'yours', src: got.url, poster: got.poster, scrim: 0.4 } : null;
+  /* a picture is shown whole, not as its small still */
+  return got ? { id: 'yours', src: got.url, poster: got.image ? got.url : got.poster, image: !!got.image, scrim: 0.4 } : null;
 }
 
 /* `pale` says what the pale cards are in this look: pale on Graphite, dark on
@@ -1320,6 +1322,18 @@ class Store {
     await this.save('accounts');
   }
 
+  /* Your @name and a line about you, for the profile card (views/profilecard.js). */
+  get userHandle() { return this.data.accounts.userHandle || ''; }
+  async setUserHandle(h) {
+    this.data.accounts.userHandle = String(h || '').toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9._]/g, '').slice(0, 24);
+    await this.save('accounts');
+  }
+  get userBio() { return this.data.accounts.userBio || ''; }
+  async setUserBio(t) {
+    this.data.accounts.userBio = String(t || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    await this.save('accounts');
+  }
+
   /* The colour behind your initials. A display preference like the theme, so
      it sits with the account list rather than inside any one account — the
      name at the foot of the sidebar is yours, not the account's. Journals
@@ -1572,7 +1586,7 @@ class Store {
       const b = await fs.readImage(v.file);
       if (!b) return null;
       const url = URL.createObjectURL(new Blob([b], { type: v.type || 'video/mp4' }));
-      rememberYourBackground(id, url, v.thumb || '');
+      rememberYourBackground(id, url, v.thumb || '', v.kind === 'image');
       return url;
     } catch { return null; }
   }
@@ -1588,10 +1602,12 @@ class Store {
     const file = `${SHOTS}/bgvideo-${id.slice(4)}.${ext}`;
     await fs.ensureDir(SHOTS);
     await fs.writeImage(file, blob);
-    const entry = { id, file, name: String(meta.name || 'Video').slice(0, 40), type: meta.type || 'video/mp4',
-                    dur: Number(meta.dur) || 0, thumb: meta.thumb || '', addedAt: new Date().toISOString() };
+    /* a picture goes the same way as a video (same list, same file naming, so backups and clean-up cover it): kind says which */
+    const image = meta.kind === 'image';
+    const entry = { id, file, name: String(meta.name || (image ? 'Picture' : 'Video')).slice(0, 40), type: meta.type || (image ? 'image/jpeg' : 'video/mp4'),
+                    dur: Number(meta.dur) || 0, thumb: meta.thumb || '', addedAt: new Date().toISOString(), ...(image ? { kind: 'image' } : {}) };
     this.data.accounts.bgVideos = [...this.bgVideos, entry];
-    rememberYourBackground(id, URL.createObjectURL(new Blob([blob], { type: entry.type })), entry.thumb);
+    rememberYourBackground(id, URL.createObjectURL(new Blob([blob], { type: entry.type })), entry.thumb, image);
     const introduced = await this.setBackground('yours:' + id);
     return { entry, introduced };
   }

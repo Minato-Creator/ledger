@@ -161,7 +161,25 @@ const FILLS = ['stopLoss', 'takeProfit', 'riskPercent'];
  * Bring the account's trades in. Returns { added, updated, open, account }.
  * Throws with a plain-words message when it cannot.
  */
-export async function syncOanda(store, { onStep } = {}) {
+/* One sync at a time: the Journal's button, the import page and the quiet sync when the journal opens all
+   come here, and a second asking while one runs waits for that one instead of starting its own beside it
+   (which doubled every request to OANDA and could write the trades twice over). */
+let running = null;
+export function syncOanda(store, opts = {}) {
+  if (running) return running;
+  running = syncNow(store, opts).finally(() => { running = null; });
+  return running;
+}
+
+/** What to tell you when a sync did not work, in plain words. */
+export function syncTrouble(err) {
+  const m = String(err?.message || err || '');
+  if (/^OANDA said 404/.test(m)) return 'OANDA could not find that account. Check the key is for the right one (demo or live) in Settings → Charts & prices.';
+  if (/^OANDA said \d|failed to fetch|network|dns|timed? ?out|connection|tls|io error|reset|refused|eof|unauthori|insufficient/i.test(m)) return cd.explain(err);
+  return m || 'Could not reach OANDA. Try again in a minute.';
+}
+
+async function syncNow(store, { onStep } = {}) {
   const cred = await cd.getKey();
   if (!cred) throw new Error('Add your OANDA key first — Settings → Charts & prices.');
   const step = s => { try { onStep?.(s); } catch { /* only a progress note */ } };

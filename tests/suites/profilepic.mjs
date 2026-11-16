@@ -99,7 +99,7 @@ t('…read from the vault when they have not been yet', await p.evaluate(async (
 
 /* ---------- Profile, and taking them away ---------- */
 await p.evaluate(() => { location.hash = '#/settings/profile'; }); await p.waitForTimeout(600);
-t('Profile has a Picture and a Banner row', await p.locator('[data-pick="avatar"]').count() === 1 && await p.locator('[data-pick="banner"]').count() === 1);
+t('Profile has a Picture and a Banner row', await p.locator('.st-pf [data-pick="avatar"]').count() === 1 && await p.locator('.st-pf [data-pick="banner"]').count() === 1);
 const banFile = A.banner.file, picFile = A.avatar.file;
 await p.click('[data-drop="banner"]'); await p.waitForTimeout(500);
 await p.click('[data-drop="avatar"]'); await p.waitForTimeout(500);
